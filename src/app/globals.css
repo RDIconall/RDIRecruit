@@ -1,0 +1,40 @@
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #162335;
+  --color-orange: #e74424;
+  --color-cream: #fafaf7;
+  --color-navy-muted: #2a3d54;
+  --color-orange-muted: #f06a50;
+  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
+
+  /* Larger type scale for readability (spec: bigger fonts). Named sizes bumped
+     ~1px each; layout widths are px-based so they don't reflow. */
+  --text-xs: 0.8125rem; /* 13px (was 12) */
+  --text-xs--line-height: 1.15rem;
+  --text-sm: 0.9375rem; /* 15px (was 14) */
+  --text-sm--line-height: 1.45rem;
+  --text-base: 1.0625rem; /* 17px (was 16) */
+  --text-base--line-height: 1.65rem;
+  --text-lg: 1.1875rem; /* 19px (was 18) */
+  --text-lg--line-height: 1.7rem;
+}
+
+@layer base {
+  html {
+    @apply bg-cream text-navy antialiased;
+  }
+
+  body {
+    @apply min-h-screen font-sans;
+  }
+}
+
+@layer utilities {
+  .font-hero {
+    font-family: var(--font-serif);
+    font-style: italic;
+  }
+}

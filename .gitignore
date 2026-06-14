@@ -1,13 +1,36 @@
-.DS_Store
+# Dependencies
+node_modules/
+.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# Next.js
+.next/
+out/
+build/
+
+# Env
 .env
 .env.*
 !.env.example
-node_modules/
-__pycache__/
-*.pyc
-.venv/
-dist/
-build/
+
+# Debug / OS
+npm-debug.log*
+.DS_Store
+*.pem
+
+# Vercel
+.vercel
+
+# TypeScript
+next-env.d.ts
+*.tsbuildinfo
+
+# IDE
 .idea/
 .vscode/
-*.log
+.env*.local

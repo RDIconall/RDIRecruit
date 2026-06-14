@@ -1,0 +1,786 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *{box-sizing:border-box}
+    html,body{margin:0;padding:0}
+    body{background:#FAFAF7;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+    ::selection{background:rgba(231,68,36,0.18)}
+    input,button{font-family:inherit}
+    ::-webkit-scrollbar{width:10px;height:10px}
+    ::-webkit-scrollbar-track{background:transparent}
+    ::-webkit-scrollbar-thumb{background:rgba(22,35,53,0.16)}
+    @media (prefers-reduced-motion: reduce){*{transition:none !important}}
+  </style>
+</helmet>
+<div style="min-height:100vh; background:#FAFAF7; font-family:'Instrument Sans',system-ui,sans-serif; color:#162335; font-size:13px; line-height:1.5; font-variant-numeric:tabular-nums;">
+
+  <div style="position:sticky; top:0; z-index:40; height:52px; background:#FFFFFF; border-bottom:1px solid rgba(22,35,53,0.15); display:flex; align-items:center; gap:18px; padding:0 24px;">
+    <div style="display:flex; align-items:center; gap:10px; cursor:pointer; flex-shrink:0;" onClick="{{ openBoard }}">
+      <img src="logo-mark.svg" alt="RDI" style="height:22px; width:auto; display:block;">
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; letter-spacing:0.02em; color:rgba(22,35,53,0.55); white-space:nowrap;">Hiring layer</span>
+    </div>
+    <div style="width:1px; height:22px; background:rgba(22,35,53,0.15);"></div>
+    <div style="display:flex; align-items:center; gap:8px; font-size:13px; flex-shrink:0; white-space:nowrap;">
+      <span style="cursor:pointer; color:{{ crumbBoardColor }};" onClick="{{ openBoard }}">Pipeline</span>
+      <sc-if value="{{ notBoard }}" hint-placeholder-val="{{ false }}">
+        <span style="color:rgba(22,35,53,0.35);">›</span>
+        <span style="cursor:pointer; color:{{ crumbCandColor }};" onClick="{{ openActiveCand }}">{{ activeC.name }}</span>
+      </sc-if>
+      <sc-if value="{{ isCompose }}" hint-placeholder-val="{{ false }}">
+        <span style="color:rgba(22,35,53,0.35);">›</span>
+        <span style="color:#162335;">Compose invite</span>
+      </sc-if>
+    </div>
+    <div style="flex:1;"></div>
+    <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.45); white-space:nowrap; flex-shrink:0;">Synced from Workable</span>
+    <div style="display:flex; align-items:center; gap:6px; flex-shrink:0;">
+      <span style="font-size:12px; color:rgba(22,35,53,0.60);">Alerts</span>
+      <span style="min-width:16px; height:16px; padding:0 4px; background:#E74424; color:#fff; border-radius:9999px; font-family:'JetBrains Mono',monospace; font-size:10px; line-height:16px; text-align:center;">3</span>
+    </div>
+    <div style="width:28px; height:28px; border-radius:9999px; background:#162335; color:#FAFAF7; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:600; flex-shrink:0;">L</div>
+  </div>
+
+  <!-- BOARD -->
+  <sc-if value="{{ isBoard }}" hint-placeholder-val="{{ true }}">
+  <div style="max-width:1320px; margin:0 auto; padding:32px 24px 80px;">
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:24px; flex-wrap:wrap;">
+      <div>
+        <div style="font-size:30px; font-weight:600; letter-spacing:-0.01em; line-height:1.05;">Director, research <span style="font-family:'Instrument Serif',Georgia,serif; font-style:italic; font-weight:400; color:#E74424;">&amp; science.</span></div>
+        <div style="margin-top:8px; display:flex; align-items:center; gap:14px; font-family:'JetBrains Mono',monospace; font-size:12px; color:rgba(22,35,53,0.70); flex-wrap:wrap; white-space:nowrap;">
+          <span>RDI-DIR-014</span><span style="color:rgba(22,35,53,0.25);">·</span><span>{{ boardActive }} live</span><span style="color:rgba(22,35,53,0.25);">·</span><span style="color:#15803d;">{{ boardStrong }} strong</span><span style="color:rgba(22,35,53,0.25);">·</span><span style="color:#E74424;">{{ boardNew }} new</span><sc-if value="{{ hasOut }}" hint-placeholder-val="{{ false }}"><span style="color:rgba(22,35,53,0.25);">·</span><span style="color:rgba(22,35,53,0.5);">{{ boardOut }} out</span></sc-if><span style="color:rgba(22,35,53,0.25);">·</span><span>seat IVc–IVb</span>
+        </div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:12px; color:rgba(22,35,53,0.55);">Domain 25 · Stratum 20 · Lab &amp; CLIA 20 · Regulatory 15 · Tenure 10 · Local 10</div>
+      </div>
+    </div>
+
+    <div style="margin-top:24px; border-left:2px solid #162335; padding:2px 0 2px 16px;">
+      <div style="font-size:14px; line-height:1.55; color:rgba(22,35,53,0.82); max-width:820px;">One candidate is in a class of his own. <span style="font-weight:600;">Dr. R. Fillmore (93)</span> has 35 years in IVD — he co-built the rapid-cycle PCR apparatus behind the Roche <span style="font-family:'Instrument Serif',Georgia,serif; font-style:italic;">LightCycler</span>, took <span style="font-family:'Instrument Serif',Georgia,serif; font-style:italic;">Cepheid</span> GeneXpert assays through FDA submission, and now runs a CLIA + CAP biobank at <span style="font-family:'Instrument Serif',Georgia,serif; font-style:italic;">Huntsman</span>. Stratum IV, confirmed by the work. The one open question is location — Salt Lake City, so the seat needs relocation or a defined on-site cadence. Priya Raman (86) is the strongest local option, one stratum below and climbing.</div>
+    </div>
+
+    <div style="margin-top:28px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:12px;">
+      <div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+        <sc-for list="{{ chips }}" as="chip" hint-placeholder-count="6">
+          <button onClick="{{ chip.onClick }}" style="cursor:pointer; border:none; background:transparent; padding:4px 0; font-size:13px; font-weight:500; color:{{ chip.color }}; border-bottom:2px solid {{ chip.underline }}; display:flex; align-items:center; gap:6px;"><span>{{ chip.label }}</span><span style="font-family:'JetBrains Mono',monospace; font-size:11px; opacity:0.5;">{{ chip.count }}</span></button>
+        </sc-for>
+      </div>
+      <div style="display:flex; border:1px solid rgba(22,35,53,0.18); border-radius:6px; overflow:hidden;">
+        <button onClick="{{ setLayoutA }}" style="cursor:pointer; border:none; padding:6px 12px; font-size:12px; font-weight:500; background:{{ segA.bg }}; color:{{ segA.color }};">Ledger</button>
+        <button onClick="{{ setLayoutB }}" style="cursor:pointer; border:none; border-left:1px solid rgba(22,35,53,0.18); padding:6px 12px; font-size:12px; font-weight:500; background:{{ segB.bg }}; color:{{ segB.color }};">Evidence</button>
+        <button onClick="{{ setLayoutC }}" style="cursor:pointer; border:none; border-left:1px solid rgba(22,35,53,0.18); padding:6px 12px; font-size:12px; font-weight:500; background:{{ segC.bg }}; color:{{ segC.color }};">Tiers</button>
+      </div>
+    </div>
+
+    <sc-if value="{{ bulkVisible }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:14px; display:flex; align-items:center; gap:14px; background:#162335; color:#FAFAF7; padding:10px 16px; border-radius:6px;">
+        <span style="font-family:'JetBrains Mono',monospace; font-size:12px;">{{ selectedCount }} selected</span>
+        <div style="width:1px; height:18px; background:rgba(250,250,247,0.25);"></div>
+        <button onClick="{{ bulkClear }}" style="cursor:pointer; border:none; background:#E74424; color:#fff; border-radius:9999px; padding:6px 16px; font-size:12px; font-weight:600;">Advance to async</button>
+        <button onClick="{{ bulkClear }}" style="cursor:pointer; border:1px solid rgba(250,250,247,0.35); background:transparent; color:#FAFAF7; border-radius:9999px; padding:6px 14px; font-size:12px;">Hold</button>
+        <button onClick="{{ dqSelected }}" style="cursor:pointer; border:1px solid rgba(250,250,247,0.35); background:transparent; color:#FAFAF7; border-radius:9999px; padding:6px 14px; font-size:12px;">Disqualify</button>
+        <div style="flex:1;"></div>
+        <button onClick="{{ bulkClear }}" style="cursor:pointer; border:none; background:transparent; color:rgba(250,250,247,0.6); font-size:12px;">Clear</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isLayoutA }}" hint-placeholder-val="{{ true }}">
+    <div style="margin-top:18px; overflow-x:auto; padding-bottom:4px;"><div style="min-width:860px;">
+      <div style="display:grid; grid-template-columns:26px 28px minmax(190px,1.4fr) 80px 132px 106px 112px 116px 56px 14px; gap:0; align-items:center; padding:0 8px 10px; border-bottom:1px solid rgba(22,35,53,0.15); font-size:11px; color:rgba(22,35,53,0.45);">
+        <div></div><div>#</div><div>Candidate</div><div>Fit</div><div>RO stratum</div><div>Salary value</div><div>Confidence</div><div>Stage</div><div>Owner</div><div></div>
+      </div>
+      <sc-for list="{{ visible }}" as="c" hint-placeholder-count="7">
+        <div onClick="{{ c.open }}" style="display:grid; grid-template-columns:26px 28px minmax(190px,1.4fr) 80px 132px 106px 112px 116px 56px 14px; gap:0; align-items:center; padding:12px 8px; border-bottom:1px solid rgba(22,35,53,0.10); cursor:pointer; background:{{ c.rowBg }}; opacity:{{ c.rowOpacity }};" style-hover="background:#FFFFFF;">
+          <div onClick="{{ c.stop }}" style="display:flex;"><input type="checkbox" checked="{{ c.selected }}" onChange="{{ c.toggle }}" style="width:14px; height:14px; accent-color:#E74424; cursor:pointer;"></div>
+          <div style="font-family:'JetBrains Mono',monospace; font-size:13px; color:rgba(22,35,53,0.45);">{{ c.rank }}</div>
+          <div style="padding-right:12px; min-width:0;">
+            <div style="display:flex; align-items:center; gap:6px; min-width:0;"><span style="font-size:13px; font-weight:600; white-space:nowrap; flex-shrink:0; text-decoration:{{ c.nameStrike }};">{{ c.name }}</span><sc-if value="{{ c.isNew }}" hint-placeholder-val="{{ false }}"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#E74424; flex-shrink:0;">· new</span></sc-if></div>
+            <div style="margin-top:2px; font-size:11px; color:rgba(22,35,53,0.55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.sub }}</div>
+          </div>
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:20px; font-weight:500; line-height:1;">{{ c.fit }}</div>
+            <div style="margin-top:5px; display:flex; height:5px; width:72px; background:rgba(22,35,53,0.07); overflow:hidden;"><sc-for list="{{ c.segments }}" as="seg" hint-placeholder-count="6"><div style="height:100%; width:{{ seg.w }}; background:{{ seg.bg }};"></div></sc-for></div>
+          </div>
+          <div style="font-size:13px;"><span style="font-family:'JetBrains Mono',monospace; font-weight:500;">{{ c.stratum }}</span><span style="color:rgba(22,35,53,0.40); font-family:'JetBrains Mono',monospace; font-size:11px;"> /IVc–IVb</span><div style="margin-top:1px; font-size:11px; color:{{ c.trajColor }};">{{ c.trajArrow }} {{ c.traj }}</div></div>
+          <div style="font-size:13px; color:{{ c.salColor }};">{{ c.sal }}<div style="margin-top:1px; font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.45);">{{ c.ask }}</div></div>
+          <div style="font-size:12px; color:{{ c.confColor }};">{{ c.conf }}</div>
+          <div style="font-size:12px; color:rgba(22,35,53,0.82);">{{ c.stageShow }}</div>
+          <div style="font-size:12px; color:{{ c.ownerColor }};">{{ c.assignee }}</div>
+          <div style="color:rgba(22,35,53,0.30); font-size:14px;">›</div>
+        </div>
+      </sc-for>
+    </div></div>
+    </sc-if>
+
+    <sc-if value="{{ isLayoutB }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:8px;">
+      <sc-for list="{{ visible }}" as="c" hint-placeholder-count="7">
+        <div onClick="{{ c.open }}" style="display:grid; grid-template-columns:24px 96px 1fr 220px; gap:18px; align-items:center; padding:18px 8px; border-bottom:1px solid rgba(22,35,53,0.10); cursor:pointer; background:{{ c.rowBg }}; opacity:{{ c.rowOpacity }};" style-hover="background:#FFFFFF;">
+          <div onClick="{{ c.stop }}" style="display:flex; align-self:flex-start; padding-top:6px;"><input type="checkbox" checked="{{ c.selected }}" onChange="{{ c.toggle }}" style="width:14px; height:14px; accent-color:#E74424; cursor:pointer;"></div>
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:36px; font-weight:500; line-height:0.9; letter-spacing:-0.02em;">{{ c.fit }}</div>
+            <div style="margin-top:6px; font-size:11px; font-weight:600; color:{{ c.tierColor }};">{{ c.tierLabel }}</div>
+            <div style="margin-top:1px; font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.40);">#{{ c.rank }}</div>
+          </div>
+          <div style="padding-right:16px;">
+            <div style="display:flex; align-items:center; gap:8px; min-width:0;"><span style="font-size:15px; font-weight:600; white-space:nowrap; flex-shrink:0;">{{ c.name }}</span><span style="font-size:12px; color:rgba(22,35,53,0.55);">{{ c.sub }}</span><sc-if value="{{ c.isNew }}" hint-placeholder-val="{{ false }}"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#E74424; flex-shrink:0;">· new</span></sc-if></div>
+            <div style="margin-top:6px; font-size:13px; line-height:1.5; color:rgba(22,35,53,0.70); max-width:560px;">{{ c.why }}</div>
+            <div style="margin-top:10px; display:flex; height:7px; width:100%; max-width:480px; background:rgba(22,35,53,0.07); overflow:hidden;"><sc-for list="{{ c.segments }}" as="seg" hint-placeholder-count="6"><div style="height:100%; width:{{ seg.w }}; background:{{ seg.bg }};"></div></sc-for></div>
+            <div style="margin-top:6px; font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.45);">{{ c.catLine }}</div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:5px; font-size:12px; text-align:right;">
+            <div><span style="color:rgba(22,35,53,0.45);">RO </span><span style="font-family:'JetBrains Mono',monospace; font-weight:500;">{{ c.stratum }}</span> <span style="color:{{ c.trajColor }};">{{ c.trajArrow }}</span></div>
+            <div style="color:{{ c.salColor }};">{{ c.sal }} <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.45);">{{ c.ask }}</span></div>
+            <div style="color:{{ c.confColor }};">{{ c.conf }}</div>
+            <div style="color:rgba(22,35,53,0.82);">{{ c.stage }}</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.45);">{{ c.sources }} sources · {{ c.assignee }}</div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ isLayoutC }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:10px;">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+        <div style="margin-top:22px;">
+          <div style="display:flex; align-items:center; gap:10px; padding-bottom:8px; border-bottom:1px solid {{ g.color }};">
+            <span style="font-size:14px; font-weight:600; color:{{ g.color }};">{{ g.label }}</span>
+            <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.45);">{{ g.count }} · avg {{ g.avg }}</span>
+            <span style="flex:1;"></span><span style="font-size:11px; color:rgba(22,35,53,0.50);">{{ g.note }}</span>
+          </div>
+          <sc-for list="{{ g.items }}" as="c" hint-placeholder-count="3">
+            <div onClick="{{ c.open }}" style="display:grid; grid-template-columns:1fr 58px 160px 130px 116px; gap:14px; align-items:center; padding:11px 8px; border-bottom:1px solid rgba(22,35,53,0.08); cursor:pointer; background:{{ c.rowBg }}; opacity:{{ c.rowOpacity }};" style-hover="background:#FFFFFF;">
+              <div style="display:flex; align-items:center; gap:8px; min-width:0;"><span style="font-size:13px; font-weight:600; white-space:nowrap; flex-shrink:0; text-decoration:{{ c.nameStrike }};">{{ c.name }}</span><span style="font-size:11px; color:rgba(22,35,53,0.55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; min-width:0;">{{ c.sub }}</span><sc-if value="{{ c.isNew }}" hint-placeholder-val="{{ false }}"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:#E74424; flex-shrink:0;">· new</span></sc-if></div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:500;">{{ c.fit }}</div>
+              <div style="font-size:12px;"><span style="font-family:'JetBrains Mono',monospace; font-weight:500;">{{ c.stratum }}</span> <span style="color:{{ c.trajColor }};">{{ c.trajArrow }} {{ c.traj }}</span></div>
+              <div style="font-size:12px; color:{{ c.salColor }};">{{ c.sal }}</div>
+              <div style="font-size:12px; color:rgba(22,35,53,0.82);">{{ c.stageShow }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <!-- CANDIDATE PROFILE (single page) -->
+  <sc-if value="{{ isCandidate }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1180px; margin:0 auto; padding:28px 24px 110px;">
+
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:32px; flex-wrap:wrap;">
+      <div style="min-width:0;">
+        <div style="font-size:28px; font-weight:600; letter-spacing:-0.01em;">{{ activeC.name }}</div>
+        <div style="margin-top:5px; font-size:14px; color:rgba(22,35,53,0.70);">{{ activeRole }} · <span style="font-family:'Instrument Serif',Georgia,serif; font-style:italic; font-size:16px;">{{ activeCompany }}</span></div>
+        <div style="margin-top:12px; display:flex; flex-wrap:wrap; gap:6px 14px; font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.60);">
+          <span>RO <span style="color:#162335; font-weight:500;">{{ activeC.stratum }}</span> / seat IVc–IVb</span><span style="color:rgba(22,35,53,0.25);">·</span><span style="color:{{ activeC.trajColor }};">{{ activeC.trajArrow }} {{ activeC.traj }}</span><span style="color:rgba(22,35,53,0.25);">·</span><span>basis: {{ activeBasis }}</span><span style="color:rgba(22,35,53,0.25);">·</span><span>{{ activeLoc }}</span>
+        </div>
+      </div>
+      <div style="text-align:right; flex-shrink:0;">
+        <div style="font-family:'JetBrains Mono',monospace; font-size:46px; font-weight:500; line-height:0.9; letter-spacing:-0.02em;">{{ activeC.fit }}</div>
+        <div style="margin-top:6px; font-size:12px; font-weight:600; color:{{ activeC.tierColor }}; white-space:nowrap;">{{ activeC.tierLabel }}</div>
+        <div style="margin-top:2px; font-size:12px; color:{{ activeC.confColor }}; white-space:nowrap;">confidence: {{ activeC.conf }}</div>
+        <div style="margin-top:2px; font-size:12px; color:{{ activeC.salColor }}; white-space:nowrap;">{{ activeC.sal }} · <span style="font-family:'JetBrains Mono',monospace;">{{ activeC.ask }}</span></div>
+      </div>
+    </div>
+
+    <div style="margin-top:18px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+      <button onClick="{{ openCompose }}" style="cursor:pointer; border:none; background:#E74424; color:#fff; border-radius:9999px; padding:9px 18px; font-size:13px; font-weight:600;">Compose invite →</button>
+      <button style="cursor:pointer; border:1px solid rgba(22,35,53,0.20); background:transparent; color:#162335; border-radius:9999px; padding:9px 16px; font-size:13px;">Advance</button>
+      <button style="cursor:pointer; border:1px solid rgba(22,35,53,0.20); background:transparent; color:#162335; border-radius:9999px; padding:9px 16px; font-size:13px;">Hold</button>
+      <button onClick="{{ denyActiveCand }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.20); background:transparent; color:#162335; border-radius:9999px; padding:9px 16px; font-size:13px;">Disqualify</button>
+      <button onClick="{{ withdrawActiveCand }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.20); background:transparent; color:#162335; border-radius:9999px; padding:9px 16px; font-size:13px;">Mark withdrawn</button>
+      <sc-if value="{{ candStatusLabel }}" hint-placeholder-val="{{ '' }}"><button onClick="{{ restoreActiveCand }}" style="cursor:pointer; border:1px solid rgba(231,68,36,0.4); background:transparent; color:#E74424; border-radius:9999px; padding:9px 16px; font-size:13px;">Restore</button></sc-if>
+      <div style="flex:1;"></div>
+      <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.45);">owner: {{ activeC.assignee }} · stage: {{ activeC.stageShow }}</span>
+    </div>
+
+    <div style="margin-top:22px; border:1px solid rgba(22,35,53,0.12); border-top:2px solid #162335; display:grid; grid-template-columns:1fr 218px; gap:0;">
+      <div style="padding:18px 20px; min-width:0;">
+        <div style="font-size:15px; font-weight:600;">{{ investHead }}</div>
+        <div style="margin-top:8px; font-size:13px; line-height:1.6; color:rgba(22,35,53,0.82);">{{ investText }}</div>
+        <div style="margin-top:12px; font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.5);">Pool · {{ poolLine }}</div>
+      </div>
+      <div style="border-left:1px solid rgba(22,35,53,0.12); padding:18px 20px; background:rgba(22,35,53,0.02);">
+        <div style="font-size:11px; color:rgba(22,35,53,0.55);">Target salary</div>
+        <div style="margin-top:4px; font-family:'JetBrains Mono',monospace; font-size:34px; font-weight:600; letter-spacing:-0.02em; line-height:1;">{{ activeC.ask }}</div>
+        <div style="margin-top:4px; font-size:12px; color:{{ activeC.salColor }};">{{ activeC.sal }}</div>
+        <div style="margin-top:9px; font-size:12px; line-height:1.45; color:rgba(22,35,53,0.7);">{{ salVector }}</div>
+      </div>
+    </div>
+
+    <sc-if value="{{ noDetail }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:40px; padding:24px 0; border-top:1px solid rgba(22,35,53,0.15); font-size:13px; color:rgba(22,35,53,0.55);">The full career, résumé and verification analysis is generated for shortlisted candidates. Advance {{ activeC.name }} to populate this profile.</div>
+    </sc-if>
+
+    <sc-if value="{{ hasDetail }}" hint-placeholder-val="{{ true }}">
+
+    <!-- CAREER & RO -->
+    <div style="margin-top:40px;">
+      <div style="font-size:16px; font-weight:600;">Career, stratum &amp; the life timeline.</div>
+      <div style="margin-top:5px; font-size:13px; line-height:1.55; color:rgba(22,35,53,0.62); max-width:800px;">The chronology, the requisite-organization climb, and the résumé evidence — one view. Read top to bottom and you walk forward in time, from the first bench role up through Stratum IV. The chart shows the climb; the rows carry the evidence. Gaps are shown, not smoothed over.</div>
+
+      <div style="margin-top:24px; display:grid; grid-template-columns:22px 1fr; gap:8px; max-width:760px;">
+        <div style="position:relative; height:172px;">
+          <sc-for list="{{ chart.grid }}" as="g" hint-placeholder-count="4"><div style="position:absolute; right:0; top:{{ g.y }}%; transform:translateY(-50%); font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.45);">{{ g.label }}</div></sc-for>
+        </div>
+        <div style="position:relative; height:172px; border-left:1px solid rgba(22,35,53,0.15); border-bottom:1px solid rgba(22,35,53,0.15);">
+          <sc-for list="{{ chart.grid }}" as="g" hint-placeholder-count="4"><div style="position:absolute; left:0; right:0; top:{{ g.y }}%; border-top:1px solid rgba(22,35,53,0.07);"></div></sc-for>
+          <div style="position:absolute; top:0; bottom:0; left:{{ chart.gap.x }}%; width:{{ chart.gap.w }}%; background:rgba(231,68,36,0.07); border-left:1px dashed rgba(231,68,36,0.55); border-right:1px dashed rgba(231,68,36,0.55);"><div style="position:absolute; top:3px; left:50%; transform:translateX(-50%); font-family:'JetBrains Mono',monospace; font-size:9px; color:#E74424; white-space:nowrap;">gap</div></div>
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none" style="position:absolute; inset:0; width:100%; height:100%; overflow:visible;"><polyline points="{{ chart.poly }}" fill="none" stroke="#162335" stroke-width="1.6" vector-effect="non-scaling-stroke" stroke-linejoin="round" stroke-linecap="round"></polyline></svg>
+          <div style="position:absolute; left:{{ chart.phd.x }}%; top:0; bottom:0; width:1px; background:rgba(22,35,53,0.18);"></div>
+          <div style="position:absolute; left:{{ chart.phd.x }}%; top:-3px; transform:translateX(-50%); font-family:'JetBrains Mono',monospace; font-size:9px; color:rgba(22,35,53,0.5); background:#FAFAF7; padding:0 3px; white-space:nowrap;">Ph.D. 2000</div>
+          <sc-for list="{{ chart.nodes }}" as="n" hint-placeholder-count="8"><div style="position:absolute; left:{{ n.x }}%; top:{{ n.y }}%; transform:{{ n.lt }}; font-family:'JetBrains Mono',monospace; font-size:9px; color:rgba(22,35,53,0.6); white-space:nowrap;">{{ n.label }}</div></sc-for>
+          <sc-for list="{{ chart.nodes }}" as="n" hint-placeholder-count="8"><div style="position:absolute; left:{{ n.x }}%; top:{{ n.y }}%; width:8px; height:8px; border-radius:9999px; background:#162335; border:1.5px solid #FAFAF7; transform:translate(-50%,-50%);"></div></sc-for>
+        </div>
+        <div></div>
+        <div style="position:relative; height:14px;"><sc-for list="{{ chart.ticks }}" as="t" hint-placeholder-count="4"><span style="position:absolute; left:{{ t.x }}%; transform:translateX(-50%); font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.45);">{{ t.label }}</span></sc-for></div>
+      </div>
+
+      <div style="margin-top:20px;">
+        <sc-for list="{{ timeline }}" as="r" hint-placeholder-count="9">
+          <sc-if value="{{ r.isRole }}" hint-placeholder-val="{{ true }}">
+          <div style="display:grid; grid-template-columns:92px 20px 1fr; gap:0;">
+            <div style="text-align:right; padding:1px 14px 0 0;">
+              <div style="font-family:'JetBrains Mono',monospace; font-size:12px; color:rgba(22,35,53,0.78); white-space:nowrap;">{{ r.dates }}</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.40); white-space:nowrap;">age {{ r.age }}</div>
+            </div>
+            <div style="position:relative;">
+              <div style="position:absolute; left:5px; top:0; bottom:0; width:1px; background:rgba(22,35,53,0.15);"></div>
+              <div style="position:absolute; left:0; top:4px; width:11px; height:11px; border-radius:9999px; background:#162335; border:2px solid #FAFAF7; box-shadow:0 0 0 1px rgba(22,35,53,0.20);"></div>
+            </div>
+            <div style="padding:0 0 26px 12px; min-width:0;">
+              <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+                <div style="font-size:14px; font-weight:600;">{{ r.pos }}<span style="font-weight:400; color:rgba(22,35,53,0.5);"> · {{ r.company }}</span></div>
+                <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.55); white-space:nowrap;">stratum {{ r.stratum }}</div>
+              </div>
+              <div style="margin-top:9px; font-size:13px; line-height:1.6; color:rgba(22,35,53,0.85);">{{ r.read }}</div>
+              <button onClick="{{ r.toggleSrc }}" style="margin-top:9px; cursor:pointer; border:none; background:transparent; padding:0; font-family:'JetBrains Mono',monospace; font-size:11px; color:#E74424;">{{ r.srcLabel }}</button>
+              <sc-if value="{{ r.srcOpen }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:8px; padding:10px 13px; background:rgba(22,35,53,0.025); border-left:2px solid rgba(22,35,53,0.15); font-size:12px; line-height:1.6; color:rgba(22,35,53,0.72);"><span style="font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.4);">from the résumé&nbsp;&nbsp;</span><sc-for list="{{ r.frags }}" as="f" hint-placeholder-count="2"><span style="background:{{ f.bg }}; border-bottom:{{ f.underline }}; padding:{{ f.pad }};">{{ f.t }}</span></sc-for></div>
+              </sc-if>
+            </div>
+          </div>
+          </sc-if>
+          <sc-if value="{{ r.isGap }}" hint-placeholder-val="{{ false }}">
+          <div style="display:grid; grid-template-columns:92px 20px 1fr; gap:0;">
+            <div></div>
+            <div style="position:relative;">
+              <div style="position:absolute; left:4px; top:0; bottom:0; width:0; border-left:2px dotted rgba(231,68,36,0.6);"></div>
+              <div style="position:absolute; left:-1px; top:13px; width:13px; height:13px; border-radius:9999px; background:#FAFAF7; border:2px solid #E74424;"></div>
+            </div>
+            <div style="padding:10px 0 32px 12px;">
+              <div style="display:flex; align-items:center; gap:11px; background:rgba(231,68,36,0.07); border:1px solid rgba(231,68,36,0.3); padding:10px 14px; max-width:600px;">
+                <span style="font-size:13px; font-weight:700; color:#E74424; white-space:nowrap;">9-month gap</span>
+                <span style="font-size:12px; line-height:1.45; color:rgba(22,35,53,0.72);">{{ r.label }}</span>
+              </div>
+            </div>
+          </div>
+          </sc-if>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- VERIFICATION & FLAGS -->
+    <div style="margin-top:44px;">
+      <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;">
+        <span style="font-size:16px; font-weight:600; white-space:nowrap;">Verification &amp; flags.</span>
+        <span style="font-size:13px; font-weight:600; color:{{ vColor }}; white-space:nowrap;">{{ vRead }}</span>
+      </div>
+      <div style="margin-top:5px; font-size:12px; line-height:1.5; color:rgba(22,35,53,0.55); max-width:760px;">Application compared against the public professional profile (LinkedIn). Job-relevant claims only — protected and non-job attributes are never read. This is verification, not scoring: it does not change the fit number, and it flags claims, not the person.</div>
+
+      <div style="margin-top:18px;">
+      <sc-for list="{{ vClaims }}" as="v" hint-placeholder-count="4">
+        <div style="display:grid; grid-template-columns:118px 1fr; gap:18px; padding:14px 0; border-top:1px solid rgba(22,35,53,0.12);">
+          <div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600; color:{{ v.color }};">{{ v.verdict }}</div>
+            <div style="margin-top:4px; font-size:13px; font-weight:600;">{{ v.category }}</div>
+          </div>
+          <div>
+            <div style="font-size:13px; line-height:1.55; color:rgba(22,35,53,0.82);">{{ v.note }}</div>
+            <sc-if value="{{ v.hasConflict }}" hint-placeholder-val="{{ false }}">
+              <div style="margin-top:8px; font-size:12px; line-height:1.6; color:rgba(22,35,53,0.62);"><span style="color:rgba(22,35,53,0.45);">Application —</span> {{ v.application }}<br><span style="color:rgba(22,35,53,0.45);">Profile —</span> {{ v.profile }}</div>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+      </div>
+
+      <div style="margin-top:18px; display:grid; grid-template-columns:1fr 1fr; gap:28px;">
+        <div>
+          <div style="font-size:12px; font-weight:600;">Pinpoint questions to resolve live</div>
+          <sc-for list="{{ vQuestions }}" as="q" hint-placeholder-count="2"><div style="margin-top:8px; display:flex; gap:8px; font-size:12px; line-height:1.5; color:rgba(22,35,53,0.75);"><span style="color:#E74424; flex-shrink:0;">→</span><span>{{ q }}</span></div></sc-for>
+        </div>
+        <div>
+          <div style="font-size:12px; font-weight:600;">Checks before an offer</div>
+          <sc-for list="{{ vActions }}" as="a" hint-placeholder-count="3"><div style="margin-top:8px; display:flex; gap:8px; font-size:12px; line-height:1.5; color:rgba(22,35,53,0.75);"><span style="color:rgba(22,35,53,0.35); flex-shrink:0;">·</span><span>{{ a }}</span></div></sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- APPLICATION FILE -->
+    <div style="margin-top:44px;">
+      <div style="font-size:16px; font-weight:600; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:8px;">The application — in full.</div>
+
+      <div style="margin-top:18px; border:1px solid rgba(22,35,53,0.12); border-top:2px solid #162335; padding:16px 18px;">
+        <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div style="font-size:14px; font-weight:600;">Dig-in card</div>
+          <div style="font-size:13px;"><span style="color:rgba(22,35,53,0.55);">evidence quality </span><span style="font-weight:600; color:#15803d;">{{ digin.quality }}</span></div>
+        </div>
+        <div style="margin-top:10px; font-size:13px; line-height:1.55; color:rgba(22,35,53,0.82); max-width:760px;">{{ digin.careerRead }}</div>
+        <div style="margin-top:14px; display:grid; grid-template-columns:1fr 1fr; gap:24px;">
+          <div>
+            <div style="font-size:12px; font-weight:600;">Answers</div>
+            <div style="margin-top:4px; font-size:12px; color:rgba(22,35,53,0.70);">{{ digin.mix }}</div>
+            <div style="margin-top:10px; font-size:12px; font-weight:600;">Integrity — <span style="color:#b45309;">{{ digin.integrity }}</span></div>
+            <div style="margin-top:4px; font-size:12px; line-height:1.45; color:rgba(22,35,53,0.65);">{{ diginIntegrityNote }}</div>
+          </div>
+          <div>
+            <div style="font-size:12px; font-weight:600;">Settle live</div>
+            <sc-for list="{{ digin.resolve }}" as="r" hint-placeholder-count="2"><div style="margin-top:6px; display:flex; gap:8px; font-size:12px; line-height:1.45; color:rgba(22,35,53,0.75);"><span style="color:#E74424; flex-shrink:0;">→</span><span>{{ r }}</span></div></sc-for>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top:28px; font-size:14px; font-weight:600;">Screening answers</div>
+      <div style="margin-top:4px; font-size:12px; color:rgba(22,35,53,0.55); max-width:760px;">Graded on substance against the concept key, not on fluency. The verdict says whether the answer owns the method or just names the tools.</div>
+      <sc-for list="{{ answers }}" as="qa" hint-placeholder-count="3">
+        <div style="margin-top:16px; padding-bottom:16px; border-bottom:1px solid rgba(22,35,53,0.10);">
+          <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px;">
+            <div style="font-size:13px; font-weight:600; max-width:660px;">{{ qa.q }}</div>
+            <div style="font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600; color:{{ qa.vColor }}; white-space:nowrap;">{{ qa.verdict }}</div>
+          </div>
+          <div style="margin-top:6px; font-size:13px; line-height:1.6; color:rgba(22,35,53,0.78); max-width:760px;">{{ qa.a }}</div>
+          <sc-if value="{{ qa.hasPresent }}" hint-placeholder-val="{{ false }}"><div style="margin-top:8px; font-size:12px; line-height:1.5; color:#15803d;">Demonstrates — {{ qa.presentLine }}</div></sc-if>
+          <sc-if value="{{ qa.hasNote }}" hint-placeholder-val="{{ false }}"><div style="margin-top:7px; font-size:12px; color:rgba(22,35,53,0.55);">{{ qa.note }}</div></sc-if>
+        </div>
+      </sc-for>
+
+      <div style="margin-top:28px; font-size:14px; font-weight:600;">Cover letter</div>
+      <div style="margin-top:10px; max-width:720px; font-size:14px; line-height:1.7; color:rgba(22,35,53,0.85);">{{ cover }}</div>
+
+      <div style="margin-top:30px; display:flex; align-items:baseline; justify-content:space-between; gap:12px;">
+        <div style="font-size:14px; font-weight:600;">Résumé</div>
+        <a href="Fillmore-Resume.docx" download style="font-size:12px; color:#E74424; text-decoration:none;">Download ↓</a>
+      </div>
+      <div style="margin-top:12px; border:1px solid rgba(22,35,53,0.2); overflow:hidden;">
+        <div style="display:flex; align-items:center; gap:14px; padding:9px 14px; background:#162335; color:rgba(250,250,247,0.9);">
+          <span style="font-size:12px;">Fillmore-Resume.pdf</span>
+          <span style="flex:1;"></span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(250,250,247,0.55);">page 1 of 1</span>
+          <span style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(250,250,247,0.55); white-space:nowrap;">−&nbsp;&nbsp;100%&nbsp;&nbsp;+</span>
+        </div>
+        <div style="padding:22px; background:#e8e8e4; max-height:580px; overflow-y:auto;">
+          <div style="max-width:600px; margin:0 auto; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,0.18); padding:46px 50px;">
+            <div style="font-size:21px; font-weight:700; letter-spacing:-0.01em;">R. Fillmore, Ph.D.</div>
+            <div style="margin-top:3px; font-size:12px; color:rgba(22,35,53,0.6);">Director, Research &amp; Science · Salt Lake City, UT · contact on file</div>
+            <div style="margin-top:24px; font-size:13px; font-weight:700; border-bottom:1px solid rgba(22,35,53,0.25); padding-bottom:4px;">Experience</div>
+            <sc-for list="{{ resumeDoc }}" as="role" hint-placeholder-count="8">
+              <div style="margin-top:15px;">
+                <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px;">
+                  <div style="font-size:13px; font-weight:600;">{{ role.pos }}, {{ role.company }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.5); white-space:nowrap;">{{ role.dates }}</div>
+                </div>
+                <div style="margin-top:4px; font-size:12px; line-height:1.55; color:rgba(22,35,53,0.78);">{{ role.text }}</div>
+              </div>
+            </sc-for>
+            <div style="margin-top:24px; font-size:13px; font-weight:700; border-bottom:1px solid rgba(22,35,53,0.25); padding-bottom:4px;">Education</div>
+            <div style="margin-top:11px; display:flex; align-items:baseline; justify-content:space-between; gap:12px;">
+              <div style="font-size:13px; font-weight:600;">Ph.D., Utah State University</div>
+              <div style="font-family:'JetBrains Mono',monospace; font-size:11px; color:rgba(22,35,53,0.5);">2000</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <!-- COMPOSE -->
+  <sc-if value="{{ isCompose }}" hint-placeholder-val="{{ false }}">
+  <div style="max-width:1120px; margin:0 auto; padding:28px 24px 96px;">
+    <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+      <div style="max-width:640px;">
+        <div style="font-size:24px; font-weight:600;">Compose invite — {{ activeC.name }}</div>
+        <div style="margin-top:5px; font-size:13px; line-height:1.5; color:rgba(22,35,53,0.62);">Questions live in the email. VideoAsk holds the intro video and the answer slots. Sending happens in Workable — the layer moves the stage and the bound template fires. The layer never sends mail itself.</div>
+      </div>
+      <button onClick="{{ backToCandidate }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.20); background:transparent; color:#162335; border-radius:9999px; padding:7px 15px; font-size:12px; white-space:nowrap;">← Back to candidate</button>
+    </div>
+    <div style="margin-top:26px; display:grid; grid-template-columns:1fr 372px; gap:36px; align-items:start;">
+      <div style="min-width:0;">
+        <div style="font-size:13px; font-weight:600; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:6px;">AI-suggested risk questions</div>
+        <div style="margin-top:8px; font-size:12px; line-height:1.5; color:rgba(22,35,53,0.55);">One repeated judgment anchor for the cross-modal check, plus tailored risk probes. The application gates are not re-asked. Selected questions drop into the email insert.</div>
+        <sc-for list="{{ questions }}" as="q" hint-placeholder-count="3">
+          <div onClick="{{ q.onToggle }}" style="margin-top:12px; display:flex; gap:12px; padding:12px 14px; border:1px solid {{ q.qBorder }}; background:{{ q.qBg }}; cursor:pointer;">
+            <div style="flex-shrink:0; width:18px; height:18px; border-radius:4px; border:1.5px solid {{ q.boxBorder }}; background:{{ q.boxBg }}; color:{{ q.boxColor }}; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:700; margin-top:1px;">{{ q.check }}</div>
+            <div style="min-width:0;"><div style="font-size:13px; line-height:1.5; color:#162335;">{{ q.q }}</div><div style="margin-top:5px; font-size:11px; line-height:1.45; color:rgba(22,35,53,0.55);">{{ q.why }}</div></div>
+          </div>
+        </sc-for>
+        <div style="margin-top:28px; font-size:13px; font-weight:600; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:6px;">VideoAsk capture</div>
+        <div style="margin-top:14px; display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px;">
+          <div><div style="position:relative; aspect-ratio:16/9; background:#162335; display:flex; align-items:center; justify-content:center; overflow:hidden;"><div style="width:34px; height:34px; border-radius:9999px; background:rgba(250,250,247,0.16); display:flex; align-items:center; justify-content:center;"><div style="width:0; height:0; border-left:10px solid #FAFAF7; border-top:6px solid transparent; border-bottom:6px solid transparent; margin-left:2px;"></div></div><span style="position:absolute; bottom:6px; right:6px; font-family:'JetBrains Mono',monospace; font-size:9px; color:#FAFAF7; background:rgba(0,0,0,0.45); padding:1px 5px;">1:48</span></div><div style="margin-top:6px; font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.55);">Intro · reused</div></div>
+          <div><div style="aspect-ratio:16/9; border:1px dashed rgba(22,35,53,0.25); display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.40);">slot · Q1</div><div style="margin-top:6px; font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.55);">Answer 1</div></div>
+          <div><div style="aspect-ratio:16/9; border:1px dashed rgba(22,35,53,0.25); display:flex; align-items:center; justify-content:center; font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.40);">slot · Q2/Q3</div><div style="margin-top:6px; font-family:'JetBrains Mono',monospace; font-size:10px; color:rgba(22,35,53,0.55);">Answer 2</div></div>
+        </div>
+      </div>
+      <div style="border:1px solid rgba(22,35,53,0.12); border-top:2px solid #E74424; background:#FFFFFF;">
+        <div style="padding:16px;">
+          <div style="font-size:11px; font-weight:600; color:rgba(22,35,53,0.55);">Workable template</div>
+          <div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"><sc-for list="{{ tmplChips }}" as="t" hint-placeholder-count="4"><button onClick="{{ t.onClick }}" style="text-align:left; cursor:pointer; border:1px solid {{ t.border }}; background:{{ t.bg }}; color:{{ t.color }}; border-radius:6px; padding:9px 12px; font-size:12px;">{{ t.label }}</button></sc-for></div>
+          <div style="margin-top:16px; font-size:11px; font-weight:600; color:rgba(22,35,53,0.55);">Tailored insert · auto-built</div>
+          <div style="margin-top:8px; border:1px solid rgba(22,35,53,0.12); padding:11px; background:#FAFAF7; font-size:12px; line-height:1.55; color:rgba(22,35,53,0.82);">
+            <div>Hi {{ activeFirst }} — a short async step before we book a call. Please record answers to:</div>
+            <sc-if value="{{ hasInserts }}" hint-placeholder-val="{{ false }}"><div style="margin-top:8px; display:flex; flex-direction:column; gap:6px;"><sc-for list="{{ insertQuestions }}" as="iq" hint-placeholder-count="2"><div style="display:flex; gap:7px;"><span style="font-family:'JetBrains Mono',monospace; color:#E74424; flex-shrink:0;">{{ iq.n }}.</span><span>{{ iq.q }}</span></div></sc-for></div></sc-if>
+            <sc-if value="{{ notHasInserts }}" hint-placeholder-val="{{ false }}"><div style="margin-top:8px; color:rgba(22,35,53,0.45);">Select at least one question to build the insert.</div></sc-if>
+          </div>
+          <div style="margin-top:10px; font-size:11px; line-height:1.45; color:rgba(22,35,53,0.50);">Consent line auto-appended. VideoAsk link embedded. Replies thread back to Workable and the watched inbox.</div>
+        </div>
+        <button onClick="{{ doSend }}" style="width:100%; border:none; background:{{ sendBg }}; color:{{ sendColor }}; cursor:{{ sendCursor }}; padding:14px; font-size:13px; font-weight:600;">{{ sendLabel }}</button>
+        <div style="padding:9px 16px; font-family:'JetBrains Mono',monospace; font-size:10px; line-height:1.4; color:rgba(22,35,53,0.40); border-top:1px solid rgba(22,35,53,0.08);">Gated — needs a template and ≥1 question. The layer moves the stage; Workable fires the mail.</div>
+      </div>
+    </div>
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { screen:'board', layout:'A', tier:'all', selected:[], active:'fillmore', src:'answers', anno:null, qSel:[0,1,2], template:null, statuses:{}, openSrc:[] };
+
+  data = [
+    { id:'fillmore', name:'Dr. R. Fillmore',  role:'Director, Research & Science', company:'Huntsman Cancer Institute', fit:93, tier:'strong',   cats:{p:24,e:20,s:20,w:15,t:10,l:4}, sal:'justified',   ask:'$215k', conf:'high',            stratum:'IVb–a', traj:'grows-the-role', stage:'Async interview', assignee:'Conall', isNew:false, sources:4, why:'35 years in IVD from the bench to Director — co-built the apparatus behind the Roche LightCycler, ran Cepheid GeneXpert assays to FDA, now runs a CLIA + CAP biobank. Stratum IV, confirmed. Salt Lake City — relocation or on-site cadence is the only open question.' },
+    { id:'raman',    name:'Dr. Priya Raman',  role:'Assoc. Director, Assay Development', company:'Lucira Health', fit:86, tier:'strong',   cats:{p:22,e:17,s:18,w:13,t:7,l:9}, sal:'justified',   ask:'$190k', conf:'high',            stratum:'IIIa', traj:'grows-the-role', stage:'Phone screen',    assignee:'Lara',   isNew:false, sources:2, why:'Strong molecular assay-development lead at Stratum IIIa — one band below the seat but climbing, FDA-track POC experience, and local to LA.' },
+    { id:'lowe',     name:'Dr. Marcus Lowe',  role:'Principal Scientist',          company:'Thermo Fisher',  fit:81, tier:'consider', cats:{p:21,e:16,s:16,w:13,t:8,l:7}, sal:'rich for fit',ask:'$225k', conf:'medium',          stratum:'IIIb', traj:'plateaued',      stage:'Applied',         assignee:'Lara',   isNew:false, sources:2, why:'Deep bench scientist, but six years at Principal without stepping up — plateaued below the Director stratum, and a $225k ask the fit does not justify.' },
+    { id:'cho',      name:'Dr. Helena Cho',   role:'Laboratory Director',          company:'Quest Diagnostics', fit:79, tier:'consider', cats:{p:18,e:18,s:18,w:11,t:7,l:8}, sal:'poor value',  ask:'$230k', conf:'medium',          stratum:'IVc', traj:'bends-away',     stage:'Case study',      assignee:'Conall', isNew:false, sources:3, why:'Holds the stratum, but pure CLIA operations — thin on assay R&D and submissions. Bends away from the build side of the seat.' },
+    { id:'okafor',   name:'Dr. Sam Okafor',   role:'Senior Scientist',             company:'Talis Biomedical', fit:74, tier:'hold',     cats:{p:19,e:15,s:14,w:11,t:6,l:9}, sal:'great value', ask:'$160k', conf:'text-unreliable', stratum:'IIIc', traj:'grows-the-role', stage:'Applied',         assignee:'—',      isNew:true,  sources:1, why:'Promising and local, but the written answers read AI-assisted — the role-level and a reference carry the score, not the prose.' },
+    { id:'fischer',  name:'Dr. Lena Fischer', role:'R&D Manager, Molecular',       company:'Qiagen',         fit:71, tier:'hold',     cats:{p:18,e:15,s:14,w:10,t:8,l:6}, sal:'unstated',    ask:'—',     conf:'medium',          stratum:'IIIb', traj:'plateaued',      stage:'Applied',         assignee:'—',      isNew:false, sources:1, why:'Solid molecular R&D manager, but no diagnostics-submission scope on file and salary unstated, so value is unscored.' },
+    { id:'reyes',    name:'Dr. Tomas Reyes',  role:'QC Manager',                   company:'Eurofins',       fit:64, tier:'deny',     cats:{p:15,e:12,s:13,w:10,t:6,l:8}, sal:'justified',   ask:'$140k', conf:'high',            stratum:'IIc', traj:'regressed',      stage:'Applied',         assignee:'—',      isNew:true,  sources:1, why:'QC management at Stratum II; the Director seat requires IV, and the trajectory has flattened. Recommend deny.' },
+  ];
+
+  catLabels = { p:'Domain', e:'Stratum', s:'Lab & CLIA', w:'Regulatory', t:'Tenure', l:'Local' };
+  catMax = { p:25, e:20, s:20, w:15, t:10, l:10 };
+
+  complementMap = {
+    fillmore:{ type:'owner', head:'Risk off the company', removes:'the science and lab key-person risk — the CLIA + CAP lab, assay validation, and FDA-defensible submissions stop routing through Conall', vector:'a fundraise decision, not a budget rejection' },
+    raman:{ type:'technician', head:'Work off the desk', removes:'the hands-on assay-development load', vector:'a discount on future value — invest now, bend the curve' },
+    lowe:{ type:'technician', head:'Work off the desk', removes:'deep-bench execution', vector:'rich for the load removed at his stratum' },
+    cho:{ type:'owner', head:'Risk off the company', removes:'CLIA lab operations', vector:'priced as an owner, but thin on the build side' },
+    okafor:{ type:'technician', head:'Work off the desk', removes:'junior assay execution', vector:'cheap, but the curve is unproven' },
+    fischer:{ type:'technician', head:'Work off the desk', removes:'molecular R&D management', vector:'unpriced — salary withheld' },
+    reyes:{ type:'technician', head:'Work off the desk', removes:'QC execution', vector:'below the stratum the seat needs' },
+  };
+  roleReadMap = {
+    'Research Technician':'Task-level bench work — designed, developed, built. Level I, but the LightCycler apparatus is a real owned outcome, not a claim.',
+    'Graduate Research Assistant':'Ran lab operations for ten and taught — the first sign of carrying a function, not just tasks. Level II.',
+    'Postdoctoral Fellow':'Directed a BSL-2 facility and built assays end to end — owned-function register (directed, built, established), climbing into III.',
+    'Supervisor, Nucleic Acids Detection':'Owned a $3.5M DARPA program and the people on it — function ownership with budget and stakes. Stratum III.',
+    'Senior Scientist':'Carried assays from design control to FDA submission — the full owned outcome, the work Conall would otherwise sit with.',
+    'Principal Scientist':'Ran a biorepository serving global R&D under cGMP/GLP, supervised eight — function-level ownership at scale.',
+    'Senior Manager':'Global remit, SME across functions, portfolio strategy — owned-function and strategy register. Stratum IV.',
+    'Director, Research & Science':'Runs the lab as an owner — CLIA + CAP, $2M budget, 25 staff, board and committee credibility. The science adult who does not need Conall in the room.',
+  };
+
+  tierMeta = {
+    strong:   { label:'Strong',   color:'#15803d', note:'clears the rubric bar — advance' },
+    consider: { label:'Consider', color:'#162335', note:'holds the level, watch the caveat' },
+    hold:     { label:'Hold',     color:'#b45309', note:'borderline — needs more evidence' },
+    deny:     { label:'Deny',     color:'#b91c1c', note:'below the seat requirement' },
+  };
+  trajMeta = {
+    'grows-the-role':{ arrow:'↗', color:'#15803d' },
+    'plateaued':     { arrow:'→', color:'rgba(22,35,53,0.50)' },
+    'bends-away':    { arrow:'↘', color:'#b45309' },
+    'regressed':     { arrow:'↓', color:'#b91c1c' },
+  };
+  salColor(v){ return ({ 'justified':'rgba(22,35,53,0.82)', 'great value':'#15803d', 'rich for fit':'#b45309', 'poor value':'#b91c1c', 'unstated':'rgba(22,35,53,0.45)' })[v] || 'rgba(22,35,53,0.82)'; }
+  confColor(v){ return ({ 'high':'rgba(22,35,53,0.82)', 'medium':'#b45309', 'text-unreliable':'#b91c1c' })[v] || 'rgba(22,35,53,0.82)'; }
+
+  statusOf(id){ return this.state.statuses[id]||'active'; }
+  ranked(){ const sa=c=>this.statusOf(c.id)==='active'?0:1; return [...this.data].sort((a,b)=> sa(a)-sa(b) || b.fit-a.fit); }
+  decorate(c){
+    const rank = this.ranked().findIndex(x=>x.id===c.id) + 1;
+    const segDefs = [['p',1.0],['e',0.72],['s',0.56],['w',0.42],['t',0.30],['l',0.20]];
+    const segments = segDefs.map(([k,op])=>({ w: Math.round(c.cats[k]/this.catMax[k]*100*(this.catMax[k]/100)) + '%', bg:`rgba(22,35,53,${op})` }));
+    const tm=this.tierMeta[c.tier], trj=this.trajMeta[c.traj], selected=this.state.selected.includes(c.id);
+    const status=this.statusOf(c.id), inactive=status!=='active';
+    const statusLabel=status==='dq'?'Disqualified':status==='withdrawn'?'Withdrew':'';
+    return { ...c, rank, segments, sub:c.role+' · '+c.company,
+      tierLabel:tm.label, tierColor:tm.color, trajArrow:trj.arrow, trajColor:trj.color,
+      salColor:this.salColor(c.sal), confColor:this.confColor(c.conf),
+      ownerColor: c.assignee==='—'?'rgba(22,35,53,0.35)':'rgba(22,35,53,0.82)',
+      catLine:`Domain ${c.cats.p} · Stratum ${c.cats.e} · Lab ${c.cats.s} · Reg ${c.cats.w} · Tenure ${c.cats.t} · Local ${c.cats.l}`,
+      status, inactive, statusLabel, stageShow: inactive?statusLabel:c.stage, rowOpacity: inactive?0.5:1, nameStrike: inactive?'line-through':'none', complement:(this.complementMap[c.id]||{}).type||'',
+      selected, rowBg: inactive?'rgba(22,35,53,0.02)':(selected?'rgba(231,68,36,0.05)':'transparent'),
+      toggle:(e)=>{ if(e&&e.stopPropagation)e.stopPropagation(); this.toggleSelect(c.id); },
+      stop:(e)=>{ if(e&&e.stopPropagation)e.stopPropagation(); },
+      open:()=> this.setState({ screen:'candidate', active:c.id, src:'answers', anno:null }) };
+  }
+  toggleSelect(id){ const s=this.state.selected; this.setState({ selected: s.includes(id)? s.filter(x=>x!==id):[...s,id] }); }
+  setStatus(id,st){ const m={...this.state.statuses}; if(st==='active') delete m[id]; else m[id]=st; this.setState({statuses:m}); }
+  dqSelected(){ const m={...this.state.statuses}; this.state.selected.forEach(id=>m[id]='dq'); this.setState({statuses:m, selected:[]}); }
+  toggleSrc(k){ const s=this.state.openSrc; this.setState({ openSrc: s.includes(k)? s.filter(x=>x!==k):[...s,k] }); }
+  visibleList(){ let list=this.ranked(); const t=this.state.tier;
+    if(t==='new') list=list.filter(c=>c.isNew && this.statusOf(c.id)==='active');
+    else if(t!=='all') list=list.filter(c=>c.tier===t && this.statusOf(c.id)==='active');
+    return list.map(c=>this.decorate(c)); }
+
+  details = {
+    fillmore: {
+      basis:'reasoning', loc:'Salt Lake City',
+      summary:'This is the strongest IVD operator in the pipeline and one of the strongest RDI has seen. Fillmore co-built the rapid-cycle PCR apparatus that became the Roche LightCycler, developed GeneXpert assays through FDA submission at Cepheid, and now directs a CLIA- and CAP-certified biobank and molecular pathology core. The career reads as a clean Stratum I→IV climb with no gaps. The one real constraint is location, and the verification turned up one date flag to resolve live — neither changes the fit.',
+      career: [
+        { pos:'Director, Research & Science', company:'Huntsman Cancer Institute', years:'2015–present', age:'44–51', stratum:'IVb–a', L:'87.5%', W:'8.5%' },
+        { pos:'Senior Manager',              company:'Roche Molecular Systems',  years:'2013–2015', age:'42–44', stratum:'IVc–b', L:'79%',   W:'8.5%' },
+        { pos:'Principal Scientist',         company:'Roche Molecular Systems',  years:'2009–2013', age:'38–42', stratum:'IIIa–IVc', L:'71%', W:'8%' },
+        { pos:'Senior Scientist',            company:'Cepheid',                  years:'2007–2009', age:'36–38', stratum:'IIIb–a', L:'62.5%', W:'8.5%' },
+        { pos:'Supervisor, Nucleic Acids',   company:'Ribomed Biotechnologies',  years:'2005–2007', age:'34–36', stratum:'IIIc–b', L:'54%',  W:'8.5%' },
+        { pos:'Postdoctoral Fellow',         company:'University of Utah',       years:'2000–2005', age:'29–34', stratum:'IIa–IIIc', L:'46%', W:'8%' },
+        { pos:'Graduate Research Assistant', company:'Utah State University',    years:'1993–2000', age:'22–29', stratum:'IIb',    L:'34.5%', W:'6%' },
+        { pos:'Research Technician',         company:'University of Utah',       years:'1987–1992', age:'<22',   stratum:'Ia',     L:'18%',   W:'6%' },
+      ],
+      timeline: [
+        { pos:'Director, Research & Science', company:'Huntsman Cancer Institute', dates:'2015–now', age:'44–51', stratum:'IVb–a', L:'87.5%', W:'8.5%',
+          frags:[ {t:'Directs the Biorepository and Molecular Pathology Core — biobank inventory and IRB protocol authorship under HIPAA. '}, {t:'Oversees CAP and CLIA certification',a:1}, {t:', running '}, {t:'ddPCR, NanoString, MassArray and NGS',a:1}, {t:' in molecular diagnostics, on '}, {t:'a $2M annual budget with 25 staff',a:1}, {t:'. Research Assistant Professor, Pathology (2019).'} ],
+          notes:[ {cat:'Lab & CLIA', text:'CAP + CLIA oversight on a live biobank — mirrors RDI\u2019s 8,000 sq ft CLIA + CAP lab.'}, {cat:'Stratum IV', text:'A $2M multi-year budget and 25 staff confirm Stratum IV time-span of discretion.'} ] },
+        { pos:'Senior Manager', company:'Roche Molecular Systems', dates:'2013–2015', age:'42–44', stratum:'IVc–b', L:'79%', W:'8.5%',
+          frags:[ {t:'Ran the RMS Culture Collection and Global Surveillance Program — produced control materials for '}, {t:'the entire Roche worldwide diagnostic-assay R&D operation',a:1}, {t:', served as Subject Matter Expert across functions, supervised 10, and shaped portfolio strategy.'} ],
+          notes:[ {cat:'Stratum IV', text:'Global remit across Roche\u2019s worldwide assay supply — Stratum IV time-span.'} ] },
+        { pos:'Principal Scientist', company:'Roche Molecular Systems', dates:'2009–2013', age:'38–42', stratum:'IIIa–IVc', L:'71%', W:'8%',
+          frags:[ {t:'Managed the RMS Culture Collection Biorepository and BSL-3 facility under cGMP/GLP, wrote SOPs and quality and biosafety protocols, and supervised eight scientists.'} ],
+          notes:[] },
+        { pos:'Senior Scientist', company:'Cepheid', dates:'2007–2009', age:'36–38', stratum:'IIIb–a', L:'62.5%', W:'8.5%',
+          frags:[ {t:'Developed multiplex real-time PCR assays for Influenza, HIV/HBV and STDs on '}, {t:'the SmartCycler and GeneXpert platforms',a:1}, {t:', carried through design control to '}, {t:'FDA submission',a:1}, {t:'.'} ],
+          notes:[ {cat:'Domain', text:'GeneXpert cartridge point-of-care development — the platform RDI sponsors run.'}, {cat:'Regulatory', text:'Design control to FDA submission — real 510(k)-track experience.'} ] },
+        { pos:'Supervisor, Nucleic Acids Detection', company:'Ribomed Biotechnologies', dates:'2005–2007', age:'34–36', stratum:'IIIc–b', L:'54%', W:'8.5%',
+          frags:[ {t:'Supervised assay development for a '}, {t:'$3.5M DARPA biodefense program',a:1}, {t:' — multiplex Select-Agent detection in BSL-2/3 under cGMP/GLP.'} ],
+          notes:[ {cat:'Domain', text:'Large-program assay leadership under federal contract.'} ] },
+        { pos:'Postdoctoral Fellow', company:'University of Utah', dates:'2000–2005', age:'29–34', stratum:'IIa–IIIc', L:'46%', W:'8%',
+          frags:[ {t:'Built real-time PCR assays across HIV strains, directed a BSL-2 facility for 15 users, and ran microarray biomarker discovery for leukemia and lymphoma — multiplex diagnostics with ARUP.'} ],
+          notes:[] },
+        { pos:'Graduate Research Assistant', company:'Utah State University', dates:'1993–2000', age:'22–29', stratum:'IIb', L:'34.5%', W:'6%',
+          frags:[ {t:'Studied dsRNA virus life cycles and viral genomic sequencing, ran CRO antiviral projects, and oversaw lab operations for ten. Ph.D. conferred 2000.'} ],
+          notes:[] },
+        { isGap:true, label:'winter 1992–1993 — between the bench technician role and the start of graduate school. The only gap in 35 years.' },
+        { pos:'Research Technician', company:'University of Utah', dates:'1987–1992', age:'<22', stratum:'Ia', L:'18%', W:'6%',
+          frags:[ {t:'Designed PCR primers and developed rapid-cycle PCR protocols. '}, {t:'Built a novel real-time PCR apparatus — hot air and glass capillary tubes — that led to the Roche LightCycler',a:1}, {t:'.'} ],
+          notes:[ {cat:'Domain · foundational', text:'Co-originated the apparatus behind the Roche LightCycler. The qPCR pedigree starts here.'} ] },
+      ],
+      verification: {
+        read:'Minor flags',
+        claims:[
+          { category:'Employment dates', application:'Huntsman Cancer Institute — 2015 to 2022.', profile:'Director, Research & Science · Jul 2015 – Present (7 yrs 6 mos).', verdict:'DISCREPANCY', note:'The application implies the Huntsman role ended in 2022; the public profile shows it as current. Confirm whether he has left, is leaving, or the application date is stale before relying on availability.' },
+          { category:'Education', application:'Ph.D., 2000.', profile:'Ph.D. conferred 2000, Utah State University.', verdict:'CONFIRMED', note:'Institution and year agree across both sources.' },
+          { category:'Title & scope', application:'Director of Biorepository & Molecular Pathology Core; 25 staff; $2M budget.', profile:'Director, Research & Science, Huntsman; Research Assistant Professor, Pathology (2019).', verdict:'CONFIRMED', note:'Director-level scope is consistent; the profile adds a faculty appointment the application omits.' },
+          { category:'Location / onsite', application:'Open to relocation or a hybrid on-site arrangement.', profile:'Greater Salt Lake City Area.', verdict:'UNVERIFIABLE', note:'Relocation intent is not something a profile can confirm. Resolve live — it is the seat\u2019s one open gate.' },
+        ],
+        questions:[
+          'Your application dates Huntsman to 2022, but your profile still lists it as current — which is right, and what is your status there today?',
+          'Your profile lists a Research Assistant Professor appointment (2019–) that is not in the application — is it active, and does it carry any commitment that competes with this role?',
+        ],
+        actions:[
+          'Confirm Huntsman end-date and current employment status directly with the candidate.',
+          'Education check: Ph.D. conferral, Utah State University, 2000.',
+          'Confirm the Research Assistant Professor (Pathology) appointment status and any time commitment.',
+        ],
+      },
+      resume: [
+        { pos:'Director, Research & Science', company:'Huntsman Cancer Institute', dates:'Jul 2015 – Present', stratum:'IVb–a', frags:[
+          { t:'Director of the Biorepository and Molecular Pathology Core — procurement of clinical samples from inpatient volunteers, processing, biobank inventory, and IRB protocol authorship under HIPAA. ' },
+          { t:'Overseeing certification with the College of American Pathologists and Clinical Laboratory Improvement Amendments', a:'a5' },
+          { t:'. Supervising the Molecular Diagnostics group running ' },
+          { t:'ddPCR, NanoString, MassArray, and Next-Generation Sequencing', a:'a6' },
+          { t:' of patient samples, with ' },
+          { t:'a $2M annual departmental budget and 25 staff to Associate Director', a:'a7' },
+          { t:'. Appointed Research Assistant Professor in Pathology, 2019.' },
+        ]},
+        { pos:'Senior Scientist', company:'Cepheid', dates:'Jan 2007 – Aug 2009', stratum:'IIIb–a', frags:[
+          { t:'Developed multiplex real-time PCR assays for Influenza, HIV/HBV and STDs for point-of-care diagnostics on ' },
+          { t:'the SmartCycler and GeneXpert platforms', a:'a2' },
+          { t:'. Carried assays from primer/probe design through the design-control process to ' },
+          { t:'submission for the FDA approval process', a:'a3' },
+          { t:'.' },
+        ]},
+        { pos:'Research Technician', company:'University of Utah', dates:'May 1987 – Dec 1992', stratum:'Ia', frags:[
+          { t:'Designed PCR primers and reaction mixtures and developed rapid-cycle PCR protocols. ' },
+          { t:'Developed a novel real-time PCR apparatus using hot air and glass capillary tubes, leading to the production of the Roche LightCycler', a:'a1' },
+          { t:'.' },
+        ]},
+      ],
+      annoOrder:['a1','a2','a3','a5','a6','a7'],
+      annoDefs:{
+        a1:{ cat:'Domain · foundational', note:'Co-originated the rapid-cycle PCR apparatus behind the Roche LightCycler — the instrument category started here. The qPCR pedigree is as deep as it gets.' },
+        a2:{ cat:'Domain', note:'GeneXpert + SmartCycler assay development — the cartridge point-of-care platform several RDI sponsors run today.' },
+        a3:{ cat:'Regulatory', note:'Took assays through design control to FDA submission — real 510(k)-track experience, not just bench work.' },
+        a5:{ cat:'Lab & CLIA', note:'CAP + CLIA oversight on a live biobank — directly mirrors RDI\u2019s 8,000 sq ft CLIA + CAP lab.' },
+        a6:{ cat:'Domain', note:'ddPCR, NanoString, MassArray and NGS in production — multi-platform molecular at scale.' },
+        a7:{ cat:'Stratum IV', note:'A $2M multi-year budget and 25 staff to Associate Director confirm Stratum IV time-span of discretion.' },
+      },
+      digin: { quality:'Strong', mix:'1 owned (technical) · 2 intent answers, on point', integrity:'Minor',
+        careerRead:'35 years locked in IVD and molecular diagnostics · owned the lab function as Director, top-of-house · portability to RDI: low risk.',
+        flags:[ {tell:'Stale end-date', verbatim:'Huntsman — 2015 to 2022', why:'the profile shows the role as current; confirm status before relying on availability.'} ],
+        resolve:[ 'Confirm current Huntsman status — the application says 2022, the profile says present.', 'Relocation or hybrid on-site in Van Nuys, and on what timeline.' ] },
+      answers: [
+        { q:'Walk us through validating a new qPCR assay to the point a sponsor could defend it to FDA.', kind:'screen', verdict:'OWNED',
+          a:'I start with analytical validation — LoB, LoD and precision to CLSI EP17 and EP05, then linearity and interference across the real sample matrix. The design history file is locked under design control before any clinical samples run. Clinical validation is a method comparison against the predicate or a reference method on banked patient samples, powered for the claim. Reagent lots get lot-to-lot bridging and accelerated stability — lyophilized bead variance is what bites you at scale.',
+          present:['analytical validation to CLSI EP17/EP05','design control / design history file','clinical method comparison vs predicate','lot-to-lot & reagent stability','sample matrix / interference'], note:'' },
+        { q:'Why move from Huntsman to a CRO like RDI?', kind:'intent', verdict:'OWNED',
+          a:'I have spent fifteen years building the lab side of diagnostics — biorepository, CLIA and CAP, assay development. RDI is where that work meets real sponsor timelines and submissions that have to land. I want to own the science end of studies, not run a core facility indefinitely.',
+          present:[], note:'Intent question, no concept key. The reasoning is concrete and specific.' },
+        { q:'How do you think about location and on-site work?', kind:'intent', verdict:'OWNED',
+          a:'I am open to relocating to the Los Angeles area for the right role, or to a hybrid arrangement with regular on-site weeks in Van Nuys. The lab work is hands-on; I am not looking for a fully remote seat.',
+          present:[], note:'Intent question, no concept key. Directly answers the open gate.' },
+      ],
+      cover:'I am applying for the Director, Research & Science role. My career has run from the bench — I helped build the rapid-cycle PCR instrument that became the LightCycler — through assay development at Cepheid and Roche, to directing a CLIA- and CAP-certified biobank and molecular pathology core at Huntsman. I know what it takes to move a diagnostic assay from primer design to an FDA submission, and to run a regulated lab that sponsors can trust. RDI\u2019s IVD-only focus is exactly where I want to apply that.',
+      questions:[
+        { q:'You co-developed the apparatus behind the LightCycler and took GeneXpert assays to FDA. Walk us through one assay you carried from primer design to submission — where did it nearly fail?', why:'Anchors the FDA-submission claim in a concrete mechanism, not a line on the résumé.' },
+        { q:'Our lab is 8,000 sq ft, CLIA + CAP, three connected labs. What would you change in the first 90 days, and what would you leave alone?', why:'Tests operating judgment at the seat\u2019s stratum — what he builds versus what he respects.' },
+        { q:'You are in Salt Lake City. Be specific: relocation, hybrid with on-site weeks, or remote — and on what timeline?', why:'Closes the one open gate. Local is the only category below the bar, and the verification flagged a stale end-date.' },
+      ],
+    },
+  };
+
+  detailVals(){
+    const s=this.state;
+    const cand=this.data.find(c=>c.id===s.active)||this.data[0];
+    const ac=this.decorate(cand);
+    const d=this.details[s.active];
+    const has=!!d;
+    let career=[], timeline=[], chart=null, resumeDoc=[], digin=null, diginIntegrityNote='', verification=null, resume=[], annotations=[], answers=[], cover='', questions=[], vClaims=[];
+    if(has){
+      career=d.career;
+      timeline=(d.timeline||[]).slice().reverse().map(it=> it.isGap ? {isGap:true,isRole:false,label:it.label} : {isRole:true,isGap:false,pos:it.pos,company:it.company,dates:it.dates,age:it.age,stratum:it.stratum, read:this.roleReadMap[it.pos]||'', srcOpen:this.state.openSrc.includes(it.pos), toggleSrc:()=>this.toggleSrc(it.pos), srcLabel:this.state.openSrc.includes(it.pos)?'Hide source':'Show source', frags:it.frags.map(f=>({t:f.t,bg:f.a?'rgba(231,68,36,0.14)':'transparent',underline:f.a?'1px solid rgba(231,68,36,0.45)':'none',pad:f.a?'1px 2px':'0'}))} );
+      const v=d.verification;
+      const vColorMap={ 'Clean':'#15803d','Minor flags':'#b45309','Material discrepancy':'#b91c1c','Unverified (no profile)':'rgba(22,35,53,0.55)' };
+      const verdColor={ CONFIRMED:'#15803d', DISCREPANCY:'#b45309', UNVERIFIABLE:'rgba(22,35,53,0.50)' };
+      verification={ read:v.read, color:vColorMap[v.read]||'#162335', questions:v.questions, actions:v.actions };
+      vClaims=v.claims.map(c=>({ ...c, color:verdColor[c.verdict]||'#162335', hasConflict:c.verdict==='DISCREPANCY' }));
+      resume=d.resume.map(role=>({ ...role, frags: role.frags.map(f=>{
+        const hl=!!f.a, on=f.a===s.anno;
+        return { t:f.t, isHl:hl,
+          bg: hl ? (on?'rgba(231,68,36,0.32)':'rgba(231,68,36,0.13)') : 'transparent',
+          cursor: hl?'pointer':'auto',
+          underline: hl?'1px solid rgba(231,68,36,0.5)':'none',
+          pad: hl?'1px 1px':'0',
+          onEnter: hl?(()=>this.setState({anno:f.a})):(()=>{}),
+          onLeave: hl?(()=>this.setState({anno:null})):(()=>{}) };
+      }) }));
+      annotations=d.annoOrder.map(id=>{ const a=d.annoDefs[id], on=s.anno===id;
+        return { id, cat:a.cat, note:a.note, catColor: on?'#E74424':'rgba(22,35,53,0.50)',
+          border: on?'#E74424':'rgba(22,35,53,0.14)', bg: on?'rgba(231,68,36,0.06)':'#FFFFFF',
+          onEnter:()=>this.setState({anno:id}), onLeave:()=>this.setState({anno:null}) }; });
+      cover=d.cover; questions=d.questions;
+      const roleItems=(d.timeline||[]).filter(it=>!it.isGap);
+      const yr=str=>{const p=String(str).split('\u2013');return [parseInt(p[0]), p[1]==='now'?2024:parseInt(p[1])];};
+      const X0=1985,X1=2025, xf=y=>((y-X0)/(X1-X0)*100), cyv=r=>100-(parseFloat(r.L)+parseFloat(r.W)/2);
+      const chrono=[...roleItems].sort((a,b)=>yr(a.dates)[0]-yr(b.dates)[0]);
+      const shortCo={'University of Utah':'Utah','Utah State University':'Utah State','Ribomed Biotechnologies':'Ribomed','Cepheid':'Cepheid','Roche Molecular Systems':'Roche','Huntsman Cancer Institute':'Huntsman'};
+      const hint=p=>/Technician/.test(p)?'Tech':/Postdoc/.test(p)?'Postdoc':/Graduate/.test(p)?'PhD':/Principal/.test(p)?'Prin':/Senior Manager/.test(p)?'Sr Mgr':/Director/.test(p)?'Dir':'';
+      const cpts=chrono.map((r,i)=>{const ab=yr(r.dates); const h=hint(r.pos); return {x:+xf((ab[0]+ab[1])/2).toFixed(1), y:+cyv(r).toFixed(1), label:(shortCo[r.company]||r.company)+(h?' \u00b7 '+h:''), lt:(i%2===0?'translate(-46%,-150%)':'translate(-46%,-290%)')};});
+      chart={ poly:cpts.map(p=>p.x+','+p.y).join(' '), nodes:cpts,
+        grid:[['I',87.5],['II',62.5],['III',37.5],['IV',12.5]].map(g=>({label:g[0],y:g[1]})),
+        ticks:[1990,2000,2010,2020].map(y=>({label:String(y),x:+xf(y).toFixed(1)})),
+        phd:{x:+xf(2000).toFixed(1)},
+        gap:{x:+xf(1992).toFixed(1), w:+(xf(1993)-xf(1992)).toFixed(1)} };
+      resumeDoc=roleItems.map(r=>({pos:r.pos,company:r.company,dates:r.dates,stratum:r.stratum,text:r.frags.map(f=>f.t).join('')}));
+      const vA={OWNED:'#15803d',SURFACE:'#b45309',EVASIVE:'#b91c1c'};
+      answers=(d.answers||[]).map(qa=>({ ...qa, vColor:vA[qa.verdict]||'#162335', hasPresent:!!(qa.present&&qa.present.length), presentLine:(qa.present||[]).join(' \u00b7 '), hasNote:!!qa.note }));
+      digin=d.digin||null; diginIntegrityNote=(d.digin&&d.digin.flags&&d.digin.flags[0])?d.digin.flags[0].why:'';
+    }
+    // pool / investment read (updates as candidates are DQ'd or withdraw)
+    const statusOf=id=>this.state.statuses[id]||'active';
+    const activeAll=this.data.filter(c=>statusOf(c.id)==='active');
+    const dqN=this.data.filter(c=>statusOf(c.id)==='dq').length;
+    const wN=this.data.filter(c=>statusOf(c.id)==='withdrawn').length;
+    const comp=this.complementMap[s.active]||{type:'technician',head:'Work off the desk',removes:'operational load',vector:'unpriced'};
+    const ownersActive=activeAll.filter(c=>(this.complementMap[c.id]||{}).type==='owner').length;
+    const activeSorted=[...activeAll].sort((a,b)=>b.fit-a.fit);
+    const myRank=activeSorted.findIndex(c=>c.id===s.active)+1;
+    const candActive=statusOf(s.active)==='active';
+    const firstName=cand.name.replace('Dr. ','').split(' ').slice(-1)[0];
+    const investText = !candActive
+      ? `${firstName} is out of the running (${(ac.statusLabel||'inactive').toLowerCase()}). ${activeAll.length} candidate${activeAll.length===1?'':'s'} remain live.`
+      : `${firstName} buys down ${comp.removes}. That is ${comp.type==='owner'?'an owner complement \u2014 the founder-dependency a buyer prices':'a technician complement \u2014 operational relief off the desk'}. Of ${activeAll.length} candidates still live, ${comp.type==='owner'?(ownersActive<=1?'he is the only owner complement':'he is the strongest owner complement'):(myRank===1?'he is the top of the pool':`he ranks #${myRank} of ${activeAll.length}`)}. At ${cand.ask} he is ${comp.vector}.`;
+    const poolLine = `${activeAll.length} active \u00b7 ${dqN} disqualified \u00b7 ${wN} withdrawn`;
+    // composer questions
+    const qlist = questions.length?questions:[{q:'Walk us through the most ambiguous problem you owned end to end last year.', why:'Baseline judgment anchor.'}];
+    const qs=qlist.map((it,i)=>{ const sel=s.qSel.includes(i); return { ...it, idx:i, selected:sel, check:sel?'✓':'',
+      qBorder:sel?'#E74424':'rgba(22,35,53,0.15)', qBg:sel?'rgba(231,68,36,0.04)':'#FFFFFF',
+      boxBg:sel?'#E74424':'transparent', boxColor:sel?'#FFFFFF':'transparent', boxBorder:sel?'#E74424':'rgba(22,35,53,0.30)',
+      onToggle:()=>{ const x=s.qSel.includes(i)? s.qSel.filter(y=>y!==i):[...s.qSel,i]; this.setState({qSel:x}); } }; });
+    const insertQuestions=qs.filter(q=>q.selected).map((q,i)=>({ n:String(i+1), q:q.q }));
+    const tmplOpts=['Async interview invite','Phone screen (Calendly)','Hold — keep warm','Early-stage rejection'];
+    const template=s.template, canSend=!!template && s.qSel.length>0;
+    const srcOn=(k)=> s.src===k;
+    return {
+      activeRole:cand.role, activeCompany:cand.company, activeFirst:(cand.name.split(' ').slice(-1)[0]),
+      activeLoc:(d&&d.loc)||'—', activeBasis:(d&&d.basis)||(cand.conf==='text-unreliable'?'reference':'reasoning'),
+      summary:(d&&d.summary)||cand.why,
+      investHead:comp.head, investText, poolLine, salVector:comp.vector, candComplement:comp.type,
+      candActive, candStatusLabel: ac.statusLabel,
+      denyActiveCand:()=>this.setStatus(s.active,'dq'), withdrawActiveCand:()=>this.setStatus(s.active,'withdrawn'), restoreActiveCand:()=>this.setStatus(s.active,'active'),
+      hasDetail:has, noDetail:!has,
+      career, timeline, chart, digin, diginIntegrityNote, resumeDoc,
+      vRead: verification?verification.read:'', vColor: verification?verification.color:'#162335',
+      vClaims, vQuestions: verification?verification.questions:[], vActions: verification?verification.actions:[],
+      resume, annotations, annoCount:annotations.length, answers, cover,
+      isResume:srcOn('resume'), isAnswers:srcOn('answers'), isCover:srcOn('cover'),
+      setResume:()=>this.setState({src:'resume'}), setAnswers:()=>this.setState({src:'answers'}), setCover:()=>this.setState({src:'cover'}),
+      srcResumeColor: srcOn('resume')?'#162335':'rgba(22,35,53,0.55)', srcResumeUnderline: srcOn('resume')?'#E74424':'transparent',
+      srcAnswersColor: srcOn('answers')?'#162335':'rgba(22,35,53,0.55)', srcAnswersUnderline: srcOn('answers')?'#E74424':'transparent',
+      srcCoverColor: srcOn('cover')?'#162335':'rgba(22,35,53,0.55)', srcCoverUnderline: srcOn('cover')?'#E74424':'transparent',
+      openCompose:()=>this.setState({screen:'compose'}), backToCandidate:()=>this.setState({screen:'candidate'}),
+      questions:qs, tmplOpts, insertQuestions, hasInserts:insertQuestions.length>0, notHasInserts:insertQuestions.length===0,
+      tmplChips: tmplOpts.map(t=>({ label:t, onClick:()=>this.setState({template:t}),
+        bg:s.template===t?'#162335':'#FFFFFF', color:s.template===t?'#FAFAF7':'rgba(22,35,53,0.82)', border:s.template===t?'#162335':'rgba(22,35,53,0.18)' })),
+      sendLabel: template==='Phone screen (Calendly)'?'Move to Phone screen & send':template==='Early-stage rejection'?'Move to Rejected & send':template==='Hold — keep warm'?'Move to Hold':'Move to Async interview & send',
+      sendBg:canSend?'#E74424':'rgba(22,35,53,0.18)', sendColor:canSend?'#FFFFFF':'rgba(22,35,53,0.45)', sendCursor:canSend?'pointer':'not-allowed',
+      doSend:()=>{ if(canSend) this.setState({screen:'candidate'}); },
+    };
+  }
+
+  renderVals(){
+    const s=this.state;
+    const seg=(on)=> on?{bg:'#162335',color:'#FAFAF7'}:{bg:'#FFFFFF',color:'rgba(22,35,53,0.70)'};
+    const act=c=>(this.state.statuses[c.id]||'active')==='active';
+    const count=(k)=> k==='all'?this.data.filter(act).length: k==='new'?this.data.filter(c=>c.isNew&&act(c)).length: this.data.filter(c=>c.tier===k&&act(c)).length;
+    const boardActive=this.data.filter(act).length, boardStrong=this.data.filter(c=>c.tier==='strong'&&act(c)).length, boardNew=this.data.filter(c=>c.isNew&&act(c)).length, boardOut=this.data.length-boardActive;
+    const chips=[['all','All'],['strong','Strong'],['consider','Consider'],['hold','Hold'],['deny','Deny'],['new','New']].map(([key,label])=>{
+      const on=s.tier===key; return { label, count:count(key), onClick:()=>this.setState({tier:key}),
+        color:on?'#162335':'rgba(22,35,53,0.55)', underline:on?'#E74424':'transparent' }; });
+    const visible=this.visibleList();
+    const groups=['strong','consider','hold','deny'].map(k=>{ const items=visible.filter(c=>c.tier===k);
+      const avg=items.length?Math.round(items.reduce((a,c)=>a+c.fit,0)/items.length):0; const tm=this.tierMeta[k];
+      return { key:k, label:tm.label, color:tm.color, note:tm.note, items, count:items.length, avg }; }).filter(g=>g.count>0);
+    const activeC=this.decorate(this.data.find(c=>c.id===s.active)||this.data[0]);
+    return {
+      isBoard:s.screen==='board', isCandidate:s.screen==='candidate', isCompose:s.screen==='compose', notBoard:s.screen!=='board',
+      crumbBoardColor:s.screen==='board'?'#162335':'rgba(22,35,53,0.55)', crumbCandColor:s.screen==='candidate'?'#162335':'rgba(22,35,53,0.55)',
+      openBoard:()=>this.setState({screen:'board'}), openActiveCand:()=>this.setState({screen:'candidate'}),
+      activeC, chips, visible, groups,
+      boardActive, boardStrong, boardNew, boardOut, hasOut:boardOut>0, dqSelected:()=>this.dqSelected(),
+      isLayoutA:s.layout==='A', isLayoutB:s.layout==='B', isLayoutC:s.layout==='C',
+      setLayoutA:()=>this.setState({layout:'A'}), setLayoutB:()=>this.setState({layout:'B'}), setLayoutC:()=>this.setState({layout:'C'}),
+      segA:seg(s.layout==='A'), segB:seg(s.layout==='B'), segC:seg(s.layout==='C'),
+      selectedCount:s.selected.length, bulkVisible:s.selected.length>0, bulkClear:()=>this.setState({selected:[]}),
+      ...this.detailVals(),
+    };
+  }
+}
+</script>
+</body>
+</html>
