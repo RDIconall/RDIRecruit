@@ -12,10 +12,10 @@ import {
   askTierLabel,
   logColor,
 } from "@/lib/triage/theme";
-import { CANDIDATES, findCandidate } from "@/lib/triage/data";
-import { buildMd, candUrl } from "@/lib/triage/workspace";
 import type { TimelineRow } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
+import { useTriageData } from "./context";
+import { getWorkingFileContent } from "@/app/actions/triage";
 
 const C = COLORS;
 const F = FONTS;
@@ -30,10 +30,11 @@ interface Props {
 }
 
 export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
+  const { candidates, findCandidate } = useTriageData();
   const ws = wsApi.ws;
   const candidate = findCandidate(activeId);
-  const id = candidate.id;
-  const total = CANDIDATES.length;
+  const total = candidates.length;
+  const id = activeId;
 
   const [tlEditing, setTlEditing] = useState(false);
   const [corrDraft, setCorrDraft] = useState("");
@@ -45,6 +46,8 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
     setCorrDraft("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  if (!candidate) return null;
 
   const dm = DM(candidate.decision);
   const rev = REV(candidate.rev);
@@ -79,9 +82,10 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
   const effTimeline = wsApi.effTimeline(id);
   const transcriptSaved = (ws.transcripts[id] ?? "") === tdraft && tdraft.length > 0;
 
-  const downloadMd = () => {
+  const downloadMd = async () => {
     try {
-      const blob = new Blob([buildMd(candidate, ws)], { type: "text/markdown" });
+      const { content } = await getWorkingFileContent({ candidateId: id });
+      const blob = new Blob([content], { type: "text/markdown" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -89,7 +93,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       a.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
-      // ignore
+      // ignore — download is best-effort
     }
   };
 
@@ -169,7 +173,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           </span>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
             <a
-              href={candUrl(id)}
+              href={candidate.workableUrl}
               target="_blank"
               rel="noopener noreferrer"
               style={{ fontFamily: F.mono, fontSize: 12.5, color: C.brick, textDecoration: "none" }}

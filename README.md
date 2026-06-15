@@ -18,21 +18,48 @@ There are **no numeric scores and no tiers** — only a shared decision vocabula
 
 ## Product surfaces
 
-The app is a single client surface (`src/components/triage/`) that switches between two views:
+The app is server-fed from Supabase. `src/app/page.tsx` is a Server Component that loads the selected job's candidates — mapping the real `candidates` / `applications` / `scores` / `ro_assessments` / `evaluations` / `narratives` rows into the triage view model (`src/lib/triage/from-supabase.ts`) — and hands a fully-populated pool to the client surface (`src/components/triage/`), which switches between two views:
 
 - **Pool** (`PoolScreen`) — pool read + counts, a grouped **cut list** to clear first, and an **interview-priority** table with decision/reviewer-signal/why/ask·RO/risk/next-action columns and decision filters.
 - **Candidate** (`CandidateScreen`) — red-flag banner (for cuts), the short decision read, reviewer signal, optional human re-analysis, a gated deep analysis (ask vs RO level + editable RO time progression), annotated cover letter and application answers, a logistics check, interview summary + Fireflies transcripts, and a per-candidate **working file** you can download as `.md`.
 
-Human edits (disqualifications, timeline overrides, comment replies, corrections, pulled transcripts) persist to `localStorage` under `rdi-recruit-ws-v1`. This is the prototype persistence layer — wire it to Supabase server-side next.
+A **job switcher** in the top bar lists all five published jobs (default: _Clinical Data Manager — Data Integrity & Investigation_); selecting one reloads the pool server-side via `/?job=<shortcode>`.
+
+> **No numeric scores ever reach the UI.** The `scores` table is read only to _derive_ a decision (verdict bands + integrity/verification gates → the decision vocabulary). Decision, why, risk, next, RO capability, logistics, cover, answers, and timeline are mapped faithfully from the real data; fields the DB doesn't have yet degrade gracefully rather than being fabricated.
+
+### Data persistence
+
+Human triage edits persist to Supabase (across users/devices), no longer to `localStorage`:
+
+- **Disqualify** → `candidate_overlay.status` (`active` / `disqualified`), reusing the existing overlay table.
+- **Timeline overrides, comment replies, corrections log, pulled/pasted transcripts, run-deep flag** → `candidate_working_files.workspace` (jsonb).
+
+Edits are optimistic in the UI and written through the server actions in `src/app/actions/triage.ts`. "Open in Workable" deeplinks use the real `candidates.raw.profile_url` (falling back to `src/lib/workable/links.ts`).
+
+### Per-candidate working file + recalculate (Claude)
+
+Each candidate has **one living markdown case file** stored in Supabase (`candidate_working_files.content`), rendered by `src/lib/triage/working-file.ts` from the candidate's real materials plus human corrections / replies / transcripts. It is re-rendered every time a human saves an edit, and the **Download .md** button streams the stored content.
+
+The deep buttons — **Save correction & re-analyze**, **Save transcript & analyze**, and **Run deep analysis** — trigger a server-side **recalculate** (`src/lib/triage/recalc.ts`):
+
+1. loads the candidate's stored `.md` + materials + the latest human corrections / transcript / replies,
+2. calls **Claude** (Anthropic SDK) to re-derive the decision read — **Decision** (from the fixed vocabulary), **Why**, **Main risk**, **Next action**, and a change note — with **no numeric scores**,
+3. writes the read back to `candidate_working_files.read` and appends it into the working-file content,
+4. the UI reflects the new decision immediately (optimistic), and the pool refreshes.
+
+It is gated behind Clerk auth and runs entirely server-side, so the API key never reaches the client. If `ANTHROPIC_API_KEY` is missing or Claude errors, the human edit is still saved and the UI shows a non-blocking notice instead of crashing.
 
 ## Where the code lives
 
 | Path | Purpose |
 |---|---|
-| `src/app/page.tsx` | Mounts the triage app (Clerk-protected) |
-| `src/components/triage/` | `triage-app`, `pool-screen`, `candidate-screen`, `use-workspace` |
-| `src/lib/triage/` | `types`, `data` (mock pool), `theme` (tokens + decision/signal maps), `workspace` (localStorage + Workable deeplinks + `.md` builder) |
+| `src/app/page.tsx` | Server Component: loads the pool from Supabase, mounts the triage app (Clerk-protected) |
+| `src/components/triage/` | `triage-app`, `pool-screen`, `candidate-screen`, `use-workspace`, `context` |
+| `src/lib/triage/` | `types`, `theme` (tokens + decision/signal maps), `from-supabase` (DB→view-model mapper), `load` (server batch loader), `store` (working-file read/write), `working-file` (`.md` renderer), `recalc` (Claude re-derive) |
+| `src/app/actions/triage.ts` | Server actions: persist edits, disqualify, recalculate, download `.md` |
+| `src/lib/data/` | Board/overlay queries (`board`, `board-queries`, `overlay`) reused as the data layer |
 | `src/lib/workable/` | Workable client + link helpers (reused connector) |
+| `supabase/migrations/` | `001`–`008` original schema; **`009_working_files.sql`** adds `candidate_working_files` (additive) |
 | `src/app/api/` | Workable webhook, cron reconcile/migrate, Fireflies/Gmail ingest, candidate resume (preserved server infra) |
 | `archive/` | Previous scoring-centric UI, components, and docs |
 

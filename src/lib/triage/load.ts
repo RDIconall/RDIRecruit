@@ -1,0 +1,273 @@
+import "server-only";
+import { hasSupabase } from "../env";
+import { getServiceSupabase } from "../supabase/server";
+import { getBoardFromSupabase } from "../data/board-queries";
+import { getPublishedJobs, getJobByShortcode } from "../jobs/service";
+import { wbJob } from "../workable/links";
+import type { WorkspaceSlice } from "./types";
+import { INTERVIEW_EVIDENCE_TYPES } from "../sync/candidate-hash";
+import type {
+  AnswerGradePayload,
+  DigInPayload,
+  EvidenceRow,
+  InvestPayload,
+  NarrativeSegment,
+  RoleReadPayload,
+  VerificationPayload,
+} from "../types";
+import type { Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
+import { mapCandidate, type CandidateEvaluations } from "./from-supabase";
+import { getWorkingFiles } from "./store";
+
+export const DEFAULT_JOB_SHORTCODE = "379AA16E8F"; // Clinical Data Manager — Data Integrity & Investigation
+
+export interface TriagePool {
+  candidates: Candidate[];
+  workspace: Workspace;
+  meta: PoolMeta;
+  jobs: JobOption[];
+  configured: boolean;
+}
+
+function emptyWorkspace(): Workspace {
+  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {} };
+}
+
+function emptyPool(jobShortcode: string, jobs: JobOption[], title: string): TriagePool {
+  return {
+    candidates: [],
+    workspace: emptyWorkspace(),
+    jobs,
+    configured: hasSupabase(),
+    meta: {
+      title,
+      jobShortcode,
+      jobUrl: wbJob(jobShortcode),
+      healthState: hasSupabase() ? "No candidates" : "Not connected",
+      healthRead: hasSupabase()
+        ? "No candidates synced for this job yet."
+        : "Supabase is not configured in this environment, so no live candidates can load.",
+      total: 0,
+    },
+  };
+}
+
+type EvalRow = { candidate_id: string; kind: string; payload: Record<string, unknown>; created_at: string };
+
+function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
+  const byCandidate = new Map<string, EvalRow[]>();
+  for (const row of rows) {
+    const list = byCandidate.get(row.candidate_id) ?? [];
+    list.push(row);
+    byCandidate.set(row.candidate_id, list);
+  }
+
+  const result = new Map<string, CandidateEvaluations>();
+  for (const [id, list] of byCandidate) {
+    const latest = (kind: string) =>
+      list
+        .filter((r) => r.kind === kind)
+        .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0]?.payload ?? null;
+    const all = (kind: string) =>
+      list
+        .filter((r) => r.kind === kind)
+        .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
+        .map((r) => r.payload);
+
+    result.set(id, {
+      invest: latest("invest_head") as unknown as InvestPayload | null,
+      dig: latest("dig_in") as unknown as DigInPayload | null,
+      verification: latest("verification") as unknown as VerificationPayload | null,
+      roleReads: all("role_read") as unknown as RoleReadPayload[],
+      answerGrades: all("answer_grade") as unknown as AnswerGradePayload[],
+    });
+  }
+  return result;
+}
+
+function deriveMeta(candidates: Candidate[], jobShortcode: string, title: string): PoolMeta {
+  const n = (d: Candidate["decision"]) => candidates.filter((c) => c.decision === d).length;
+  const interview = n("interview");
+  const short = n("short");
+  const verify = n("verify");
+  const worth = interview + short + verify;
+  const cut = n("cut");
+
+  let healthState: string;
+  if (interview > 0) healthState = "Has interview-ready files";
+  else if (short > 0) healthState = "Usable, not strong";
+  else if (worth > 0) healthState = "Needs verification";
+  else healthState = "Thin";
+
+  const healthRead =
+    candidates.length === 0
+      ? "No candidates synced for this job yet."
+      : `${candidates.length} in pool · ${worth} worth screening, ${cut} to cut. ` +
+        (interview > 0
+          ? `Clear the cut list, then screen the ${interview} interview-ready file${interview === 1 ? "" : "s"} first.`
+          : short > 0
+            ? `No standout interview-first file yet — clear the cut list, then short-screen the strongest group.`
+            : `Clear the cut list and keep recruiting; nothing yet clears the bar for a first interview.`);
+
+  return {
+    title,
+    jobShortcode,
+    jobUrl: wbJob(jobShortcode),
+    healthState,
+    healthRead,
+    total: candidates.length,
+  };
+}
+
+export interface OneCandidate {
+  candidate: Candidate;
+  slice: WorkspaceSlice;
+  disqualified: boolean;
+  workableUrl: string;
+  jobShortcode: string;
+}
+
+/** Targeted load of a single candidate's mapped view model + persisted edits. */
+export async function loadOneCandidate(candidateId: string): Promise<OneCandidate | null> {
+  if (!hasSupabase()) return null;
+  const supabase = getServiceSupabase();
+
+  const { data: candidate } = await supabase
+    .from("candidates")
+    .select("*")
+    .eq("workable_id", candidateId)
+    .maybeSingle();
+  if (!candidate) return null;
+
+  const jobShortcode = (candidate.job_shortcode as string) ?? DEFAULT_JOB_SHORTCODE;
+
+  const [scoreRes, roRes, overlayRes, appRes, narrRes, evalRes, evidenceRes, wfMap] = await Promise.all([
+    supabase.from("scores").select("*").eq("candidate_id", candidateId).order("created_at", { ascending: false }).limit(1),
+    supabase.from("ro_assessments").select("*").eq("candidate_id", candidateId).order("created_at", { ascending: false }).limit(1),
+    supabase.from("candidate_overlay").select("*").eq("candidate_id", candidateId).maybeSingle(),
+    supabase.from("applications").select("candidate_id, answers, cover_letter").eq("candidate_id", candidateId).maybeSingle(),
+    supabase.from("narratives").select("segments").eq("candidate_id", candidateId).order("generated_at", { ascending: false }).limit(1),
+    supabase.from("evaluations").select("candidate_id, kind, payload, created_at").eq("candidate_id", candidateId),
+    supabase.from("evidence").select("*").eq("candidate_id", candidateId).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
+    getWorkingFiles([candidateId]),
+  ]);
+
+  const overlay = (overlayRes.data as { status?: string; status_reason?: string | null; complement?: string | null; complement_removes?: string | null; salary_vector?: string | null } | null) ?? null;
+  const evals = groupEvaluations((evalRes.data ?? []) as EvalRow[]).get(candidateId) ?? {
+    invest: null,
+    dig: null,
+    verification: null,
+    roleReads: [],
+    answerGrades: [],
+  };
+  const wf = wfMap.get(candidateId);
+
+  const candidateView = mapCandidate({
+    candidate: candidate as Parameters<typeof mapCandidate>[0]["candidate"],
+    score: (scoreRes.data?.[0] as Parameters<typeof mapCandidate>[0]["score"]) ?? null,
+    ro: (roRes.data?.[0] as Parameters<typeof mapCandidate>[0]["ro"]) ?? null,
+    overlay: overlay as Parameters<typeof mapCandidate>[0]["overlay"],
+    application: (appRes.data as { answers: Record<string, unknown> | null; cover_letter: string | null } | null) ?? null,
+    narrative: ((narrRes.data?.[0]?.segments as NarrativeSegment[] | undefined) ?? []),
+    evals,
+    interviewEvidence: (evidenceRes.data ?? []) as EvidenceRow[],
+    read: (wf?.read as DecisionRead | null) ?? null,
+    rank: 0,
+    jobLocation: "Van Nuys, CA",
+    jobShortcode,
+  });
+
+  const disqualified = overlay?.status === "disqualified" || Boolean((candidate as { disqualified?: boolean }).disqualified);
+
+  return {
+    candidate: candidateView,
+    slice: wf?.workspace ?? {},
+    disqualified,
+    workableUrl: candidateView.workableUrl,
+    jobShortcode,
+  };
+}
+
+export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> {
+  const jobSummaries = await getPublishedJobs();
+  const jobs: JobOption[] = jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title }));
+  const jobMeta = await getJobByShortcode(jobShortcode);
+  const title = jobMeta?.title ?? jobShortcode;
+
+  if (!hasSupabase()) return emptyPool(jobShortcode, jobs, title);
+
+  const board = await getBoardFromSupabase(jobShortcode);
+  if (!board?.length) return emptyPool(jobShortcode, jobs, title);
+
+  const ids = board.map((b) => b.candidate.workable_id);
+  const supabase = getServiceSupabase();
+
+  const [appsRes, evalRes, narrRes, evidenceRes, workingFiles] = await Promise.all([
+    supabase.from("applications").select("candidate_id, answers, cover_letter").in("candidate_id", ids),
+    supabase.from("evaluations").select("candidate_id, kind, payload, created_at").in("candidate_id", ids),
+    supabase.from("narratives").select("candidate_id, segments, generated_at").in("candidate_id", ids).order("generated_at", { ascending: false }),
+    supabase.from("evidence").select("*").in("candidate_id", ids).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
+    getWorkingFiles(ids),
+  ]);
+
+  const appsByCandidate = new Map<string, { answers: Record<string, unknown> | null; cover_letter: string | null }>();
+  for (const a of (appsRes.data ?? []) as Array<{ candidate_id: string; answers: Record<string, unknown> | null; cover_letter: string | null }>) {
+    if (!appsByCandidate.has(a.candidate_id)) appsByCandidate.set(a.candidate_id, { answers: a.answers, cover_letter: a.cover_letter });
+  }
+
+  const evalsByCandidate = groupEvaluations((evalRes.data ?? []) as EvalRow[]);
+
+  const narrByCandidate = new Map<string, NarrativeSegment[]>();
+  for (const n of (narrRes.data ?? []) as Array<{ candidate_id: string; segments: NarrativeSegment[] }>) {
+    if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
+  }
+
+  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
+  for (const e of (evidenceRes.data ?? []) as EvidenceRow[]) {
+    const list = evidenceByCandidate.get(e.candidate_id) ?? [];
+    list.push(e);
+    evidenceByCandidate.set(e.candidate_id, list);
+  }
+
+  const workspace = emptyWorkspace();
+  const candidates: Candidate[] = board.map((item, index) => {
+    const id = item.candidate.workable_id;
+    const wf = workingFiles.get(id);
+    const read = (wf?.read as DecisionRead | null) ?? null;
+
+    const candidate = mapCandidate({
+      candidate: item.candidate,
+      score: item.score ?? null,
+      ro: item.ro ?? null,
+      overlay: item.overlay ?? null,
+      application: appsByCandidate.get(id) ?? null,
+      narrative: narrByCandidate.get(id) ?? [],
+      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [] },
+      interviewEvidence: evidenceByCandidate.get(id) ?? [],
+      read,
+      rank: index + 1,
+      jobLocation: "Van Nuys, CA",
+      jobShortcode,
+    });
+
+    // Hydrate the client workspace from persisted state.
+    const dq = item.overlay?.status === "disqualified" || Boolean(item.candidate.disqualified);
+    if (dq) workspace.dq[id] = true;
+    const slice = wf?.workspace ?? {};
+    if (slice.ovr) workspace.ovr[id] = slice.ovr;
+    if (slice.replies) workspace.replies[id] = slice.replies;
+    if (slice.corrections) workspace.corrections[id] = slice.corrections;
+    if (slice.transcript) workspace.transcripts[id] = slice.transcript;
+    if (slice.deep) workspace.deep[id] = true;
+
+    return candidate;
+  });
+
+  return {
+    candidates,
+    workspace,
+    jobs,
+    configured: true,
+    meta: deriveMeta(candidates, jobShortcode, title),
+  };
+}

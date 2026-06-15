@@ -8,9 +8,12 @@ Follow these when building features, especially the triage decision flow, auth, 
 
 RDIRecruit is a **candidate-triage decision tool** that protects interview time: cut weak candidates first, rank who to interview, then build a deep read only for the ones worth it. There are **no numeric scores and no tiers** — only the decision vocabulary _Interview first · Short screen · Verify first · Hold · Cut · Review blocked_. Workable stays the ATS of record.
 
-- UI: `src/components/triage/` (`triage-app`, `pool-screen`, `candidate-screen`, `use-workspace`).
-- Domain + data: `src/lib/triage/` (`types`, `data`, `theme`, `workspace`).
-- Human edits persist to `localStorage` (`rdi-recruit-ws-v1`) in the prototype — wire to Supabase server-side next.
+- UI: `src/components/triage/` (`triage-app`, `pool-screen`, `candidate-screen`, `use-workspace`, `context`).
+- Domain + data: `src/lib/triage/` (`types`, `theme`, `from-supabase` mapper, `load` server loader, `store` + `working-file` for the `.md`, `recalc` for the Claude re-derive).
+- The app is **server-fed from Supabase** (`src/app/page.tsx` Server Component → `loadTriagePool`). Real tables: `candidates`, `applications`, `scores`, `ro_assessments`, `evaluations`, `narratives`, `candidate_overlay`, and `candidate_working_files` (migration `009`).
+- **No numeric scores/tiers in the UI** — `scores` is used only to derive a decision from the vocabulary; everything surfaced maps from real data or degrades gracefully.
+- Human edits persist to Supabase via `src/app/actions/triage.ts`: disqualify → `candidate_overlay`; timeline/replies/corrections/transcripts/run-deep → `candidate_working_files.workspace`. Optimistic in the UI.
+- Each candidate has one living `.md` working file in `candidate_working_files.content`; **Save correction & re-analyze / Save transcript & analyze / Run deep analysis** call Claude (server-side, Clerk-gated, resilient) to re-derive the decision read and write it back.
 - Connectors are preserved under `src/lib/` and `src/app/api/`; the previous scoring-centric UI/docs live in `archive/`.
 - Keep the build Vercel-deployable on `main` (Clerk env-driven, no hardcoded secrets).
 

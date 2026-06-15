@@ -2,10 +2,9 @@
 
 import { CSSProperties } from "react";
 import { FONTS, DM, REV, askColor, askTierLabel } from "@/lib/triage/theme";
-import { CANDIDATES, JOB_CODE, HEALTH_STATE, HEALTH_READ } from "@/lib/triage/data";
-import { jobUrl } from "@/lib/triage/workspace";
 import type { CutGroup, Decision } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
+import { useTriageData } from "./context";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: FONTS.mono, ...extra });
 
@@ -25,6 +24,7 @@ const CUT_DEFS: { key: CutGroup; title: string }[] = [
 ];
 
 export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }: Props) {
+  const { candidates: CANDIDATES, meta } = useTriageData();
   const { ws, bulkDq, openCount, toggleDq } = wsApi;
   const dq = ws.dq;
 
@@ -74,13 +74,13 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 24, flexWrap: "wrap" }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 42, fontWeight: 500, letterSpacing: "-0.035em", lineHeight: 0.98 }}>
-            Clinical data manager{" "}
+            {meta.title}{" "}
             <span style={{ fontFamily: FONTS.serif, fontStyle: "italic", fontWeight: 400, color: "#E74424", letterSpacing: "-0.01em" }}>
               pool.
             </span>
           </h1>
           <div style={mono({ marginTop: 11, display: "flex", alignItems: "center", gap: 11, fontSize: 14, color: "rgba(22,35,53,0.62)", flexWrap: "wrap" })}>
-            <span>{JOB_CODE}</span>
+            <span>{meta.jobShortcode}</span>
             <span style={{ color: "rgba(22,35,53,0.25)" }}>·</span>
             <span>{total} in pool</span>
             <span style={{ color: "rgba(22,35,53,0.25)" }}>·</span>
@@ -92,7 +92,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
           </div>
         </div>
         <a
-          href={jobUrl()}
+          href={meta.jobUrl}
           target="_blank"
           rel="noopener noreferrer"
           style={{
@@ -116,9 +116,9 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
         <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "0 56px", alignItems: "start" }}>
           <div>
             <div style={mono({ fontSize: 12, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(22,35,53,0.5)" })}>
-              Pool read — <span style={{ color: "#E74424" }}>{HEALTH_STATE}</span>
+              Pool read — <span style={{ color: "#E74424" }}>{meta.healthState}</span>
             </div>
-            <div style={{ marginTop: 12, fontSize: 23, fontWeight: 400, lineHeight: 1.4, maxWidth: 640 }}>{HEALTH_READ}</div>
+            <div style={{ marginTop: 12, fontSize: 23, fontWeight: 400, lineHeight: 1.4, maxWidth: 640 }}>{meta.healthRead}</div>
           </div>
           <div style={{ borderLeft: "1px solid rgba(22,35,53,0.12)", paddingLeft: 40 }}>
             {counts.map((ct) => (

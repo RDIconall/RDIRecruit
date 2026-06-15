@@ -157,9 +157,14 @@ export interface Candidate {
   fireflies?: FirefliesRecording[];
   interview?: InterviewSummary;
   redFlags: RedFlag[];
+
+  // Real Workable deeplink (from candidates.raw.profile_url, else link helper).
+  workableUrl: string;
 }
 
-// Persisted human-edit workspace (localStorage key rdi-recruit-ws-v1).
+// Persisted human-edit workspace. Hydrated server-side from candidate_overlay
+// (disqualify) + candidate_working_files.workspace (everything else); edits are
+// written back through server actions (see src/app/actions/triage.ts).
 export interface Workspace {
   dq: Record<string, boolean>;
   ovr: Record<string, TimelineRow[]>;
@@ -167,4 +172,43 @@ export interface Workspace {
   corrections: Record<string, { ts: string; text: string }[]>;
   transcripts: Record<string, string>;
   deep: Record<string, boolean>;
+}
+
+// The per-candidate slice of the workspace, as stored in
+// candidate_working_files.workspace (jsonb). Disqualify lives on
+// candidate_overlay, so it is intentionally absent here.
+export interface WorkspaceSlice {
+  ovr?: TimelineRow[];
+  replies?: Record<string, string>;
+  corrections?: { ts: string; text: string }[];
+  transcript?: string;
+  deep?: boolean;
+}
+
+// Claude's re-derived decision read, stored in candidate_working_files.read.
+// Decision vocabulary only — NEVER any numeric score or tier.
+export interface DecisionRead {
+  decision: Decision;
+  why: string;
+  risk: string;
+  next: string;
+  timelineNote?: string;
+  flags?: RedFlag[];
+  recalculatedAt?: string;
+  model?: string;
+}
+
+// Pool-level header values, derived server-side from the live job + counts.
+export interface PoolMeta {
+  title: string;
+  jobShortcode: string;
+  jobUrl: string;
+  healthState: string;
+  healthRead: string;
+  total: number;
+}
+
+export interface JobOption {
+  shortcode: string;
+  title: string;
 }

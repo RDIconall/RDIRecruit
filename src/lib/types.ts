@@ -149,6 +149,8 @@ export interface InvestPayload {
   removes: string;
   vector: string;
   summary: string;
+  /** Parsed salary ask, e.g. "$100k" (present in stored invest_head payloads). */
+  ask?: string | null;
 }
 
 /** role_read evaluation — one per career role, keyed by role/company. */
