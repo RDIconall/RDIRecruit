@@ -21,8 +21,9 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "RDI Hiring Layer",
-  description: "Intelligence layer on top of Workable for RDI Trials recruiting",
+  title: "RDIRecruit — Candidate triage",
+  description:
+    "A decision tool that protects interview time: cut weak candidates first, rank who to interview, and build an RO-style progression only for candidates worth it.",
 };
 
 export default function RootLayout({

@@ -4,37 +4,64 @@
   --color-navy: #162335;
   --color-orange: #e74424;
   --color-cream: #fafaf7;
-  --color-navy-muted: #2a3d54;
-  --color-orange-muted: #f06a50;
-  --font-sans: var(--font-instrument-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-serif: var(--font-instrument-serif), ui-serif, Georgia, serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
-
-  /* Larger type scale for readability (spec: bigger fonts). Named sizes bumped
-     ~1px each; layout widths are px-based so they don't reflow. */
-  --text-xs: 0.8125rem; /* 13px (was 12) */
-  --text-xs--line-height: 1.15rem;
-  --text-sm: 0.9375rem; /* 15px (was 14) */
-  --text-sm--line-height: 1.45rem;
-  --text-base: 1.0625rem; /* 17px (was 16) */
-  --text-base--line-height: 1.65rem;
-  --text-lg: 1.1875rem; /* 19px (was 18) */
-  --text-lg--line-height: 1.7rem;
+  --color-brick: #9e3b28;
+  --font-sans: var(--font-instrument-sans), -apple-system, system-ui, sans-serif;
+  --font-serif: var(--font-instrument-serif), "Tiempos Headline", Georgia, serif;
+  --font-mono: var(--font-jetbrains-mono), "Söhne Mono", ui-monospace, monospace;
 }
 
 @layer base {
-  html {
-    @apply bg-cream text-navy antialiased;
+  * {
+    box-sizing: border-box;
+  }
+
+  html,
+  body {
+    margin: 0;
+    padding: 0;
   }
 
   body {
-    @apply min-h-screen font-sans;
+    min-height: 100vh;
+    background: #fafaf7;
+    color: #162335;
+    font-family: var(--font-sans);
+    font-size: 17px;
+    line-height: 1.5;
+    font-feature-settings: "ss01", "ss02", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
-}
 
-@layer utilities {
-  .font-hero {
-    font-family: var(--font-serif);
-    font-style: italic;
+  ::selection {
+    background: #e74424;
+    color: #fff;
+  }
+
+  input,
+  button,
+  select,
+  textarea {
+    font-family: inherit;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: rgba(22, 35, 53, 0.16);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none !important;
+    }
   }
 }
