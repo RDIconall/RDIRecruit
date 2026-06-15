@@ -31,9 +31,21 @@ const ANSWER_COLOR: Record<string, string> = {
   EVASIVE: "#b91c1c",
 };
 
-export function VerificationSection({ evaluations }: { evaluations: EvaluationRow[] }) {
+export function VerificationSection({
+  evaluations,
+  dateFlags = [],
+}: {
+  evaluations: EvaluationRow[];
+  dateFlags?: string[];
+}) {
   const row = evaluations.find((e) => e.kind === "verification");
   const v = row?.payload as unknown as VerificationPayload | undefined;
+
+  const sortedClaims = [...(v?.claims ?? [])].sort((a, b) => {
+    const aNeeds = a.category?.includes("NEEDS YOU") || a.note?.includes("[NEEDS YOU]") ? 0 : 1;
+    const bNeeds = b.category?.includes("NEEDS YOU") || b.note?.includes("[NEEDS YOU]") ? 0 : 1;
+    return aNeeds - bNeeds;
+  });
 
   return (
     <section className="mt-11">
@@ -57,7 +69,19 @@ export function VerificationSection({ evaluations }: { evaluations: EvaluationRo
         </p>
       ) : (
         <div className="mt-4">
-          {v.claims.map((claim, i) => (
+          {dateFlags.map((flag) => (
+            <div
+              key={flag}
+              className="grid grid-cols-[118px_1fr] gap-[18px] border-t border-navy/12 py-3.5"
+            >
+              <div>
+                <div className="font-mono text-[10px] font-semibold text-orange">NEEDS YOU</div>
+                <div className="mt-1 text-[13px] font-semibold">Chronology</div>
+              </div>
+              <div className="text-[13px] leading-relaxed text-navy/82">{flag}</div>
+            </div>
+          ))}
+          {sortedClaims.map((claim, i) => (
             <div
               key={`${claim.category}-${i}`}
               className="grid grid-cols-[118px_1fr] gap-[18px] border-t border-navy/12 py-3.5"
@@ -241,13 +265,6 @@ export function ApplicationSection({
         <ResumeViewer candidateId={candidateId} fallbackUrl={fallbackResumeUrl} />
       </div>
 
-      {resumeReview?.dateFlags?.length ? (
-        <ul className="mt-4 space-y-1 text-xs text-orange">
-          {resumeReview.dateFlags.map((flag) => (
-            <li key={flag}>[NEEDS YOU] {flag}</li>
-          ))}
-        </ul>
-      ) : null}
     </section>
   );
 }

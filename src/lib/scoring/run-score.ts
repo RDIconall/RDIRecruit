@@ -148,6 +148,12 @@ export async function scoreCandidate(
   const interviewEvidence = await loadInterviewEvidenceText(candidateId);
   const recruiterComments = await loadRecruiterCommentsText(candidateId);
 
+  const { data: evidenceRows } = await supabase
+    .from("evidence")
+    .select("id")
+    .eq("candidate_id", candidateId);
+  const evidenceThrough = (evidenceRows ?? []).map((row) => row.id as string);
+
   // The two documents the grader reads for this seat: the global "How We
   // Evaluate" method + this job's rubric (weights + prose). Plus learned calibration.
   const [method, rubric, calibration] = await Promise.all([
@@ -191,21 +197,6 @@ export async function scoreCandidate(
     careerContext,
   });
 
-  // Evaluation succeeded — now it is safe to clear the prior read for a replace.
-  // (ro_assessments and narratives are deleted-then-inserted in place further down.)
-  if (options?.replace) {
-    const { data: priorScores } = await supabase
-      .from("scores")
-      .select("id")
-      .eq("candidate_id", candidateId);
-    const scoreIds = (priorScores ?? []).map((s) => s.id as string);
-    if (scoreIds.length) {
-      await supabase.from("score_inputs").delete().in("score_id", scoreIds);
-      await supabase.from("scores").delete().in("id", scoreIds);
-    }
-    await supabase.from("evaluations").delete().eq("candidate_id", candidateId);
-  }
-
   const { data: scoreRow, error: scoreError } = await supabase
     .from("scores")
     .insert({
@@ -216,6 +207,7 @@ export async function scoreCandidate(
       salary_value: evaluation.salaryValue,
       model_version: "claude-sonnet-4-6",
       confidence: evaluation.confidence,
+      evidence_through: evidenceThrough,
     })
     .select("*")
     .single();
@@ -274,9 +266,8 @@ export async function scoreCandidate(
     await supabase.from("narratives").insert({ candidate_id: candidateId, segments: narrative });
   }
 
-  // §2 complement read → overlay.
+  // §2 complement read → overlay (preserve disqualify/withdraw status).
   await upsertOverlay(candidateId, {
-    status: "active",
     complement: evaluation.complement,
     complement_removes: evaluation.complementRemoves,
     salary_vector: evaluation.salaryVector,
@@ -333,6 +324,7 @@ export async function scoreCandidate(
       payload: row.payload,
       model_version: "claude-sonnet-4-6",
       rubric_version: rubric.version,
+      evidence_through: evidenceThrough,
     })),
   );
 

@@ -12,6 +12,16 @@ import {
 import { upsertOverlay } from "@/lib/data/overlay";
 import { enqueueWorkableWrite } from "@/lib/workable/write-queue";
 import { hasSupabase, hasWorkable } from "@/lib/env";
+import { candidatePath, jobBoardPath } from "@/lib/routes";
+
+function revalidatePipeline(jobShortcode: string, candidateId?: string) {
+  revalidatePath("/board");
+  revalidatePath(jobBoardPath(jobShortcode));
+  if (candidateId) {
+    revalidatePath(`/candidates/${candidateId}`);
+    revalidatePath(candidatePath(jobShortcode, candidateId));
+  }
+}
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -65,8 +75,7 @@ export async function advanceCandidate(input: {
     }
   });
 
-  revalidatePath("/board");
-  revalidatePath(`/candidates/${input.candidateId}`);
+  revalidatePipeline(input.jobShortcode, input.candidateId);
   return { ok: true, stage: nextStage };
 }
 
@@ -86,7 +95,7 @@ export async function holdCandidate(input: {
     );
   });
 
-  revalidatePath("/board");
+  revalidatePipeline(input.jobShortcode);
   return { ok: true };
 }
 
@@ -118,7 +127,7 @@ export async function denyCandidate(input: {
     );
   }
 
-  revalidatePath("/board");
+  revalidatePipeline(input.jobShortcode, input.candidateId);
   return { ok: true };
 }
 
@@ -135,8 +144,7 @@ export async function withdrawCandidate(input: {
       await reviewerLabel(),
     );
   }
-  revalidatePath("/board");
-  revalidatePath(`/candidates/${input.candidateId}`);
+  revalidatePipeline(input.jobShortcode, input.candidateId);
   return { ok: true };
 }
 
@@ -152,8 +160,7 @@ export async function restoreCandidate(input: {
       await reviewerLabel(),
     );
   }
-  revalidatePath("/board");
-  revalidatePath(`/candidates/${input.candidateId}`);
+  revalidatePipeline(input.jobShortcode, input.candidateId);
   return { ok: true };
 }
 
@@ -172,7 +179,7 @@ export async function bulkCandidateAction(input: {
       await denyCandidate({ jobShortcode: input.jobShortcode, candidateId });
     }
   }
-  revalidatePath("/board");
+  revalidatePipeline(input.jobShortcode);
   return { ok: true, count: input.candidateIds.length };
 }
 

@@ -10,6 +10,7 @@ import {
   restoreCandidate,
   withdrawCandidate,
 } from "@/app/actions/candidates";
+import { composePath } from "@/lib/routes";
 import { wbCandidate } from "@/lib/workable/links";
 import type { CandidateOverlayRow } from "@/lib/types";
 
@@ -40,7 +41,7 @@ export function CandidateActionBar({
   return (
     <div className="mt-[18px] flex flex-wrap items-center gap-2.5">
       <Link
-        href={`/invite/${candidateId}?job=${jobShortcode}`}
+        href={composePath(jobShortcode, candidateId)}
         className="rounded-full bg-orange px-[18px] py-2 text-[14px] font-semibold text-white"
       >
         Compose invite →
@@ -56,6 +57,16 @@ export function CandidateActionBar({
           <ActionBtn disabled={pending} onClick={() => run(() => denyCandidate({ jobShortcode, candidateId }))}>
             Disqualify
           </ActionBtn>
+          {overlay?.status === "disqualified" ? (
+            <a
+              href={wbCandidate(jobShortcode, candidateId)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-[12px] text-navy/55 hover:text-orange"
+            >
+              Set reason in Workable ↗
+            </a>
+          ) : null}
           <ActionBtn disabled={pending} onClick={() => run(() => withdrawCandidate({ jobShortcode, candidateId }))}>
             Mark withdrawn
           </ActionBtn>
