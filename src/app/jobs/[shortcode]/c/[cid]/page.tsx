@@ -99,6 +99,14 @@ export default async function CandidatePage({
           ask={investPayload?.ask ?? null}
         />
 
+        <CandidateActionBar
+          candidateId={candidate.workable_id}
+          jobShortcode={jobShortcode}
+          candidateName={candidate.name ?? "Candidate"}
+          stage={candidate.stage}
+          overlay={overlay}
+        />
+
         <InvestmentPanel
           score={score}
           overlay={overlay}
@@ -109,14 +117,6 @@ export default async function CandidatePage({
           candidateName={candidate.name}
           active={isActive}
           statusLabel={statusLabel}
-        />
-
-        <CandidateActionBar
-          candidateId={candidate.workable_id}
-          jobShortcode={jobShortcode}
-          candidateName={candidate.name ?? "Candidate"}
-          stage={candidate.stage}
-          overlay={overlay}
         />
 
         <ReadAdjuster

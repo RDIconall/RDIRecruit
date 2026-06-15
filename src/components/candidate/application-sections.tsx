@@ -58,9 +58,9 @@ export function VerificationSection({
         ) : null}
       </div>
       <p className="mt-1 max-w-[760px] text-[12px] leading-relaxed text-navy/55">
-        Application compared against the public professional profile. Job-relevant claims only — protected
-        attributes are never read. This is verification, not scoring: it does not change the fit number, and it
-        flags claims, not the person.
+        Application compared against the public professional profile (LinkedIn). Job-relevant claims only —
+        protected and non-job attributes are never read. This is verification, not scoring: it does not change
+        the fit number, and it flags claims, not the person.
       </p>
 
       {!v || !v.claims?.length ? (

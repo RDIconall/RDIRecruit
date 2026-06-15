@@ -7,35 +7,39 @@ import { advanceCandidate } from "@/app/actions/candidates";
 const TEMPLATES = [
   {
     id: "async-video",
-    label: "Async video — risk probes",
+    label: "Async interview invite",
     subject: "Next step: two short recorded answers",
+    sendLabel: "Move to Async interview & send",
     targetStage: "assessment",
     body: (name: string, insert: string) =>
-      `Hi ${name} — please record two short answers:\n\n${insert}\n\nWe use VideoAsk so you can respond unscripted.`,
+      `Hi ${name} — a short async step before we book a call. Please record answers to:\n\n${insert}\n\nWe use VideoAsk so you can respond unscripted. Consent line auto-appended.`,
   },
   {
     id: "phone-screen",
-    label: "Phone screen invite",
+    label: "Phone screen (Calendly)",
     subject: "RDI Trials — phone screen",
-    targetStage: "phone-screen",
-    body: (name: string) =>
-      `Hi ${name} — we'd like to schedule a 30-minute phone screen. Reply with your availability this week.`,
-  },
-  {
-    id: "calendly",
-    label: "Calendly — founder screen",
-    subject: "Schedule your conversation with RDI",
+    sendLabel: "Move to Phone screen & send",
     targetStage: "phone-screen",
     body: (name: string) =>
       `Hi ${name} — book a slot via the Calendly link in this template when you're ready.`,
   },
   {
     id: "hold",
-    label: "Hold — need more evidence",
+    label: "Hold — keep warm",
     subject: "RDI Trials — holding your application",
+    sendLabel: "Move to Hold",
     targetStage: "applied",
     body: (name: string) =>
       `Hi ${name} — we're pausing your file while we compare against the active pool. No action needed.`,
+  },
+  {
+    id: "reject",
+    label: "Early-stage rejection",
+    subject: "RDI Trials — update on your application",
+    sendLabel: "Move to Rejected & send",
+    targetStage: "applied",
+    body: (name: string) =>
+      `Hi ${name} — thank you for applying. We won't be moving forward at this stage.`,
   },
 ];
 
@@ -235,7 +239,7 @@ export function ComposeClient({
           onClick={sendViaStageMove}
           className="block w-full rounded-full bg-orange py-2.5 text-center text-[14px] font-semibold text-white disabled:opacity-50"
         >
-          {pending ? "Moving stage…" : "Advance & trigger template"}
+          {pending ? "Moving stage…" : template.sendLabel}
         </button>
 
         <a
