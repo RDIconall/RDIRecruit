@@ -5,19 +5,22 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { bulkCandidateAction } from "@/app/actions/candidates";
 import {
+  activeTierCount,
   boardStats,
   categoryLine,
   categorySegments,
   confidenceColor,
+  rubricWeightsLine,
   salaryColor,
   tierKeyFromTotal,
   TIER_META,
   trajectoryMeta,
 } from "@/lib/board/format";
 import { isNewCandidate } from "@/lib/data/board";
+import { candidatePath, jobBoardPath } from "@/lib/routes";
+import type { CategoryKey } from "@/lib/types";
 import { FormattedText } from "@/components/ui/formatted-text";
 import type { JobSummary } from "@/lib/jobs/service";
-import type { PipelineStatus } from "@/lib/status/pipeline-status";
 import type { BoardCandidate } from "@/lib/types";
 
 function isActive(item: BoardCandidate) {
@@ -93,10 +96,7 @@ function JobTitleSwitcher({
   function pick(shortcode: string) {
     setOpen(false);
     if (shortcode === activeShortcode) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("job", shortcode);
-    params.delete("tier");
-    router.push(`/board?${params.toString()}`);
+    router.push(jobBoardPath(shortcode));
   }
 
   return (
@@ -172,93 +172,6 @@ function JobTitleSwitcher({
   );
 }
 
-/**
- * The "where things stand" strip, folded into the page header instead of sitting
- * as a separate band below it: Workable sync freshness, Claude review coverage,
- * and the fit mix — compact and elegant.
- */
-function HeaderStatus({ status }: { status: PipelineStatus }) {
-  const freshMins = status.lastSync
-    ? (Date.now() - new Date(status.lastSync).getTime()) / 60000
-    : Infinity;
-  const dot = freshMins < 15 ? "bg-emerald-500" : freshMins < 120 ? "bg-amber-500" : "bg-navy/30";
-
-  return (
-    <div className="flex flex-wrap items-stretch gap-x-6 gap-y-3 rounded-xl border border-navy/10 bg-white/70 px-4 py-2.5">
-      {/* Workable sync */}
-      <div className="flex flex-col gap-0.5">
-        <span className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-wide text-navy/45">
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${dot}`} />
-          Workable sync
-        </span>
-        <span className="text-[13px] text-navy/80">
-          {status.lastSyncLabel ? `Synced ${status.lastSyncLabel}` : "No sync yet"}
-          <span className="text-navy/45">
-            {" · "}
-            {status.notPulled > 0 ? (
-              <span className="text-amber-600">{status.notPulled} not pulled</span>
-            ) : (
-              <>{status.candidates} cached · all pulled</>
-            )}
-          </span>
-        </span>
-      </div>
-
-      <div className="hidden w-px self-stretch bg-navy/10 sm:block" />
-
-      {/* Claude review */}
-      <div className="flex flex-col gap-0.5">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-navy/45">
-          Claude review {status.reviewed}/{status.candidates}
-        </span>
-        <span className="text-[13px] text-navy/80">
-          {status.pending > 0 ? (
-            <span>{status.pending} to review</span>
-          ) : (
-            <span className="text-emerald-600">all reviewed</span>
-          )}
-          {status.stale > 0 ? (
-            <span className="text-amber-600"> · {status.stale} stale</span>
-          ) : null}
-        </span>
-      </div>
-
-      <div className="hidden w-px self-stretch bg-navy/10 sm:block" />
-
-      {/* Fit mix */}
-      <div className="flex flex-col gap-0.5">
-        <span className="font-mono text-[10px] uppercase tracking-wide text-navy/45">Fit mix</span>
-        <span className="flex items-center gap-2.5 text-[13px]">
-          <FitChip value={status.strong} label="Strong" color="#15803d" hint="≥85" />
-          <FitChip value={status.medium} label="Medium" color="#b45309" hint="55–84" />
-          <FitChip value={status.pass} label="Pass" color="#b91c1c" hint="<55" />
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function FitChip({
-  value,
-  label,
-  color,
-  hint,
-}: {
-  value: number;
-  label: string;
-  color: string;
-  hint: string;
-}) {
-  return (
-    <span className="inline-flex items-baseline gap-1" title={`${label} ${hint}`}>
-      <span className="font-mono font-semibold" style={{ color }}>
-        {value}
-      </span>
-      <span className="text-navy/65">{label}</span>
-    </span>
-  );
-}
-
 export function BoardClient({
   items,
   jobs = [],
@@ -266,8 +179,8 @@ export function BoardClient({
   jobTitle,
   seatStratum = "IIb–IIa",
   boardSummary,
-  status,
   initialTier,
+  rubricWeights,
 }: {
   items: BoardCandidate[];
   jobs?: JobSummary[];
@@ -275,8 +188,8 @@ export function BoardClient({
   jobTitle: string;
   seatStratum?: string;
   boardSummary?: string | null;
-  status?: PipelineStatus | null;
   initialTier?: string;
+  rubricWeights?: Record<CategoryKey, number>;
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -308,7 +221,8 @@ export function BoardClient({
     params.set("job", jobShortcode);
     if (next === "all") params.delete("tier");
     else params.set("tier", next);
-    router.replace(`/board?${params.toString()}`);
+    const path = next === "all" ? jobBoardPath(jobShortcode) : jobBoardPath(jobShortcode, next);
+    router.replace(path);
   }
 
   function toggle(id: string) {
@@ -331,24 +245,38 @@ export function BoardClient({
   const chips: Array<{ key: TierFilter; label: string; count: number }> = [
     { key: "all", label: "All", count: stats.active },
     { key: "strong", label: "Strong", count: stats.strong },
-    { key: "viable", label: "Consider", count: ranked.filter((i) => tierKeyFromTotal(i.score?.total) === "viable").length },
-    { key: "hold", label: "Hold", count: ranked.filter((i) => tierKeyFromTotal(i.score?.total) === "hold").length },
-    { key: "low", label: "Deny", count: ranked.filter((i) => tierKeyFromTotal(i.score?.total) === "low").length },
+    { key: "viable", label: "Consider", count: activeTierCount(items, "viable") },
+    { key: "hold", label: "Hold", count: activeTierCount(items, "hold") },
+    { key: "low", label: "Deny", count: activeTierCount(items, "low") },
     { key: "new", label: "New", count: stats.new },
   ];
 
   return (
     <div className="mx-auto max-w-[1320px] px-6 pb-20 pt-8">
-      <div className="flex flex-wrap items-start justify-between gap-x-10 gap-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-5">
         <div className="min-w-0">
           <JobTitleSwitcher jobs={jobs} activeShortcode={jobShortcode} title={jobTitle} />
-          <p className="mt-2 flex flex-wrap items-center gap-3.5 font-mono text-xs text-navy/55">
+          <p className="mt-2 flex flex-wrap items-center gap-3.5 font-mono text-xs text-navy/70">
+            <span>{jobShortcode}</span>
+            <span className="text-navy/25">·</span>
             <span>{stats.active} live</span>
+            <span className="text-navy/25">·</span>
+            <span className="text-emerald-700">{stats.strong} strong</span>
+            <span className="text-navy/25">·</span>
+            <span className="text-orange">{stats.new} new</span>
+            {stats.out > 0 ? (
+              <>
+                <span className="text-navy/25">·</span>
+                <span className="text-navy/50">{stats.out} out</span>
+              </>
+            ) : null}
             <span className="text-navy/25">·</span>
             <span>seat {seatStratum}</span>
           </p>
         </div>
-        {status?.configured ? <HeaderStatus status={status} /> : null}
+        {rubricWeights ? (
+          <p className="text-right text-xs text-navy/55">{rubricWeightsLine(rubricWeights)}</p>
+        ) : null}
       </div>
 
       <div className="mt-6 border-l-2 border-navy pl-4">
@@ -497,7 +425,7 @@ function BoardRow({
 
   return (
     <Link
-      href={`/candidates/${id}?job=${jobShortcode}`}
+      href={candidatePath(jobShortcode, id)}
       className="grid grid-cols-[26px_28px_minmax(190px,1.4fr)_80px_132px_106px_112px_116px_56px] items-center gap-0 border-b border-navy/10 px-2 py-3 hover:bg-white"
       style={{
         background: selected ? "rgba(231,68,36,0.05)" : "transparent",
@@ -562,11 +490,13 @@ function EvidenceLayout({
         const traj = trajectoryMeta(item.ro?.trajectory ?? undefined);
         const headline = (item.candidate.raw as { headline?: string } | null)?.headline ?? null;
         const roleLine = [headline, item.candidate.location].filter(Boolean).join(" · ");
+        const inactive = inactiveLabel(item);
         return (
           <Link
             key={id}
-            href={`/candidates/${id}?job=${jobShortcode}`}
+            href={candidatePath(jobShortcode, id)}
             className="grid grid-cols-[24px_96px_1fr_220px] items-center gap-[18px] border-b border-navy/10 px-2 py-[18px] hover:bg-white"
+            style={{ opacity: inactive ? 0.45 : 1 }}
           >
             <div onClick={(e) => e.preventDefault()}>
               <input
@@ -587,7 +517,9 @@ function EvidenceLayout({
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[15px] font-semibold">{item.candidate.name}</span>
+                <span className={`text-[15px] font-semibold ${inactive ? "line-through" : ""}`}>
+                  {item.candidate.name}
+                </span>
                 <span className="text-xs text-navy/55">{roleLine || item.candidate.location}</span>
               </div>
               {item.why ? (
@@ -615,7 +547,7 @@ function EvidenceLayout({
               <div style={{ color: confidenceColor(item.score?.confidence) }}>
                 {item.score?.confidence ?? "—"}
               </div>
-              <div>{item.candidate.stage}</div>
+              <div>{inactive ?? item.candidate.stage}</div>
               <div className="font-mono text-[12px] text-navy/45">
                 {item.sources ?? 0} source{(item.sources ?? 0) === 1 ? "" : "s"} · {ownerLabel(item.assignee)}
               </div>
@@ -657,13 +589,21 @@ function TiersLayout({ items, jobShortcode }: { items: BoardCandidate[]; jobShor
               <span className="flex-1" />
               <span className="text-[12px] text-navy/50">{group.meta.note}</span>
             </div>
-            {group.items.map((item) => (
+            {group.items.map((item) => {
+              const inactive = inactiveLabel(item);
+              return (
               <Link
                 key={item.candidate.workable_id}
-                href={`/candidates/${item.candidate.workable_id}?job=${jobShortcode}`}
+                href={candidatePath(jobShortcode, item.candidate.workable_id)}
                 className="grid grid-cols-[1fr_58px_160px_130px_116px] items-center gap-3.5 border-b border-navy/8 px-2 py-2.5 hover:bg-white"
+                style={{ opacity: inactive ? 0.45 : 1 }}
               >
-                <div className="min-w-0 truncate text-[14px] font-semibold">{item.candidate.name}</div>
+                <div className="min-w-0 truncate">
+                  <span className={`text-[14px] font-semibold ${inactive ? "line-through" : ""}`}>
+                    {item.candidate.name}
+                  </span>
+                  <span className="ml-2 text-[11px] text-navy/55">{item.candidate.location}</span>
+                </div>
                 <div className="font-mono text-lg font-medium">{item.score?.total ?? "—"}</div>
                 <div className="text-xs">
                   <span className="font-mono">{item.ro?.current_capability ?? "—"}</span>{" "}
@@ -675,9 +615,10 @@ function TiersLayout({ items, jobShortcode }: { items: BoardCandidate[]; jobShor
                 <div className="text-xs" style={{ color: salaryColor(item.score?.salary_value) }}>
                   {item.score?.salary_value ?? "unstated"}
                 </div>
-                <div className="text-xs text-navy/82">{item.candidate.stage}</div>
+                <div className="text-xs text-navy/82">{inactive ?? item.candidate.stage}</div>
               </Link>
-            ))}
+              );
+            })}
           </div>
         ) : null,
       )}

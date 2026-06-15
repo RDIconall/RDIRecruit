@@ -101,6 +101,17 @@ export function categoryLine(scores: CategoryScores | undefined): string {
     .join(" · ");
 }
 
+/** Rubric weight line for the board header (matches mock right column). */
+export function rubricWeightsLine(weights: Record<CategoryKey, number>): string {
+  return (Object.keys(weights) as CategoryKey[])
+    .map((key) => `${CATEGORY_LABELS[key]} ${weights[key]}`)
+    .join(" · ");
+}
+
+export function activeTierCount(items: BoardCandidate[], tier: TierKey): number {
+  return items.filter((i) => candidateStatus(i) === "active" && tierKeyFromTotal(i.score?.total) === tier).length;
+}
+
 function candidateStatus(item: BoardCandidate): "active" | "disqualified" | "withdrawn" {
   if (item.overlay?.status === "withdrawn") return "withdrawn";
   if (item.overlay?.status === "disqualified" || item.candidate.disqualified) return "disqualified";

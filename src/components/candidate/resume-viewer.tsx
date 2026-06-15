@@ -12,6 +12,7 @@ export function ResumeViewer({
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [mime, setMime] = useState<string>("application/pdf");
   const [error, setError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(100);
 
   useEffect(() => {
     let cancelled = false;
@@ -45,25 +46,61 @@ export function ResumeViewer({
 
   return (
     <div className="mt-8">
-      <div className="flex items-center justify-between rounded-t-md bg-navy px-4 py-2 text-cream">
+      <div className="flex items-center justify-between gap-3 rounded-t-md bg-navy px-4 py-2 text-cream">
         <span className="text-xs font-medium">Résumé</span>
-        {displayUrl ? (
-          <a
-            href={displayUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-xs text-cream/80 hover:text-orange"
-          >
-            Download ↗
-          </a>
-        ) : null}
+        <div className="flex items-center gap-3">
+          {isPdf ? (
+            <>
+              <span className="font-mono text-[10px] text-cream/55">Page 1</span>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setZoom((z) => Math.max(50, z - 10))}
+                  className="rounded px-1.5 py-0.5 text-xs text-cream/80 hover:bg-cream/10"
+                  aria-label="Zoom out"
+                >
+                  −
+                </button>
+                <span className="font-mono text-[10px] text-cream/70">{zoom}%</span>
+                <button
+                  type="button"
+                  onClick={() => setZoom((z) => Math.min(150, z + 10))}
+                  className="rounded px-1.5 py-0.5 text-xs text-cream/80 hover:bg-cream/10"
+                  aria-label="Zoom in"
+                >
+                  +
+                </button>
+              </div>
+            </>
+          ) : null}
+          {displayUrl ? (
+            <a
+              href={displayUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs text-cream/80 hover:text-orange"
+            >
+              Download ↗
+            </a>
+          ) : null}
+        </div>
       </div>
       {displayUrl && isPdf ? (
-        <iframe
-          title="Résumé"
-          src={displayUrl}
-          className="h-[480px] w-full rounded-b-md border border-t-0 border-navy/12 bg-white"
-        />
+        <div
+          className="overflow-auto rounded-b-md border border-t-0 border-navy/12 bg-white"
+          style={{ height: 480 }}
+        >
+          <iframe
+            title="Résumé"
+            src={displayUrl}
+            className="h-full w-full origin-top-left border-0"
+            style={{
+              transform: `scale(${zoom / 100})`,
+              width: `${10000 / zoom}%`,
+              height: `${10000 / zoom}%`,
+            }}
+          />
+        </div>
       ) : displayUrl ? (
         <div className="rounded-b-md border border-t-0 border-navy/12 bg-white p-4 text-sm text-navy/70">
           <p>DOCX stored in Supabase — open download to view the original file.</p>

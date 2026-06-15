@@ -1,5 +1,8 @@
 import { redirect } from "next/navigation";
+import { getPublishedJobs } from "@/lib/jobs/service";
+import { jobBoardPath } from "@/lib/routes";
 
-export default function HomePage() {
-  redirect("/board");
+export default async function HomePage() {
+  const jobs = await getPublishedJobs();
+  redirect(jobBoardPath(jobs[0]?.shortcode ?? "EA-001"));
 }

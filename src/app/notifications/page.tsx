@@ -2,6 +2,7 @@ import Link from "next/link";
 import { AppHeader } from "@/components/layout/app-header";
 import { listNotifications, markNotificationsRead } from "@/lib/notifications/service";
 import { getPublishedJobs, resolveActiveJobShortcode } from "@/lib/jobs/service";
+import { candidatePath } from "@/lib/routes";
 
 export default async function NotificationsPage({
   searchParams,
@@ -35,7 +36,7 @@ export default async function NotificationsPage({
                     <p className="mt-1 text-sm text-navy">{payload.text ?? "Notification"}</p>
                     {alert.candidate_id && job ? (
                       <Link
-                        href={`/candidates/${alert.candidate_id}?job=${job}`}
+                        href={candidatePath(job, alert.candidate_id)}
                         className="mt-2 inline-block text-xs text-orange hover:underline"
                       >
                         View candidate →

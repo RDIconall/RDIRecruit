@@ -82,7 +82,6 @@ export function InvestmentPanel({
   poolStats,
   salaryHint,
   candidateName,
-  summary,
   active = true,
   statusLabel,
 }: {
@@ -93,7 +92,6 @@ export function InvestmentPanel({
   poolStats?: { active: number; owners: number };
   salaryHint?: string | null;
   candidateName?: string | null;
-  summary?: string | null;
   active?: boolean;
   statusLabel?: string;
 }) {
@@ -118,12 +116,6 @@ export function InvestmentPanel({
           text={invest.text}
           className="mt-2 text-[14px] leading-relaxed text-navy/82"
         />
-        {summary ? (
-          <FormattedText
-            text={summary}
-            className="mt-2.5 max-w-[640px] text-[14px] leading-relaxed text-navy/70"
-          />
-        ) : null}
         {poolLine ? (
           <p className="mt-3 font-mono text-[12px] text-navy/50">Pool · {poolLine}</p>
         ) : null}
