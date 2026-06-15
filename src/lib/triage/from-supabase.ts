@@ -20,9 +20,14 @@ import type {
   VerificationPayload,
 } from "../types";
 import { wbCandidate } from "../workable/links";
+import { reviewerSignalFor } from "./reviewer";
 import type {
   AnswerRow,
   Candidate,
+  CareerProgression,
+  CareerRead,
+  CareerStep,
+  CorrectionEntry,
   CoverLine,
   CutGroup,
   Decision,
@@ -31,6 +36,9 @@ import type {
   Logistics,
   LogisticsSignal,
   RedFlag,
+  ResumeRole,
+  ResumeView,
+  ReviewerSignal,
   TimelineRow,
   TimelineSignal,
 } from "./types";
@@ -43,9 +51,22 @@ export interface CandidateEvaluations {
   answerGrades: AnswerGradePayload[];
 }
 
+// One résumé experience entry as stored in applications.parsed_experience.
+export interface ParsedExperienceEntry {
+  title?: string | null;
+  company?: string | null;
+  start?: string | null;
+  end?: string | null;
+  current?: boolean | null;
+  summary?: string | null;
+}
+
 export interface ApplicationLite {
   answers: Record<string, unknown> | null;
   cover_letter: string | null;
+  parsed_experience?: ParsedExperienceEntry[] | null;
+  resume_text?: string | null;
+  resume_url?: string | null;
 }
 
 export interface MapInput {
@@ -58,6 +79,8 @@ export interface MapInput {
   evals: CandidateEvaluations;
   interviewEvidence: EvidenceRow[];
   read: DecisionRead | null;
+  /** Persisted human corrections (with optional reviewer identity) — drives rev/revNote (#7). */
+  corrections?: CorrectionEntry[];
   rank: number;
   jobLocation: string;
   jobShortcode: string;
@@ -372,13 +395,19 @@ function redFlagsFrom(input: MapInput): RedFlag[] {
 function cutFieldsFor(input: MapInput): Pick<Candidate, "cutGroup" | "cutReason" | "cite" | "cutMatters"> {
   const dig = input.evals.dig;
   const integrity = (dig?.integrity ?? "").toLowerCase();
+  const materialIntegrity = integrity.startsWith("material");
+  const discrepancy = hasDiscrepancy(input.evals.verification);
   const gapCount = input.narrative.filter((s) => s.type === "gap").length;
   const roleCount = input.narrative.filter((s) => s.type === "role").length;
   const hasCover = Boolean(input.application?.cover_letter?.trim());
   const answerCount = input.evals.answerGrades.length;
+  const reviewerHardNo = latestReviewerKind(input.corrections) === "lara";
 
+  // #1: a human/overlay disqualification (or a reviewer "hard no") that is NOT a
+  // material-integrity / contradiction cut lands in the "human signal" group.
   let cutGroup: CutGroup;
-  if (integrity.startsWith("material") || hasDiscrepancy(input.evals.verification)) cutGroup = "evidence";
+  if (materialIntegrity || discrepancy) cutGroup = "evidence";
+  else if (humanCut(input) || reviewerHardNo) cutGroup = "human";
   else if (gapCount >= 2 || (roleCount >= 4 && gapCount >= 1)) cutGroup = "pattern";
   else if (!hasCover && answerCount === 0) cutGroup = "care";
   else cutGroup = "mismatch";
@@ -393,9 +422,181 @@ function cutFieldsFor(input: MapInput): Pick<Candidate, "cutGroup" | "cutReason"
   return {
     cutGroup,
     cutReason: truncate(cutReason, 200),
-    cite: "Materials",
+    cite: citeFor(input, { cutGroup, materialIntegrity, discrepancy, hasCover, answerCount }),
     cutMatters: dig?.integrityNote ? truncate(dig.integrityNote, 200) : truncate(input.evals.dig?.careerRead ?? "Does not remove the burden this seat exists to cover.", 200),
   };
+}
+
+/**
+ * Where the cut evidence actually comes from, so the cut row / candidate page can
+ * cite a real source rather than a static "Materials" label (#2).
+ */
+function citeFor(
+  input: MapInput,
+  ctx: { cutGroup: CutGroup; materialIntegrity: boolean; discrepancy: boolean; hasCover: boolean; answerCount: number },
+): string {
+  if (ctx.discrepancy) return "Verification";
+  if (ctx.materialIntegrity) return "Dig-in";
+  if (ctx.cutGroup === "human") return input.overlay?.status_reason ? "Overlay" : "Reviewer";
+  if (ctx.cutGroup === "pattern") return "Timeline";
+  if (ctx.cutGroup === "care") return !ctx.hasCover ? "Cover letter" : "Application";
+  if (input.evals.dig?.careerRead) return "Dig-in";
+  return "Materials";
+}
+
+function yearLabel(date: string | null | undefined): string | null {
+  if (!date) return null;
+  const d = new Date(date);
+  if (Number.isNaN(d.getTime())) {
+    const m = String(date).match(/\d{4}/);
+    return m ? m[0] : null;
+  }
+  return d.toLocaleDateString("en-US", { year: "numeric", month: "short" });
+}
+
+function resumePeriod(entry: ParsedExperienceEntry): string {
+  const start = yearLabel(entry.start);
+  const end = entry.current ? "Present" : yearLabel(entry.end);
+  if (start && end) return `${start} – ${end}`;
+  if (start) return `${start} – Present`;
+  if (end) return end;
+  return "—";
+}
+
+function bulletsFromSummary(summary: string | null | undefined): string[] {
+  if (!summary) return [];
+  return summary
+    .split(/\r?\n/)
+    .map((line) => line.replace(/^\s*[*\-•·]\s*/, "").trim())
+    .filter(Boolean);
+}
+
+function resumeFrom(application: ApplicationLite | null): ResumeView {
+  const entries = (application?.parsed_experience ?? []).filter(
+    (e): e is ParsedExperienceEntry => Boolean(e && (e.title || e.company || e.summary)),
+  );
+  const roles: ResumeRole[] = entries.map((e) => ({
+    title: (e.title ?? "").trim() || "Role",
+    company: (e.company ?? "").trim() || "—",
+    period: resumePeriod(e),
+    current: Boolean(e.current),
+    bullets: bulletsFromSummary(e.summary),
+  }));
+  const fullText = application?.resume_text?.trim() || undefined;
+  const fileUrl = application?.resume_url?.trim() || undefined;
+  return {
+    hasResume: roles.length > 0 || Boolean(fullText),
+    roles,
+    fullText,
+    fileUrl,
+  };
+}
+
+const CONFIDENCE_NOTE: Record<string, string> = {
+  confirmed: "Read confirmed from the candidate's own reasoning.",
+  downgraded: "Résumé over-claimed — read downgraded against tenure and roles.",
+  "text-unreliable": "Résumé text reads as unreliable — lean on tenure and references.",
+};
+
+// Strongest scope verbs evidencing a role's stratum (highest tier present).
+function strongestVerbs(verbs: RoAssessmentRow["per_role"][number]["verbs"]): string[] {
+  const tier = verbs.III.length ? verbs.III : verbs.II.length ? verbs.II : verbs.I;
+  return tier.slice(0, 4);
+}
+
+function careerProgressionFrom(ro: RoAssessmentRow | null): CareerProgression | undefined {
+  if (!ro) return undefined;
+  const steps: CareerStep[] = (ro.per_role ?? []).map((r) => ({
+    role: (r.role ?? "").trim() || "Role",
+    company: (r.company ?? "").trim() || "—",
+    tenure: r.years && r.years > 0 ? `${r.years.toFixed(1)} yrs` : "—",
+    stratum: r.stratum || "—",
+    stratumRange: r.stratum_range || r.stratum || "—",
+    verbs: strongestVerbs(r.verbs ?? { I: [], II: [], III: [] }),
+  }));
+  if (!steps.length) return undefined;
+  return {
+    hasData: true,
+    steps,
+    seatStratum: ro.seat_stratum || "—",
+    currentCapability: ro.current_capability || ro.seat_stratum || "—",
+    trajectory: ro.trajectory ? TRAJECTORY_LABEL[ro.trajectory] ?? ro.trajectory : "—",
+    confidenceNote: ro.text_confidence ? CONFIDENCE_NOTE[ro.text_confidence] ?? "" : "",
+    basis: ro.basis ?? "",
+  };
+}
+
+/** The reviewer kind of the most recent correction that carried a reviewer (#7). */
+function latestReviewerKind(corrections: CorrectionEntry[] | undefined): CorrectionEntry["reviewerKind"] | undefined {
+  if (!corrections?.length) return undefined;
+  for (let i = corrections.length - 1; i >= 0; i--) {
+    if (corrections[i].reviewerKind) return corrections[i].reviewerKind;
+  }
+  return undefined;
+}
+
+/**
+ * Derive the reviewer-signal lens (rev/revNote) from the latest human correction
+ * that named a reviewer (#7). A persisted Claude read.rev wins when present.
+ */
+function reviewerFrom(
+  input: MapInput,
+  decision: Decision,
+): { rev: ReviewerSignal; revNote: string } | null {
+  if (input.read?.rev) {
+    return { rev: input.read.rev, revNote: input.read.revNote || input.read.why || "" };
+  }
+  const corrections = input.corrections ?? [];
+  for (let i = corrections.length - 1; i >= 0; i--) {
+    const c = corrections[i];
+    if (!c.reviewerKind) continue;
+    const who = c.reviewerLabel || c.reviewerKind;
+    return {
+      rev: reviewerSignalFor(c.reviewerKind, decision),
+      revNote: truncate(`${who}: ${c.text}`, 200),
+    };
+  }
+  return null;
+}
+
+/**
+ * The "Career read" prose block under the deep-analysis compare strip (#6).
+ * Prefers a Claude-filled read.careerRead; otherwise maps from dig_in. Returns
+ * undefined when there is no dig_in (degrade gracefully — block is hidden).
+ */
+function careerReadFrom(input: MapInput): CareerRead | undefined {
+  if (input.read?.careerRead) return input.read.careerRead;
+  const dig = input.evals.dig;
+  if (!dig) return undefined;
+  const integrity = (dig.integrity ?? "").toLowerCase();
+  const riskText =
+    integrity.startsWith("material") && dig.integrityNote
+      ? dig.integrityNote
+      : dig.resolve?.[0] || input.evals.verification?.read || "";
+  const positive =
+    input.evals.invest?.vector?.trim() ||
+    input.evals.roleReads[input.evals.roleReads.length - 1]?.read?.trim() ||
+    dig.mix?.trim() ||
+    "";
+  const path = dig.careerRead?.trim() || firstSentence(input.evals.invest?.summary);
+  if (!path && !positive && !riskText) return undefined;
+  return {
+    path: truncate(path || "Career path read not yet derived.", 320),
+    positive: truncate(positive || "No standout positive inference on file yet.", 280),
+    risk: truncate(riskText || "No decisive risk surfaced from the materials.", 280),
+    implication: implicationFor(input.read?.decision ?? deriveDecision(input)),
+  };
+}
+
+function implicationFor(decision: Decision): string {
+  return {
+    interview: "Clears the bar — screen this one first.",
+    short: "Worth a short screen to test the one open caveat.",
+    verify: "Promising, but verify the key claim before booking a slot.",
+    hold: "Competent but not differentiating — hold behind stronger files.",
+    cut: "Does not clear the bar for this seat — cut on the materials.",
+    blocked: "Materials incomplete — re-sync before any read.",
+  }[decision];
 }
 
 export function mapCandidate(input: MapInput): Candidate {
@@ -473,6 +674,9 @@ export function mapCandidate(input: MapInput): Candidate {
     logistics: logisticsFrom(input, location),
     fireflies: firefliesFrom(input.interviewEvidence),
     redFlags: baseRedFlags,
+    resume: resumeFrom(input.application),
+    careerProgression: careerProgressionFrom(ro),
+    careerRead: careerReadFrom(input),
     workableUrl: workableUrlFor(input.candidate, input.jobShortcode),
   };
 
@@ -484,7 +688,12 @@ export function mapCandidate(input: MapInput): Candidate {
     candidate.reanalysis = input.read.reanalysis;
   }
 
-  if (input.read?.timelineNote) {
+  // #7: surface the human reviewer's signal where a named correction exists.
+  const reviewer = reviewerFrom(input, decision);
+  if (reviewer) {
+    candidate.rev = reviewer.rev;
+    candidate.revNote = reviewer.revNote;
+  } else if (input.read?.timelineNote) {
     candidate.revNote = `Re-analyzed by Claude. ${input.read.timelineNote}`;
   }
 

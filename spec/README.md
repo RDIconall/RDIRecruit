@@ -1,24 +1,32 @@
-# RDIRecruit — start here (for Cursor)
+# RDIRecruit — spec (canonical: candidate triage)
 
-We are building **our review/intelligence UI on top of Workable**. Workable stays the
-system of record; our DB caches everything so Claude is called **once per piece of
-evidence, never per page view**; and anywhere a feature is painful to build natively we
-**open Workable in a new tab** instead.
+This folder holds the **canonical specification for the candidate-triage decision tool** —
+the product RDIRecruit actually is today. RDIRecruit protects interview time: it cuts weak
+candidates first, ranks who to interview, and builds a deep read only for the ones worth it.
+There are **no numeric scores and no tiers** — only the decision vocabulary
+_Interview first · Short screen · Verify first · Hold · Cut · Review blocked_.
 
 **Read in this order:**
-1. `RDIRecruit_Build_Spec.md` — this delta spec: the caching contract, the
-   Workable-first / link-out rule, the screens as built, the data model additions.
-2. `RDIRecruit.dc.html` — the **working mock** (in this folder). It is the pixel +
-   interaction contract: copy its inline styles, layout, copy, and behaviour. Open it in a
-   browser. (`Fillmore-Resume.docx` and `logo-mark.svg` are its assets.)
-3. `../uploads/RDI_Hiring_Layer_Build_Spec (1).md` — the full Workable sync layer,
-   base data model, §9a source-capture, comms loop. Don't re-derive it; extend it.
-4. `../uploads/RDI_How_We_Evaluate.md` — the evaluation philosophy the reads encode
-   (gap-not-person, salary-as-vector, technician vs owner complement, gates vs scores).
 
-**The two rules that shape every decision** (full detail in §0 of the spec):
-- **Cache-first:** Claude only at evidence ingest → persist features + scores + reads →
-  every render/re-rank/rubric-tweak reads from Postgres. Pool/investment math is plain
-  app code, never a model call.
-- **Workable-first:** prefer Workable's native capability; deep-link out (`target="_blank"`)
-  wherever building it ourselves isn't worth it.
+1. **`HANDOFF.md`** — the product brief: screens (Pool cut-first + Candidate page),
+   decision vocabulary, what is mocked vs wired to real services, brand tokens.
+2. **`RDIRecruit (standalone).html`** — open in any browser. Fully offline, no build.
+   The source of truth for layout, copy, colors, and interaction behaviour.
+3. **`RDIRecruit.dc.html`** — the same triage mock with inline styles + one logic class
+   (`class Component`). Read it for exact pixel/copy/behaviour values; the live React
+   screens (`src/components/triage/`) are ported from this file.
+
+`logo-mark.svg` is the brand mark used by the app (`public/logo-mark.svg`).
+
+## Canonical vs legacy
+
+- **Canonical (this triage spec):** `HANDOFF.md`, `RDIRecruit (standalone).html`,
+  `RDIRecruit.dc.html`. These describe the shipping triage product and are the layout +
+  behaviour contract for the live app.
+- **Legacy (superseded):** `RDIRecruit_Build_Spec.md` and `Fillmore-Resume.docx` describe
+  the earlier **scoring-centric board** (fit numbers, tiers, ranked ledger). That direction
+  was explicitly pivoted away from (see `AGENTS.md`): the product now speaks decision
+  vocabulary only. The scoring tables are retained solely as *internal* inputs to
+  `deriveDecision()` and never reach the screen. Where the two disagree, the triage spec wins.
+
+See `docs/RDIRecruit-build-notes.md` for how the live Supabase-backed build maps to this spec.

@@ -1,7 +1,9 @@
 # RDIRecruit — Build Notes (real-data triage + Claude working file)
 
 **Audience:** external reviewers (Claude design + ChatGPT) checking the build against the handoff spec.
-**Scope of this document:** what was actually built when the mocked triage prototype was turned into a real, Supabase-backed app with a per-candidate markdown working file that Claude uses to re-derive decisions.
+**Scope of this document:** what was actually built when the mocked triage prototype was turned into a real, Supabase-backed app with a per-candidate markdown working file that Claude uses to re-derive decisions. **§7 covers the product-readiness pass** (reviewer identity, cut-row evidence, deep affordances everywhere, collapsible sections, responsive layout, career-read prose, the fifth cut group) and the canonical-spec replacement.
+
+**Canonical spec:** `spec/` now holds the **true triage handoff** — `spec/HANDOFF.md`, `spec/RDIRecruit (standalone).html`, and `spec/RDIRecruit.dc.html` (the ~108KB triage source with the Cut list, decision vocabulary, `buildMd`, and candidate page). The earlier ~82KB `spec/RDIRecruit.dc.html` was a stale legacy scoring mock and has been overwritten; `spec/README.md` marks the triage files canonical and the old `RDIRecruit_Build_Spec.md` legacy. This makes external review accurate.
 
 **Stack:** Next.js 16 (App Router) on Vercel · React 19 · TypeScript · Clerk (auth) · Supabase (Postgres) · Anthropic SDK (`claude-sonnet-4-6`, server-side only).
 
@@ -280,7 +282,7 @@ After a recalc, if `read.decision !== priorDecision`, the action attaches `reana
 
 | Gap | Behaviour |
 |---|---|
-| **Reviewer signal** (who/how a human rated) | No reviewer-rating source in the DB. `rev`/`revNote` default to "No human review yet"; the human-signal *reviewer* on re-analysis is the trigger label (Human correction / Interview transcript / Deep analysis), not a person record. |
+| **Reviewer signal** (who/how a human rated) | **Now wired (§7.1).** Corrections carry reviewer identity `{ reviewerId, reviewerLabel, reviewerKind }` from Clerk (or an explicit picker). `rev`/`revNote` are derived from the latest named correction; the re-analysis reviewer is the real person, not the trigger label. Still degrades to "No human review yet" until a named correction exists. |
 | **Commute distance** | `candidates.location` exists but no geocoded distance. `logistics.distance = "—"`; likelihood (High/Medium/Low) is inferred from location text against the Van Nuys, CA base; the read asks the human to confirm the commute. |
 | **Interview summaries** | No structured interview-summary table. `interview` is undefined → the `## Interview summary` section is omitted from the `.md` and the screen block is hidden until a transcript/summary exists. |
 | **~17 missing narratives** | Candidates without a `narratives` row get a single placeholder timeline row ("Materials not parsed — re-sync from Workable") and, combined with a missing score/invest read, fall to `blocked` rather than fabricating a chronology. |
@@ -304,7 +306,14 @@ Nothing is fabricated; every gap renders an explicit "—" / "confirm" / "re-syn
 | **Claude inputs = stored .md + materials + latest corrections/transcript/replies** | Met (fixed this pass) | `recalc.ts` now injects the stored `.md` plus all materials/human signals. |
 | **Claude output contract = decision + why + risk + next, no numbers** | Met | §4.4–4.5. |
 | **Re-analysis when a human note changes the decision (before→after, human-signal reviewer)** | Met (wired this pass) | Action builds `reanalysis` on decision change; rendered in the candidate screen; persisted in `read`. |
-| **Deep analysis gating** (auto for Interview/Short/Verify; behind "Run deep analysis anyway" for Cut/Hold/Blocked) | Met | `aShowDeep = ["interview","short","verify"].includes(decision) || ws.deep[id]`. |
+| **Deep analysis gating** (auto for Interview/Short/Verify; behind "Run deep analysis anyway" for Cut/Hold/Blocked) | Met | `aShowDeep = ["interview","short","verify"].includes(decision) || ws.deep[id]`. Only the deep block is gated; cover/answers/logistics/interview/working-file stay visible (now collapsible — §7.4). |
+| **Reviewer identity on corrections** (Conall / Lara / Other) | Met (§7.1) | Picker defaults to Clerk mapping; persisted in `workspace.corrections[]`; reviewer shown per log entry + drives `rev`/re-analysis reviewer. |
+| **Cut-row evidence** (cite / why-it-matters / next) | Met (§7.2) | Expandable detail under each cut row + a cut-evidence block on the candidate page; `cite` now reflects the real source. |
+| **Deep affordance on every actionable row** | Met (§7.3) | `?` on Cut rows (existing) plus Hold + Review-blocked rows in the interview table; candidate page button unchanged. |
+| **Collapsible lower sections** | Met (§7.4) | Résumé / Cover / Answers / Logistics / Interview / Working-file headers toggle; default open (no spec regression). |
+| **Responsive (stacks < 768px)** | Met (§7.5) | `useMediaQuery`; source-reader grids + compare strip + working-file stack to one column; wide RO tables scroll; top bar degrades. |
+| **Career read prose** (path / positive / risk / implication) | Met, data-gated (§7.6) | Block under the compare strip; mapped from `dig_in` or filled by Claude; hidden when no `dig_in`. |
+| **Fifth cut group — Human signal failures** | Met, data-gated (§7.7) | `"human"` group; populated by overlay/human cuts without a material-integrity gate; hidden until populated. |
 | **Open in Workable deeplinks** (real ids) | Met | `workableUrl` from `raw.profile_url` else `wbCandidate(shortcode, id)`. |
 | **Clerk-gated, server-side Claude, key never client-side** | Met | `requireAuth()` in every action; recalc server-only. |
 | **Cache-first (Claude at edit/ingest, not per render)** | Met | Page is a Server Component reading Postgres; recalc only on human action. |
@@ -314,7 +323,53 @@ Nothing is fabricated; every gap renders an explicit "—" / "confirm" / "re-syn
 
 ### Intentional differences from the older `RDIRecruit_Build_Spec.md`
 
-That spec is the **scoring-centric board** (fit numbers, tiers, ranked ledger). The current product is the **candidate-triage decision tool** — the explicit product pivot (see `AGENTS.md`): **no scores, no tiers, decision vocabulary only**. Where the two disagree, the triage direction wins; the scoring tables are retained but used solely as internal inputs to `deriveDecision`. The legacy mock (`spec/RDIRecruit.dc.html`) is the older board UI and is not the layout target for the triage screens.
+That spec is the **scoring-centric board** (fit numbers, tiers, ranked ledger). The current product is the **candidate-triage decision tool** — the explicit product pivot (see `AGENTS.md`): **no scores, no tiers, decision vocabulary only**. Where the two disagree, the triage direction wins; the scoring tables are retained but used solely as internal inputs to `deriveDecision`. The legacy `RDIRecruit_Build_Spec.md` is the older board spec and is not the layout target for the triage screens. (The stale `spec/RDIRecruit.dc.html` board mock has been replaced this pass with the true triage handoff — see the intro.)
+
+---
+
+## 7. Product-readiness pass
+
+A hardening pass that closes the gap between the working build and the handoff spec. **All changes keep the hard rule: decision vocabulary only, no numeric scores/tiers.** Files: `types.ts`, `reviewer.ts` (new), `from-supabase.ts`, `recalc.ts`, `working-file.ts`, `actions/triage.ts`, `use-workspace.ts`, `use-media-query.ts` (new), `context.tsx`, `triage-app.tsx`, `page.tsx`, `pool-screen.tsx`, `candidate-screen.tsx`.
+
+### 7.1 Reviewer identity (durable data model)
+
+- The correction entry grew from `{ ts, text }` to **`CorrectionEntry { ts, text, reviewerId?, reviewerLabel?, reviewerKind? }`** where `reviewerKind ∈ conall | lara | other`. It is persisted in `candidate_working_files.workspace.corrections` (**jsonb — no migration needed**; old `{ ts, text }` entries remain valid because the new fields are optional).
+- `actions/triage.ts` resolves the acting reviewer from Clerk (`reviewerIdentity()` → name/email → `reviewerKindFrom`), and `saveCorrection` honours an explicit **reviewer picker** (Conall / Lara / Other) that defaults to the Clerk-user mapping. The picker lives in the corrections UI; each correction-log entry now shows the reviewer.
+- Reviewer identity is passed into the Claude recalc prompt (`LATEST REVIEWER: …`), and the **re-analysis block's reviewer is the real person**, not the trigger type.
+- `rev`/`revNote` (`ReviewerSignal` + `REV()`) are now wired from human input: `reviewerSignalFor(kind, decision)` in `reviewer.ts` maps a named correction to `conallPos/conallConcern/laraPos/laraConcern/laraNo/second`. Derivation prefers a persisted `read.rev`, then the latest named correction (`from-supabase.ts reviewerFrom()`), so it works even when Claude is unavailable.
+
+### 7.2 Cut-row evidence (#2)
+
+- Cut rows in the pool stay scannable (reason + ✕ + ?); clicking the reason **expands** an evidence detail (Evidence = `cite`, Why it matters = `cutMatters`, Next = `next`) instead of cramming it inline.
+- `cutFieldsFor` → `citeFor()` now derives a real source: **Verification / Dig-in / Overlay / Reviewer / Timeline / Cover letter / Application / Materials** (was a static `"Materials"`).
+- The candidate page gains a **Cut evidence** block (Evidence / Why it matters / Next action) when `decision === "cut"`.
+
+### 7.3 Deep affordance everywhere (#3)
+
+- The `?` "run deep analysis" affordance (same `openDeep` path) is added to **Hold** and **Review-blocked** rows in the interview-priority table (Cut rows already had it; the candidate page already had the button). Titles/aria-labels preserved.
+
+### 7.4 Gating + collapsibility (#4)
+
+- Spec gating is unchanged: **only** the deep-analysis block (ask/RO compare strip + RO time progression, now also RO career progression) is gated for Cut/Hold/Review-blocked behind "Run deep analysis anyway".
+- The lower material sections (Résumé, Cover letter, Application answers, Logistics, Interview summary, Working file) became **collapsible** via a toggle in `SectionTitle`. **Default open** so nothing the spec shows below the fold is hidden; the 5-line decision read stays the clear default answer.
+
+### 7.5 Responsive (#5)
+
+- New `useMediaQuery` / `useIsNarrow` (SSR-safe) hook. Under 768px the source-reader grids (`1fr 300px`), the compare strip (`1fr 1fr 1.5fr`), the logistics grid (`280px 1fr`), the working-file grid (`1fr 1fr`) and the red-flags grid all **stack to one column**; the wide RO tables scroll horizontally; the top bar drops its status caption and shrinks the job switcher.
+
+### 7.6 Career-read prose (#6, data-gated)
+
+- A labelled **Career read** block under the compare strip: **career path · positive inference · risk inference · decision implication**. `careerReadFrom()` maps from `dig_in` (`careerRead` / `integrityNote` / `resolve`) and `invest_head`; Claude may also fill `read.careerRead` (added to the recalc JSON contract, optional). **Degrades gracefully** — the block is hidden when there is no `dig_in` and no Claude-filled read. No scores.
+
+### 7.7 Fifth cut group — Human signal failures (#1, data-gated)
+
+- `CutGroup` gained `"human"`; the pool renders a **"Human signal failures"** group. Membership: a human/overlay disqualification (or a reviewer "hard no") that is **not** a material-integrity / contradiction cut. The group only appears when populated (empty groups are filtered out). **Data dependency:** richer reviewer-signal "hard no" data does not exist yet, so today the group is fed by overlay/human cuts; it will widen automatically once reviewer-signal rows exist.
+
+### 7.8 Migration / data integrity
+
+- **No migration was required** — the reviewer fields ride inside the existing `workspace` jsonb. Live DB verified intact after the pass: **219 candidates · 5 job shortcodes · 5 jobs** (via Supabase MCP `execute_sql`); nothing dropped/truncated.
+
+> Note: this pass landed alongside a parallel workstream that surfaces the candidate's **résumé** (`ResumeView`) and an **RO career progression** table (`CareerProgression`) on the candidate page (`from-supabase.ts` `resumeFrom`/`careerProgressionFrom`, fed by the already-present `applications.parsed_experience/resume_text/resume_url` columns from migration `003_resume_ingest`). Those are additive and orthogonal to the items above.
 
 ---
 

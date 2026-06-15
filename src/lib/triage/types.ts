@@ -18,6 +18,19 @@ export type ReviewerSignal =
   | "mixed"
   | "second";
 
+// Which human reviewer a correction / signal came from. Maps to ReviewerSignal.
+export type ReviewerKind = "conall" | "lara" | "other";
+
+// A single human correction note, with optional reviewer identity (#7). The
+// reviewer fields are additive — older entries persisted as { ts, text } stay valid.
+export interface CorrectionEntry {
+  ts: string;
+  text: string;
+  reviewerId?: string;
+  reviewerLabel?: string;
+  reviewerKind?: ReviewerKind;
+}
+
 // Timeline-row "Signal" chip vocabulary.
 export type TimelineSignal =
   | "Positive"
@@ -45,7 +58,16 @@ export type CommentKind =
 
 export type AskTier = "top" | "high" | "mid" | "value" | "below";
 
-export type CutGroup = "care" | "evidence" | "pattern" | "mismatch";
+export type CutGroup = "care" | "evidence" | "pattern" | "mismatch" | "human";
+
+// Career-read prose block surfaced under the deep-analysis compare strip (#6).
+// Mapped from dig_in (careerRead / integrityNote / resolve) or filled by Claude.
+export interface CareerRead {
+  path: string; // career-path read
+  positive: string; // positive inference
+  risk: string; // risk inference
+  implication: string; // decision implication
+}
 
 export type TimelineRowType = "edu" | "role" | "cert" | "gap";
 
@@ -118,6 +140,49 @@ export interface RedFlag {
   source: string;
 }
 
+// One role parsed from the résumé (applications.parsed_experience / résumé text).
+export interface ResumeRole {
+  title: string;
+  company: string;
+  period: string; // "May 2020 – Present" | "2020 – 2024" | "—"
+  current: boolean;
+  bullets: string[];
+}
+
+// The candidate's résumé, surfaced read-only. Degrades gracefully: when no
+// résumé has been ingested, hasResume is false and the UI shows the empty state.
+export interface ResumeView {
+  hasResume: boolean;
+  roles: ResumeRole[];
+  // Full extracted résumé text when ingested (applications.resume_text).
+  fullText?: string;
+  // Original résumé file link from Workable (may be a time-limited signed URL).
+  fileUrl?: string;
+}
+
+// One step of the RO-derived career progression (ro_assessments.per_role).
+export interface CareerStep {
+  role: string;
+  company: string;
+  tenure: string; // "1.4 yrs" | "—"
+  stratum: string; // RO capability stratum, e.g. "IIa"
+  stratumRange: string; // e.g. "IIa–IIb"
+  // Strongest scope verbs evidencing the stratum (highest tier present).
+  verbs: string[];
+}
+
+// Career progression derived from the RO assessment. Distinct from the
+// narrative timeline: this is the RO-method capability read role-by-role.
+export interface CareerProgression {
+  hasData: boolean;
+  steps: CareerStep[];
+  seatStratum: string; // RO stratum the seat calls for
+  currentCapability: string; // where the candidate currently reads
+  trajectory: string; // human-readable trajectory label
+  confidenceNote: string; // how much to trust the résumé text
+  basis: string; // what the read leaned on
+}
+
 export interface Candidate {
   id: string;
   rank: number;
@@ -148,6 +213,9 @@ export interface Candidate {
   cite?: string;
   cutMatters?: string;
 
+  // Career-read prose (deep analysis). Present only when dig_in data supports it.
+  careerRead?: CareerRead;
+
   reanalysis?: Reanalysis;
 
   timeline: TimelineRow[];
@@ -157,6 +225,10 @@ export interface Candidate {
   fireflies?: FirefliesRecording[];
   interview?: InterviewSummary;
   redFlags: RedFlag[];
+
+  // Résumé content (from the application) + RO-derived career progression.
+  resume: ResumeView;
+  careerProgression?: CareerProgression;
 
   // Real Workable deeplink (from candidates.raw.profile_url, else link helper).
   workableUrl: string;
@@ -169,7 +241,7 @@ export interface Workspace {
   dq: Record<string, boolean>;
   ovr: Record<string, TimelineRow[]>;
   replies: Record<string, Record<string, string>>;
-  corrections: Record<string, { ts: string; text: string }[]>;
+  corrections: Record<string, CorrectionEntry[]>;
   transcripts: Record<string, string>;
   deep: Record<string, boolean>;
 }
@@ -180,7 +252,7 @@ export interface Workspace {
 export interface WorkspaceSlice {
   ovr?: TimelineRow[];
   replies?: Record<string, string>;
-  corrections?: { ts: string; text: string }[];
+  corrections?: CorrectionEntry[];
   transcript?: string;
   deep?: boolean;
 }
@@ -197,6 +269,11 @@ export interface DecisionRead {
   // Set when a human note/transcript moved the decision: surfaces the
   // before→after re-analysis with the human-signal reviewer in the UI.
   reanalysis?: Reanalysis;
+  // Reviewer-signal lens, derived from the human who left the latest correction (#7).
+  rev?: ReviewerSignal;
+  revNote?: string;
+  // Career-read prose, optionally filled/refined by Claude (#6).
+  careerRead?: CareerRead;
   recalculatedAt?: string;
   model?: string;
 }

@@ -2,11 +2,14 @@
 
 import { createContext, useContext } from "react";
 import type { Candidate, JobOption, PoolMeta } from "@/lib/triage/types";
+import type { Viewer } from "@/lib/triage/reviewer";
 
 export interface TriageData {
   candidates: Candidate[];
   meta: PoolMeta;
   jobs: JobOption[];
+  /** The signed-in reviewer (Clerk-derived) — seeds the corrections reviewer picker (#7). */
+  viewer: Viewer;
   findCandidate: (id: string) => Candidate | undefined;
 }
 

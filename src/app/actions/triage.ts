@@ -9,7 +9,15 @@ import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { renderWorkingFile } from "@/lib/triage/working-file";
 import { recalculateRead } from "@/lib/triage/recalc";
 import { DM } from "@/lib/triage/theme";
-import type { Candidate, DecisionRead, TimelineRow, WorkspaceSlice } from "@/lib/triage/types";
+import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
+import type {
+  Candidate,
+  CorrectionEntry,
+  DecisionRead,
+  ReviewerKind,
+  TimelineRow,
+  WorkspaceSlice,
+} from "@/lib/triage/types";
 
 async function requireAuth(): Promise<string> {
   const { userId } = await auth();
@@ -17,18 +25,29 @@ async function requireAuth(): Promise<string> {
   return userId;
 }
 
-async function reviewerLabel(): Promise<string | undefined> {
+interface ReviewerIdentity {
+  id?: string;
+  label?: string;
+  kind: ReviewerKind;
+}
+
+/** Resolve the acting reviewer from Clerk, mapping name/email → reviewer kind (#7). */
+async function reviewerIdentity(): Promise<ReviewerIdentity> {
   try {
     const { currentUser } = await import("@clerk/nextjs/server");
     const user = await currentUser();
-    if (!user) return undefined;
+    if (!user) return { kind: "other" };
     const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-    if (name) return name;
     const email = user.emailAddresses?.[0]?.emailAddress;
-    return email ? email.split("@")[0] : undefined;
+    const label = name || (email ? email.split("@")[0] : undefined);
+    return { id: user.id, label, kind: reviewerKindFrom(label || email) };
   } catch {
-    return undefined;
+    return { kind: "other" };
   }
+}
+
+async function reviewerLabel(): Promise<string | undefined> {
+  return (await reviewerIdentity()).label;
 }
 
 function nowStamp(): string {
@@ -63,11 +82,12 @@ interface RecalcResult {
 async function persistAndMaybeRecalc(
   candidateId: string,
   patch: WorkspaceSlice,
-  opts: { recalc: boolean; trigger?: string },
+  opts: { recalc: boolean; trigger?: string; reviewer?: ReviewerIdentity },
 ): Promise<RecalcResult> {
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
 
-  const updatedBy = await reviewerLabel();
+  const reviewer = opts.reviewer;
+  const updatedBy = reviewer?.label ?? (await reviewerLabel());
   // Write the human edit first so it survives even if Claude is unavailable.
   await upsertWorkingFile(candidateId, { workspace: patch }, updatedBy);
 
@@ -92,15 +112,26 @@ async function persistAndMaybeRecalc(
       corrections: one.slice.corrections ?? [],
       transcript: one.slice.transcript ?? "",
       replies: one.slice.replies ?? {},
+      reviewer: reviewer ? { label: reviewer.label, kind: reviewer.kind } : undefined,
     });
     if (read) {
+      // #7: carry the reviewer-signal lens (rev/revNote) on the persisted read so
+      // the pool + candidate views show the human's signal, not a generic "none".
+      if (reviewer && updatedBy) {
+        read = {
+          ...read,
+          rev: reviewerSignalFor(reviewer.kind, read.decision),
+          revNote: `${updatedBy}: ${read.timelineNote || read.why}`.slice(0, 200),
+        };
+      }
       // When a human note moved the decision, surface the before→after with the
-      // human-signal reviewer (spec: "re-analysis when a human note changes the decision").
+      // real human reviewer (person), not the trigger type.
       if (read.decision !== priorDecision) {
+        const who = updatedBy ? `${updatedBy} (human signal)` : opts.trigger ?? "Human signal";
         read = {
           ...read,
           reanalysis: {
-            reviewer: opts.trigger ?? (updatedBy ? `${updatedBy} (human signal)` : "Human signal"),
+            reviewer: who,
             before: DM(priorDecision).label,
             after: DM(read.decision).label,
             rec: read.timelineNote || read.why,
@@ -126,19 +157,38 @@ async function persistAndMaybeRecalc(
   };
 }
 
-export async function saveCorrection(input: { candidateId: string; text: string }): Promise<RecalcResult> {
+export async function saveCorrection(input: {
+  candidateId: string;
+  text: string;
+  reviewerKind?: ReviewerKind;
+}): Promise<RecalcResult> {
   await requireAuth();
   const text = input.text.trim();
   if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
 
+  // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
+  const ident = await reviewerIdentity();
+  const kind = input.reviewerKind ?? ident.kind;
+  const label =
+    ident.label && reviewerKindFrom(ident.label) === kind ? ident.label : reviewerKindLabel(kind);
+  const reviewer: ReviewerIdentity = { id: ident.id, label, kind };
+
+  const entry: CorrectionEntry = {
+    ts: nowStamp(),
+    text,
+    reviewerId: ident.id,
+    reviewerLabel: label,
+    reviewerKind: kind,
+  };
   const existing = await getWorkingFile(input.candidateId);
-  const corrections = [...(existing?.workspace.corrections ?? []), { ts: nowStamp(), text }];
-  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction" });
+  const corrections = [...(existing?.workspace.corrections ?? []), entry];
+  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction", reviewer });
 }
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
   await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript" });
+  const reviewer = await reviewerIdentity();
+  return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
 }
 
 export async function runDeepAnalysis(input: { candidateId: string }): Promise<RecalcResult> {

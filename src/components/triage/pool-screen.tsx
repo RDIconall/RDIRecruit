@@ -1,12 +1,13 @@
 "use client";
 
-import { CSSProperties } from "react";
+import { CSSProperties, useState } from "react";
 import { FONTS, DM, REV, askColor, askTierLabel } from "@/lib/triage/theme";
 import type { CutGroup, Decision } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: FONTS.mono, ...extra });
+const ink = (a: number) => `rgba(22,35,53,${a})`;
 
 interface Props {
   wsApi: WorkspaceApi;
@@ -21,12 +22,16 @@ const CUT_DEFS: { key: CutGroup; title: string }[] = [
   { key: "evidence", title: "Evidence failures" },
   { key: "pattern", title: "Career-pattern failures" },
   { key: "mismatch", title: "Role mismatch" },
+  // #1: appears only when populated — human/overlay cuts without a material-integrity gate.
+  { key: "human", title: "Human signal failures" },
 ];
 
 export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }: Props) {
   const { candidates: CANDIDATES, meta } = useTriageData();
   const { ws, bulkDq, openCount, toggleDq } = wsApi;
   const dq = ws.dq;
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const toggleExpand = (id: string) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
 
   const byDec = (d: Decision) => CANDIDATES.filter((c) => c.decision === d);
   const nInterview = byDec("interview").length;
@@ -167,72 +172,81 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
             <div style={mono({ fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9E3B28", marginBottom: 4 })}>{g.title}</div>
             {g.items.map((c) => {
               const isDq = !!dq[c.id];
+              const isOpen = !!expanded[c.id];
               return (
-                <div
-                  key={c.id}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "minmax(0,1.3fr) minmax(0,2.2fr) auto",
-                    gap: 20,
-                    alignItems: "center",
-                    padding: "13px 4px",
-                    borderTop: "1px solid rgba(22,35,53,0.09)",
-                    background: isDq ? "rgba(22,35,53,0.035)" : "transparent",
-                  }}
-                >
-                  <div onClick={() => openCandidate(c.id)} style={{ cursor: "pointer", minWidth: 0 }}>
-                    <span style={{ fontSize: 16.5, fontWeight: 500, textDecoration: isDq ? "line-through" : "none", color: isDq ? "rgba(22,35,53,0.4)" : "#162335" }}>
-                      {c.name}
-                    </span>{" "}
-                    <span style={{ fontSize: 13.5, color: "rgba(22,35,53,0.5)" }}>· {c.role}</span>
-                  </div>
-                  <div onClick={() => openCandidate(c.id)} style={{ cursor: "pointer", fontSize: 14.5, lineHeight: 1.4, color: "rgba(22,35,53,0.78)", minWidth: 0 }}>
-                    {c.cutReason}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
-                    <button
-                      onClick={() => toggleDq(c.id)}
-                      title="Disqualify"
-                      style={{
-                        cursor: "pointer",
-                        width: 32,
-                        height: 32,
-                        borderRadius: 9999,
-                        border: "1px solid #9E3B28",
-                        background: isDq ? "#9E3B28" : "transparent",
-                        color: isDq ? "#fff" : "#9E3B28",
-                        fontSize: 14,
-                        lineHeight: 1,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: 0,
-                      }}
+                <div key={c.id}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "minmax(0,1.3fr) minmax(0,2.2fr) auto",
+                      gap: 20,
+                      alignItems: "center",
+                      padding: "13px 4px",
+                      borderTop: "1px solid rgba(22,35,53,0.09)",
+                      background: isDq ? "rgba(22,35,53,0.035)" : "transparent",
+                    }}
+                  >
+                    <div onClick={() => openCandidate(c.id)} style={{ cursor: "pointer", minWidth: 0 }}>
+                      <span style={{ fontSize: 16.5, fontWeight: 500, textDecoration: isDq ? "line-through" : "none", color: isDq ? "rgba(22,35,53,0.4)" : "#162335" }}>
+                        {c.name}
+                      </span>{" "}
+                      <span style={{ fontSize: 13.5, color: "rgba(22,35,53,0.5)" }}>· {c.role}</span>
+                    </div>
+                    <div
+                      onClick={() => toggleExpand(c.id)}
+                      title={isOpen ? "Hide evidence" : "Show evidence"}
+                      aria-expanded={isOpen}
+                      style={{ cursor: "pointer", display: "flex", alignItems: "baseline", gap: 8, fontSize: 14.5, lineHeight: 1.4, color: "rgba(22,35,53,0.78)", minWidth: 0 }}
                     >
-                      ✕
-                    </button>
-                    <button
-                      onClick={() => openDeep(c.id)}
-                      title="Run deep analysis"
-                      style={mono({
-                        cursor: "pointer",
-                        width: 32,
-                        height: 32,
-                        borderRadius: 9999,
-                        border: "1px solid rgba(22,35,53,0.28)",
-                        background: "transparent",
-                        color: "#162335",
-                        fontSize: 15,
-                        lineHeight: 1,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        padding: 0,
-                      })}
-                    >
-                      ?
-                    </button>
+                      <span style={mono({ fontSize: 11, color: "#9E3B28", flexShrink: 0, transform: isOpen ? "none" : "none" })}>{isOpen ? "▾" : "▸"}</span>
+                      <span style={{ minWidth: 0 }}>{c.cutReason}</span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
+                      <button
+                        onClick={() => toggleDq(c.id)}
+                        title="Disqualify"
+                        style={{
+                          cursor: "pointer",
+                          width: 32,
+                          height: 32,
+                          borderRadius: 9999,
+                          border: "1px solid #9E3B28",
+                          background: isDq ? "#9E3B28" : "transparent",
+                          color: isDq ? "#fff" : "#9E3B28",
+                          fontSize: 14,
+                          lineHeight: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                        }}
+                      >
+                        ✕
+                      </button>
+                      <button
+                        onClick={() => openDeep(c.id)}
+                        title="Run deep analysis"
+                        style={mono({
+                          cursor: "pointer",
+                          width: 32,
+                          height: 32,
+                          borderRadius: 9999,
+                          border: "1px solid rgba(22,35,53,0.28)",
+                          background: "transparent",
+                          color: "#162335",
+                          fontSize: 15,
+                          lineHeight: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                        })}
+                      >
+                        ?
+                      </button>
+                    </div>
                   </div>
+                  {isOpen && <CutEvidence cite={c.cite} matters={c.cutMatters} next={c.next} />}
                 </div>
               );
             })}
@@ -306,14 +320,41 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                     <span style={{ fontSize: 13.5, lineHeight: 1.25, color: rev.c, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rev.label}</span>
                   </div>
                   <div style={clamp2({ paddingRight: 16, fontSize: 14.5, lineHeight: 1.38, color: "rgba(22,35,53,0.82)" })}>{c.why}</div>
-                  <div style={{ paddingRight: 10 }}>
-                    <div style={mono({ fontSize: 14, color: askColor(c.askTier) })}>
+                  <div style={{ paddingRight: 10, minWidth: 0 }}>
+                    <div style={mono({ fontSize: 14, color: askColor(c.askTier), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })} title={`${c.salary} · ${c.roLevel}`}>
                       {c.salary} · {c.roLevel}
                     </div>
-                    <div style={{ marginTop: 1, fontSize: 12.5, lineHeight: 1.25, color: c.mismatch ? "#9E3B28" : "rgba(22,35,53,0.6)" }}>{askTierLabel(c.askTier)}</div>
+                    <div style={clamp2({ marginTop: 1, fontSize: 12.5, lineHeight: 1.25, color: c.mismatch ? "#9E3B28" : "rgba(22,35,53,0.6)" })} title={askTierLabel(c.askTier)}>{askTierLabel(c.askTier)}</div>
                   </div>
                   <div style={clamp2({ paddingRight: 14, fontSize: 14.5, lineHeight: 1.38, color: "rgba(22,35,53,0.82)" })}>{c.flag}</div>
-                  <div style={clamp2({ paddingRight: 8, fontSize: 14, lineHeight: 1.35, color: "rgba(22,35,53,0.82)" })}>{c.next}</div>
+                  <div style={{ paddingRight: 8, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                    <span style={clamp2({ fontSize: 14, lineHeight: 1.35, color: "rgba(22,35,53,0.82)", flex: 1, minWidth: 0 })}>{c.next}</span>
+                    {(c.decision === "hold" || c.decision === "blocked") && (
+                      <button
+                        onClick={(e) => { e.stopPropagation(); openDeep(c.id); }}
+                        title="Run deep analysis"
+                        aria-label={`Run deep analysis for ${c.name}`}
+                        style={mono({
+                          cursor: "pointer",
+                          width: 26,
+                          height: 26,
+                          borderRadius: 9999,
+                          border: "1px solid rgba(22,35,53,0.28)",
+                          background: "transparent",
+                          color: "#162335",
+                          fontSize: 13,
+                          lineHeight: 1,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          padding: 0,
+                          flexShrink: 0,
+                        })}
+                      >
+                        ?
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -332,4 +373,44 @@ function clamp2(extra: CSSProperties): CSSProperties {
     overflow: "hidden",
     ...extra,
   } as CSSProperties;
+}
+
+// Expanded evidence for a cut row (#2): the already-mapped source, why it
+// matters, and the next action — kept out of the row itself so the list stays scannable.
+function CutEvidence({ cite, matters, next }: { cite?: string; matters?: string; next: string }) {
+  const items: { label: string; value?: string }[] = [
+    { label: "Evidence", value: cite },
+    { label: "Why it matters", value: matters },
+    { label: "Next", value: next },
+  ];
+  return (
+    <div
+      style={{
+        margin: "0 4px",
+        padding: "12px 16px",
+        background: "rgba(158,59,40,0.04)",
+        borderLeft: "2px solid #9E3B28",
+        display: "grid",
+        gridTemplateColumns: "minmax(0,1.3fr) minmax(0,2.2fr) auto",
+        gap: 20,
+      }}
+    >
+      <div />
+      <div style={{ display: "grid", gridTemplateColumns: "120px 1fr", gap: "6px 16px", alignItems: "baseline", minWidth: 0 }}>
+        {items.map((it) => (
+          <CutEvidenceRow key={it.label} label={it.label} value={it.value} />
+        ))}
+      </div>
+      <div />
+    </div>
+  );
+}
+
+function CutEvidenceRow({ label, value }: { label: string; value?: string }) {
+  return (
+    <>
+      <div style={mono({ fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9E3B28" })}>{label}</div>
+      <div style={{ fontSize: 13.5, lineHeight: 1.45, color: value ? ink(0.82) : ink(0.45) }}>{value || "—"}</div>
+    </>
+  );
 }

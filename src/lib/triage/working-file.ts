@@ -51,7 +51,7 @@ export function renderWorkingFile(
   });
 
   s += "\n## Corrections (human, persisted)\n\n";
-  if (corr.length) corr.forEach((e) => (s += `- [${e.ts}] ${e.text}\n`));
+  if (corr.length) corr.forEach((e) => (s += `- [${e.ts}]${e.reviewerLabel ? ` (${e.reviewerLabel})` : ""} ${e.text}\n`));
   else s += "- none\n";
 
   s += "\n## Notes to Claude (replies on its comments)\n\n";

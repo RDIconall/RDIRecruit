@@ -1,7 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { Candidate, DecisionRead, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { Candidate, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
   runDeepAnalysis,
@@ -28,7 +29,7 @@ export interface WorkspaceApi {
   removeRow: (id: string, idx: number) => void;
   setReply: (id: string, key: string, val: string) => void;
   setTranscript: (id: string, val: string) => void;
-  addCorrection: (id: string, text: string) => void;
+  addCorrection: (id: string, text: string, reviewerKind?: ReviewerKind) => void;
 }
 
 function nowStamp(): string {
@@ -170,12 +171,19 @@ export function useWorkspace(
   );
 
   const addCorrection = useCallback(
-    (id: string, text: string) => {
+    (id: string, text: string, reviewerKind?: ReviewerKind) => {
       const v = text.trim();
       if (!v) return;
-      const log = [...(wsRef.current.corrections[id] || []), { ts: nowStamp(), text: v }];
+      // Optimistic entry: stamp the picked reviewer's label; the server persists the
+      // authoritative Clerk-derived label/id on its write.
+      const optimistic = {
+        ts: nowStamp(),
+        text: v,
+        ...(reviewerKind ? { reviewerKind, reviewerLabel: reviewerKindLabel(reviewerKind) } : {}),
+      };
+      const log = [...(wsRef.current.corrections[id] || []), optimistic];
       setWs((w) => ({ ...w, corrections: { ...w.corrections, [id]: log } }));
-      void handleRecalc(id, () => saveCorrection({ candidateId: id, text: v }));
+      void handleRecalc(id, () => saveCorrection({ candidateId: id, text: v, reviewerKind }));
     },
     [handleRecalc],
   );

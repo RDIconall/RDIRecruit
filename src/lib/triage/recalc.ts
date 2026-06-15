@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { env, hasAnthropic } from "../env";
-import type { Candidate, Decision, DecisionRead } from "./types";
+import type { CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind } from "./types";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -19,14 +19,23 @@ OUTPUT IS A DECISION, NOT A SCORE. You must NEVER produce, mention, or imply a n
 
 Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. Integrity problems and clear contradictions are gates: they push to cut regardless of fit.
 
+When a named human reviewer (e.g. Conall or Lara) leaves a correction, treat their signal as authoritative human judgment and weight it accordingly — name them as the source of the change.
+
 Return JSON only, no prose outside the JSON, in exactly this shape:
 {
   "decision": one of ${VALID_DECISIONS.map((d) => `"${d}"`).join(" | ")},
   "why": "one or two sentences — the decisive reason for this call, grounded in the materials/corrections",
   "risk": "the single main risk or the one thing a human must settle (one sentence)",
   "next": "the concrete next action, e.g. Screen | Short screen | Verify | Hold | Reject | Re-sync",
-  "timelineNote": "one short note on what changed vs the prior read, or empty string if nothing changed"
-}`;
+  "timelineNote": "one short note on what changed vs the prior read, or empty string if nothing changed",
+  "careerRead": {
+    "path": "the candidate's career-path read in one or two sentences (no numbers)",
+    "positive": "the strongest positive inference from the materials",
+    "risk": "the main risk inference",
+    "implication": "what this implies for the decision"
+  }
+}
+The "careerRead" object is optional context — include it when you have enough to say something real, otherwise omit it entirely.`;
 
 function buildUserPrompt(input: RecalcInput): string {
   const { candidate, corrections, transcript, replies, workingFile } = input;
@@ -44,13 +53,19 @@ function buildUserPrompt(input: RecalcInput): string {
     : "No cover letter submitted.";
 
   const corr = corrections.length
-    ? corrections.map((c) => `- [${c.ts}] ${c.text}`).join("\n")
+    ? corrections
+        .map((c) => `- [${c.ts}]${c.reviewerLabel ? ` (${c.reviewerLabel})` : ""} ${c.text}`)
+        .join("\n")
     : "none";
+
+  const reviewerLine = input.reviewer?.label
+    ? `LATEST REVIEWER: ${input.reviewer.label}${input.reviewer.kind ? ` (${input.reviewer.kind})` : ""} — weight this human's signal heavily.\n`
+    : "";
 
   const reps = Object.entries(replies).filter(([, v]) => v);
   const repsText = reps.length ? reps.map(([k, v]) => `- (${k}) ${v}`).join("\n") : "none";
 
-  return `STORED WORKING FILE (.md — this candidate's living case file):
+  return `${reviewerLine}STORED WORKING FILE (.md — this candidate's living case file):
 """
 ${(workingFile || "(empty)").slice(0, 8000)}
 """
@@ -92,9 +107,23 @@ export interface RecalcInput {
   candidate: Candidate;
   /** The candidate's stored .md working file (case file), fed to Claude as context. */
   workingFile: string;
-  corrections: { ts: string; text: string }[];
+  corrections: CorrectionEntry[];
   transcript: string;
   replies: Record<string, string>;
+  /** Identity of the human whose latest correction triggered this recalc (#7). */
+  reviewer?: { label?: string; kind?: ReviewerKind };
+}
+
+function parseCareerRead(value: unknown): CareerRead | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string).trim() : "");
+  const path = str("path");
+  const positive = str("positive");
+  const risk = str("risk");
+  const implication = str("implication");
+  if (!path && !positive && !risk && !implication) return undefined;
+  return { path, positive, risk, implication };
 }
 
 /**
@@ -128,6 +157,7 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       risk: (parsed.risk || input.candidate.flag || "").trim(),
       next: (parsed.next || "").trim(),
       timelineNote: (parsed.timelineNote || "").trim() || undefined,
+      careerRead: parseCareerRead((parsed as Record<string, unknown>).careerRead),
       recalculatedAt: new Date().toISOString(),
       model: MODEL,
     };

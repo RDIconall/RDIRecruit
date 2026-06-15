@@ -16,7 +16,7 @@ import type {
   VerificationPayload,
 } from "../types";
 import type { Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
-import { mapCandidate, type CandidateEvaluations } from "./from-supabase";
+import { mapCandidate, type ApplicationLite, type CandidateEvaluations } from "./from-supabase";
 import { getWorkingFiles } from "./store";
 
 export const DEFAULT_JOB_SHORTCODE = "379AA16E8F"; // Clinical Data Manager — Data Integrity & Investigation
@@ -145,7 +145,7 @@ export async function loadOneCandidate(candidateId: string): Promise<OneCandidat
     supabase.from("scores").select("*").eq("candidate_id", candidateId).order("created_at", { ascending: false }).limit(1),
     supabase.from("ro_assessments").select("*").eq("candidate_id", candidateId).order("created_at", { ascending: false }).limit(1),
     supabase.from("candidate_overlay").select("*").eq("candidate_id", candidateId).maybeSingle(),
-    supabase.from("applications").select("candidate_id, answers, cover_letter").eq("candidate_id", candidateId).maybeSingle(),
+    supabase.from("applications").select("candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url").eq("candidate_id", candidateId).maybeSingle(),
     supabase.from("narratives").select("segments").eq("candidate_id", candidateId).order("generated_at", { ascending: false }).limit(1),
     supabase.from("evaluations").select("candidate_id, kind, payload, created_at").eq("candidate_id", candidateId),
     supabase.from("evidence").select("*").eq("candidate_id", candidateId).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
@@ -167,11 +167,12 @@ export async function loadOneCandidate(candidateId: string): Promise<OneCandidat
     score: (scoreRes.data?.[0] as Parameters<typeof mapCandidate>[0]["score"]) ?? null,
     ro: (roRes.data?.[0] as Parameters<typeof mapCandidate>[0]["ro"]) ?? null,
     overlay: overlay as Parameters<typeof mapCandidate>[0]["overlay"],
-    application: (appRes.data as { answers: Record<string, unknown> | null; cover_letter: string | null } | null) ?? null,
+    application: (appRes.data as ApplicationLite | null) ?? null,
     narrative: ((narrRes.data?.[0]?.segments as NarrativeSegment[] | undefined) ?? []),
     evals,
     interviewEvidence: (evidenceRes.data ?? []) as EvidenceRow[],
     read: (wf?.read as DecisionRead | null) ?? null,
+    corrections: wf?.workspace?.corrections ?? [],
     rank: 0,
     jobLocation: "Van Nuys, CA",
     jobShortcode,
@@ -203,16 +204,23 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const supabase = getServiceSupabase();
 
   const [appsRes, evalRes, narrRes, evidenceRes, workingFiles] = await Promise.all([
-    supabase.from("applications").select("candidate_id, answers, cover_letter").in("candidate_id", ids),
+    supabase.from("applications").select("candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url").in("candidate_id", ids),
     supabase.from("evaluations").select("candidate_id, kind, payload, created_at").in("candidate_id", ids),
     supabase.from("narratives").select("candidate_id, segments, generated_at").in("candidate_id", ids).order("generated_at", { ascending: false }),
     supabase.from("evidence").select("*").in("candidate_id", ids).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
     getWorkingFiles(ids),
   ]);
 
-  const appsByCandidate = new Map<string, { answers: Record<string, unknown> | null; cover_letter: string | null }>();
-  for (const a of (appsRes.data ?? []) as Array<{ candidate_id: string; answers: Record<string, unknown> | null; cover_letter: string | null }>) {
-    if (!appsByCandidate.has(a.candidate_id)) appsByCandidate.set(a.candidate_id, { answers: a.answers, cover_letter: a.cover_letter });
+  const appsByCandidate = new Map<string, ApplicationLite>();
+  for (const a of (appsRes.data ?? []) as Array<{ candidate_id: string } & ApplicationLite>) {
+    if (!appsByCandidate.has(a.candidate_id))
+      appsByCandidate.set(a.candidate_id, {
+        answers: a.answers,
+        cover_letter: a.cover_letter,
+        parsed_experience: a.parsed_experience,
+        resume_text: a.resume_text,
+        resume_url: a.resume_url,
+      });
   }
 
   const evalsByCandidate = groupEvaluations((evalRes.data ?? []) as EvalRow[]);
@@ -245,6 +253,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [] },
       interviewEvidence: evidenceByCandidate.get(id) ?? [],
       read,
+      corrections: wf?.workspace?.corrections ?? [],
       rank: index + 1,
       jobLocation: "Van Nuys, CA",
       jobShortcode,

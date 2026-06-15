@@ -12,9 +12,11 @@ import {
   askTierLabel,
   logColor,
 } from "@/lib/triage/theme";
-import type { TimelineRow } from "@/lib/triage/types";
+import type { ReviewerKind, TimelineRow } from "@/lib/triage/types";
+import { REVIEWER_OPTIONS } from "@/lib/triage/reviewer";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
+import { useIsNarrow } from "./use-media-query";
 import { getWorkingFileContent } from "@/app/actions/triage";
 
 const C = COLORS;
@@ -30,20 +32,31 @@ interface Props {
 }
 
 export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
-  const { candidates, findCandidate } = useTriageData();
+  const { candidates, findCandidate, viewer } = useTriageData();
   const ws = wsApi.ws;
   const candidate = findCandidate(activeId);
   const total = candidates.length;
   const id = activeId;
+  const narrow = useIsNarrow();
 
   const [tlEditing, setTlEditing] = useState(false);
   const [corrDraft, setCorrDraft] = useState("");
   const [tdraft, setTdraft] = useState("");
+  const [reviewerKind, setReviewerKind] = useState<ReviewerKind>(viewer.kind);
+  // #4: lower material sections are collapsible. Default open so the spec's
+  // below-the-fold content stays visible; the 5-line read remains the headline.
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const isOpen = (k: string) => !collapsed[k];
+  const toggleSection = (k: string) => setCollapsed((c) => ({ ...c, [k]: !c[k] }));
 
   useEffect(() => {
     setTdraft(ws.transcripts[id] ?? "");
     setTlEditing(false);
     setCorrDraft("");
+    setReviewerKind(viewer.kind);
+    // The pool and candidate views share the document scroll position; reset to
+    // the top so a candidate opens at the header rather than mid-page.
+    window.scrollTo(0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
@@ -131,8 +144,8 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
                 key={i}
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "200px 1fr 150px",
-                  gap: 16,
+                  gridTemplateColumns: narrow ? "1fr" : "200px 1fr 150px",
+                  gap: narrow ? 2 : 16,
                   alignItems: "baseline",
                   padding: "9px 0",
                   borderTop: "1px solid rgba(158,59,40,0.16)",
@@ -258,6 +271,27 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
         </div>
       )}
 
+      {/* cut evidence (#2) — the source, why it matters, and next action for a cut */}
+      {candidate.decision === "cut" && (
+        <div style={{ marginTop: 14, border: `1px solid rgba(158,59,40,0.22)`, background: "rgba(158,59,40,0.035)", padding: "16px 20px", maxWidth: 760 }}>
+          <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.brick }}>
+            Cut evidence
+          </div>
+          <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "120px 1fr", gap: "8px 18px", alignItems: "baseline" }}>
+            {[
+              { label: "Evidence", value: candidate.cite },
+              { label: "Why it matters", value: candidate.cutMatters },
+              { label: "Next action", value: candidate.next },
+            ].map((r) => (
+              <div key={r.label} style={{ display: "contents" }}>
+                <div style={{ fontFamily: F.mono, fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase", color: C.brick }}>{r.label}</div>
+                <div style={{ fontSize: 14.5, lineHeight: 1.5, color: r.value ? ink(0.85) : ink(0.45) }}>{r.value || "—"}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* deep gating */}
       {!aShowDeep && (
         <div style={{ marginTop: 24 }}>
@@ -283,7 +317,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       {aShowDeep && (
         <>
           {/* COMPARE STRIP */}
-          <div style={{ marginTop: 26, border: `1px solid ${ink(0.12)}`, background: "#fff", display: "grid", gridTemplateColumns: "1fr 1fr 1.5fr" }}>
+          <div style={{ marginTop: 26, border: `1px solid ${ink(0.12)}`, background: "#fff", display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr 1.5fr" }}>
             <div style={{ padding: "18px 22px", borderRight: `1px solid ${ink(0.1)}` }}>
               <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.04em", textTransform: "uppercase", color: ink(0.5) }}>Salary ask</div>
               <div style={{ marginTop: 7, fontFamily: F.mono, fontSize: 30, fontWeight: 500, color: C.navy }}>{candidate.salary}</div>
@@ -303,6 +337,26 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               <div style={{ marginTop: 7, fontSize: 17, lineHeight: 1.4, fontWeight: 500, color: C.navy }}>{candidate.mismatchRead}</div>
             </div>
           </div>
+
+          {/* CAREER READ (#6) — prose under the compare strip; degrades when no dig_in */}
+          {candidate.careerRead && (
+            <div style={{ marginTop: 24, border: `1px solid ${ink(0.12)}`, borderLeft: `2px solid ${C.orange}`, background: "#fff", padding: "18px 22px" }}>
+              <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.05em", textTransform: "uppercase", color: ink(0.5) }}>Career read</div>
+              <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: narrow ? "1fr" : "150px 1fr", gap: narrow ? "4px 0" : "10px 20px", alignItems: "baseline" }}>
+                {[
+                  { label: "Career path", value: candidate.careerRead.path },
+                  { label: "Positive read", value: candidate.careerRead.positive },
+                  { label: "Risk read", value: candidate.careerRead.risk },
+                  { label: "Decision implication", value: candidate.careerRead.implication },
+                ].map((r, i) => (
+                  <div key={r.label} style={{ display: "contents" }}>
+                    <div style={{ fontFamily: F.mono, fontSize: 11, letterSpacing: "0.03em", textTransform: "uppercase", color: i === 2 ? C.brick : ink(0.5), paddingTop: narrow ? 8 : 0 }}>{r.label}</div>
+                    <div style={{ fontSize: 14.5, lineHeight: 1.5, color: r.value ? ink(0.85) : ink(0.45) }}>{r.value || "—"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* RO TIME PROGRESSION */}
           <div style={{ marginTop: 38 }}>
@@ -334,6 +388,8 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
                 </button>
               </div>
             </div>
+            <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: narrow ? 820 : undefined }}>
             <div style={{ display: "grid", gridTemplateColumns: TL_COLS, padding: "10px 6px", fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.03em", textTransform: "uppercase", color: ink(0.42), borderBottom: `1px solid ${ink(0.09)}` }}>
               <div>Period</div>
               <div>Org / school</div>
@@ -395,14 +451,105 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
                 </div>
               );
             })}
+            </div>
+            </div>
           </div>
+
+          {/* RO CAREER PROGRESSION (sourced from the RO assessment) */}
+          {candidate.careerProgression?.hasData && (
+            <div style={{ marginTop: 38 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: `1px solid ${ink(0.15)}`, paddingBottom: 9 }}>
+                <h2 style={{ margin: 0, fontSize: 23, fontWeight: 500, letterSpacing: "-0.02em" }}>RO career progression</h2>
+                <span style={{ fontFamily: F.mono, fontSize: 12, color: ink(0.5) }}>
+                  Seat calls for {candidate.careerProgression.seatStratum} · reads {candidate.careerProgression.currentCapability}
+                </span>
+              </div>
+              <div style={{ marginTop: 10, fontSize: 14.5, lineHeight: 1.5, color: ink(0.8) }}>
+                {candidate.careerProgression.trajectory}
+                {candidate.careerProgression.confidenceNote ? ` · ${candidate.careerProgression.confidenceNote}` : ""}
+              </div>
+              <div style={{ overflowX: "auto" }}>
+              <div style={{ minWidth: narrow ? 720 : undefined }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 90px 96px 1.4fr", padding: "10px 6px", fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.03em", textTransform: "uppercase", color: ink(0.42), borderBottom: `1px solid ${ink(0.09)}`, marginTop: 12 }}>
+                <div>Role</div>
+                <div>Company</div>
+                <div>Tenure</div>
+                <div>RO stratum</div>
+                <div>Scope evidence</div>
+              </div>
+              {candidate.careerProgression.steps.map((step, idx) => (
+                <div key={idx} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 90px 96px 1.4fr", padding: "11px 6px", alignItems: "baseline", borderBottom: `1px solid ${ink(0.08)}` }}>
+                  <div style={{ fontSize: 14.5, color: C.navy, paddingRight: 8 }}>{step.role}</div>
+                  <div style={{ fontSize: 14.5, color: ink(0.78), paddingRight: 8 }}>{step.company}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 13, color: ink(0.7) }}>{step.tenure}</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 13, color: C.navy }}>{step.stratumRange}</div>
+                  <div style={{ fontSize: 13, color: ink(0.7), paddingRight: 10, lineHeight: 1.45 }}>
+                    {step.verbs.length ? step.verbs.join(" · ") : "—"}
+                  </div>
+                </div>
+              ))}
+              </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
+      {/* RÉSUMÉ */}
+      <SectionTitle
+        title="Résumé"
+        open={isOpen("resume")}
+        onToggle={() => toggleSection("resume")}
+        right={
+          candidate.resume.fileUrl ? (
+            <a
+              href={candidate.resume.fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontFamily: F.mono, fontSize: 12.5, color: C.brick, textDecoration: "none" }}
+            >
+              Open résumé file ↗
+            </a>
+          ) : undefined
+        }
+      />
+      {isOpen("resume") && (candidate.resume.hasResume ? (
+        <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
+          {candidate.resume.roles.map((r, i) => (
+            <div key={i} style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${r.current ? C.orange : ink(0.18)}`, padding: "16px 20px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                <div style={{ minWidth: 0 }}>
+                  <span style={{ fontSize: 16, fontWeight: 500, color: C.navy }}>{r.title}</span>
+                  <span style={{ fontSize: 15, color: ink(0.6) }}> · {r.company}</span>
+                </div>
+                <span style={{ fontFamily: F.mono, fontSize: 12.5, color: r.current ? C.orange : ink(0.55), whiteSpace: "nowrap" }}>{r.period}</span>
+              </div>
+              {r.bullets.length > 0 && (
+                <ul style={{ margin: "10px 0 0", padding: "0 0 0 18px", display: "flex", flexDirection: "column", gap: 4 }}>
+                  {r.bullets.map((b, bi) => (
+                    <li key={bi} style={{ fontSize: 14.5, lineHeight: 1.55, color: ink(0.82) }}>{b}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+          {candidate.resume.roles.length === 0 && candidate.resume.fullText && (
+            <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, padding: "18px 22px", fontSize: 14.5, lineHeight: 1.6, color: ink(0.85), whiteSpace: "pre-wrap" }}>
+              {candidate.resume.fullText}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ marginTop: 14, border: "1px dashed rgba(22,35,53,0.25)", background: ink(0.02), padding: "18px 22px", fontSize: 15, color: ink(0.6) }}>
+          No résumé on file yet.{" "}
+          <span style={{ color: ink(0.5) }}>Once a résumé syncs from Workable it appears here, role by role.</span>
+        </div>
+      ))}
+
       {/* COVER LETTER */}
-      <SectionTitle title="Cover letter" />
-      {candidate.cover.hasLetter ? (
-        <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "1fr 300px", gap: 36, alignItems: "start" }}>
+      <SectionTitle title="Cover letter" open={isOpen("cover")} onToggle={() => toggleSection("cover")} />
+      {isOpen("cover") && (candidate.cover.hasLetter ? (
+        <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 300px", gap: narrow ? 16 : 36, alignItems: "start" }}>
           <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, padding: "30px 34px", fontSize: 16, lineHeight: 1.75, color: C.navy }}>
             {candidate.cover.lines.map((ln, i) => (
               <span key={i}>
@@ -434,16 +581,17 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           No cover letter submitted.{" "}
           <span style={{ color: ink(0.7) }}>For a role built on care and detail, a blank cover letter is itself a signal.</span>
         </div>
-      )}
+      ))}
 
       {/* APPLICATION ANSWERS */}
-      <SectionTitle title="Application answers" />
+      <SectionTitle title="Application answers" open={isOpen("answers")} onToggle={() => toggleSection("answers")} />
+      {isOpen("answers") && (
       <div style={{ marginTop: 14, display: "flex", flexDirection: "column", gap: 16 }}>
         {candidate.answers.map((qa, i) => {
           const m = CM(qa.kind);
           const key = `ans-${i}`;
           return (
-            <div key={key} style={{ display: "grid", gridTemplateColumns: "1fr 300px", gap: 36, alignItems: "start" }}>
+            <div key={key} style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 300px", gap: narrow ? 16 : 36, alignItems: "start" }}>
               <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${m.color}`, padding: "18px 22px" }}>
                 <div style={{ fontFamily: F.mono, fontSize: 12, letterSpacing: "0.02em", color: ink(0.5) }}>{qa.q}</div>
                 <div style={{ marginTop: 8, fontSize: 15.5, lineHeight: 1.6, color: C.navy }}>
@@ -459,10 +607,12 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           );
         })}
       </div>
+      )}
 
       {/* LOGISTICS */}
-      <SectionTitle title="Logistics check" right={<span style={{ fontFamily: F.mono, fontSize: 12, color: ink(0.5) }}>{candidate.logistics.mode}</span>} />
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "280px 1fr", gap: 36, alignItems: "start" }}>
+      <SectionTitle title="Logistics check" open={isOpen("logistics")} onToggle={() => toggleSection("logistics")} right={<span style={{ fontFamily: F.mono, fontSize: 12, color: ink(0.5) }}>{candidate.logistics.mode}</span>} />
+      {isOpen("logistics") && (
+      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: narrow ? "1fr" : "280px 1fr", gap: narrow ? 16 : 36, alignItems: "start" }}>
         <div style={{ border: `1px solid ${ink(0.12)}`, background: "#fff", padding: "18px 20px" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
             <span style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5) }}>Likelihood</span>
@@ -487,10 +637,11 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           </div>
         </div>
       </div>
+      )}
 
       {/* INTERVIEW SUMMARY */}
-      <SectionTitle title="Interview summary" />
-      {candidate.interview && (
+      <SectionTitle title="Interview summary" open={isOpen("interview")} onToggle={() => toggleSection("interview")} />
+      {isOpen("interview") && candidate.interview && (
         <div style={{ marginTop: 16, border: `1px solid ${ink(0.12)}`, borderTop: `2px solid ${C.navy}`, background: "#fff", padding: "20px 22px" }}>
           <div style={{ fontFamily: F.mono, fontSize: 12, letterSpacing: "0.03em", color: ink(0.6) }}>{candidate.interview.title}</div>
           <div style={{ marginTop: 10, fontSize: 16, lineHeight: 1.55, color: ink(0.88) }}>{candidate.interview.fit}</div>
@@ -599,13 +750,16 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       <SectionTitle
         title="Candidate working file"
         titleSuffix={<span style={{ fontFamily: F.mono, fontSize: 13, color: ink(0.45) }}>{id}.md</span>}
+        open={isOpen("workingFile")}
+        onToggle={() => toggleSection("workingFile")}
         right={
           <button onClick={downloadMd} style={{ cursor: "pointer", border: `1px solid ${ink(0.22)}`, background: "transparent", color: C.navy, borderRadius: 9999, padding: "7px 14px", fontFamily: F.mono, fontSize: 12.5 }}>
             Download .md ↓
           </button>
         }
       />
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 40px", alignItems: "start" }}>
+      {isOpen("workingFile") && (
+      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: narrow ? "24px 0" : "0 40px", alignItems: "start" }}>
         <div>
           <div style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5), marginBottom: 8 }}>Corrections &amp; analysis notes</div>
           <div style={{ fontSize: 14, lineHeight: 1.5, color: ink(0.7), marginBottom: 10 }}>
@@ -630,15 +784,28 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               outline: "none",
             }}
           />
-          <button
-            onClick={() => {
-              wsApi.addCorrection(id, corrDraft);
-              setCorrDraft("");
-            }}
-            style={{ marginTop: 9, cursor: "pointer", border: "none", background: C.navy, color: C.cream, borderRadius: 9999, padding: "8px 16px", fontFamily: F.mono, fontSize: 12.5 }}
-          >
-            Save correction &amp; re-analyze
-          </button>
+          <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <label style={{ fontFamily: F.mono, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5) }}>Reviewer</label>
+            <select
+              value={reviewerKind}
+              onChange={(e) => setReviewerKind(e.target.value as ReviewerKind)}
+              aria-label="Reviewer leaving this correction"
+              style={{ fontFamily: F.sans, fontSize: 13, color: C.navy, background: "#fff", border: `1px solid ${ink(0.18)}`, borderRadius: 8, padding: "5px 9px", cursor: "pointer" }}
+            >
+              {REVIEWER_OPTIONS.map((o) => (
+                <option key={o.kind} value={o.kind}>{o.label}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                wsApi.addCorrection(id, corrDraft, reviewerKind);
+                setCorrDraft("");
+              }}
+              style={{ cursor: "pointer", border: "none", background: C.navy, color: C.cream, borderRadius: 9999, padding: "8px 16px", fontFamily: F.mono, fontSize: 12.5 }}
+            >
+              Save correction &amp; re-analyze
+            </button>
+          </div>
         </div>
         <div>
           <div style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5), marginBottom: 8 }}>Correction log</div>
@@ -648,7 +815,9 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               .reverse()
               .map((e, i) => (
                 <div key={i} style={{ borderLeft: `2px solid ${C.orange}`, padding: "3px 0 3px 12px", marginBottom: 12 }}>
-                  <div style={{ fontFamily: F.mono, fontSize: 11, color: ink(0.45) }}>{e.ts} · applied</div>
+                  <div style={{ fontFamily: F.mono, fontSize: 11, color: ink(0.45) }}>
+                    {e.ts}{e.reviewerLabel ? ` · ${e.reviewerLabel}` : ""} · applied
+                  </div>
                   <div style={{ marginTop: 3, fontSize: 14.5, lineHeight: 1.5, color: C.navy }}>{e.text}</div>
                 </div>
               ))
@@ -657,6 +826,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }
@@ -665,16 +835,40 @@ function SectionTitle({
   title,
   titleSuffix,
   right,
+  open,
+  onToggle,
 }: {
   title: string;
   titleSuffix?: React.ReactNode;
   right?: React.ReactNode;
+  // When provided, the header becomes a collapse toggle with a caret (#4).
+  open?: boolean;
+  onToggle?: () => void;
 }) {
+  const collapsible = typeof open === "boolean" && !!onToggle;
+  const heading = (
+    <h2 style={{ margin: 0, fontSize: 23, fontWeight: 500, letterSpacing: "-0.02em", display: "flex", alignItems: "baseline", gap: 10 }}>
+      {collapsible && (
+        <span aria-hidden style={{ fontFamily: F.mono, fontSize: 14, color: ink(0.45) }}>{open ? "▾" : "▸"}</span>
+      )}
+      <span>
+        {title} {titleSuffix}
+      </span>
+    </h2>
+  );
   return (
     <div style={{ marginTop: 42, display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: `1px solid ${ink(0.15)}`, paddingBottom: 9 }}>
-      <h2 style={{ margin: 0, fontSize: 23, fontWeight: 500, letterSpacing: "-0.02em" }}>
-        {title} {titleSuffix}
-      </h2>
+      {collapsible ? (
+        <button
+          onClick={onToggle}
+          aria-expanded={open}
+          style={{ cursor: "pointer", border: "none", background: "transparent", padding: 0, textAlign: "left", color: C.navy }}
+        >
+          {heading}
+        </button>
+      ) : (
+        heading
+      )}
       {right}
     </div>
   );

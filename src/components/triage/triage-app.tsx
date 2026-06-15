@@ -5,16 +5,19 @@ import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { FONTS } from "@/lib/triage/theme";
 import type { Candidate, DecisionRead } from "@/lib/triage/types";
+import type { Viewer } from "@/lib/triage/reviewer";
 import type { TriagePool } from "@/lib/triage/load";
 import { TriageDataProvider } from "./context";
 import { useWorkspace } from "./use-workspace";
+import { useIsNarrow } from "./use-media-query";
 import { PoolScreen } from "./pool-screen";
 import { CandidateScreen } from "./candidate-screen";
 
 type View = "pool" | "candidate";
 
-export function TriageApp({ pool }: { pool: TriagePool }) {
+export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }) {
   const router = useRouter();
+  const narrow = useIsNarrow();
   const [isPending, startTransition] = useTransition();
   const [candidates, setCandidates] = useState<Candidate[]>(pool.candidates);
   const [view, setView] = useState<View>("pool");
@@ -38,6 +41,9 @@ export function TriageApp({ pool }: { pool: TriagePool }) {
               next: read.next || c.next,
               redFlags: read.flags ?? c.redFlags,
               reanalysis: read.reanalysis ?? c.reanalysis,
+              rev: read.rev ?? c.rev,
+              revNote: read.revNote ?? c.revNote,
+              careerRead: read.careerRead ?? c.careerRead,
               survivor: read.decision === "interview" || read.decision === "short",
             }
           : c,
@@ -48,8 +54,8 @@ export function TriageApp({ pool }: { pool: TriagePool }) {
   const wsApi = useWorkspace(pool.workspace, candidates, applyRead);
 
   const contextValue = useMemo(
-    () => ({ candidates, meta: pool.meta, jobs: pool.jobs, findCandidate }),
-    [candidates, pool.meta, pool.jobs, findCandidate],
+    () => ({ candidates, meta: pool.meta, jobs: pool.jobs, viewer, findCandidate }),
+    [candidates, pool.meta, pool.jobs, viewer, findCandidate],
   );
 
   const openPool = () => setView("pool");
@@ -96,8 +102,8 @@ export function TriageApp({ pool }: { pool: TriagePool }) {
             borderBottom: "1px solid rgba(22,35,53,0.15)",
             display: "flex",
             alignItems: "center",
-            gap: 18,
-            padding: "0 28px",
+            gap: narrow ? 10 : 18,
+            padding: narrow ? "0 14px" : "0 28px",
           }}
         >
           <div
@@ -132,7 +138,7 @@ export function TriageApp({ pool }: { pool: TriagePool }) {
               border: "1px solid rgba(22,35,53,0.18)",
               borderRadius: 8,
               padding: "5px 10px",
-              maxWidth: 360,
+              maxWidth: narrow ? 150 : 360,
               cursor: "pointer",
             }}
           >
@@ -150,17 +156,19 @@ export function TriageApp({ pool }: { pool: TriagePool }) {
             </div>
           )}
           <div style={{ flex: 1 }} />
-          <span
-            style={{
-              fontFamily: FONTS.mono,
-              fontSize: 12,
-              color: "rgba(22,35,53,0.45)",
-              whiteSpace: "nowrap",
-              flexShrink: 0,
-            }}
-          >
-            Submitted materials only · synced from Workable
-          </span>
+          {!narrow && (
+            <span
+              style={{
+                fontFamily: FONTS.mono,
+                fontSize: 12,
+                color: "rgba(22,35,53,0.45)",
+                whiteSpace: "nowrap",
+                flexShrink: 0,
+              }}
+            >
+              Submitted materials only · synced from Workable
+            </span>
+          )}
           <div
             style={{
               width: 28,
