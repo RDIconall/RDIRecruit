@@ -499,8 +499,13 @@ const CONFIDENCE_NOTE: Record<string, string> = {
 };
 
 // Strongest scope verbs evidencing a role's stratum (highest tier present).
+// Live `ro_assessments.per_role[].verbs` rows can be missing a tier key even
+// though the type says all three are present, so guard each access.
 function strongestVerbs(verbs: RoAssessmentRow["per_role"][number]["verbs"]): string[] {
-  const tier = verbs.III.length ? verbs.III : verbs.II.length ? verbs.II : verbs.I;
+  const iii = verbs?.III ?? [];
+  const ii = verbs?.II ?? [];
+  const i = verbs?.I ?? [];
+  const tier = iii.length ? iii : ii.length ? ii : i;
   return tier.slice(0, 4);
 }
 

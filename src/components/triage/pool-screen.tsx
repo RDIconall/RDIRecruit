@@ -32,6 +32,9 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
   const dq = ws.dq;
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const toggleExpand = (id: string) => setExpanded((e) => ({ ...e, [id]: !e[id] }));
+  // Group-level collapse for the cut list — keyed by group title, default expanded.
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const toggleGroup = (title: string) => setCollapsedGroups((g) => ({ ...g, [title]: !g[title] }));
 
   const byDec = (d: Decision) => CANDIDATES.filter((c) => c.decision === d);
   const nInterview = byDec("interview").length;
@@ -167,10 +170,21 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
           </button>
         </div>
 
-        {cutGroups.map((g) => (
+        {cutGroups.map((g) => {
+          const groupOpen = !collapsedGroups[g.title];
+          return (
           <div key={g.title} style={{ marginTop: 18 }}>
-            <div style={mono({ fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9E3B28", marginBottom: 4 })}>{g.title}</div>
-            {g.items.map((c) => {
+            <div
+              onClick={() => toggleGroup(g.title)}
+              title={groupOpen ? "Collapse section" : "Expand section"}
+              aria-expanded={groupOpen}
+              style={mono({ cursor: "pointer", display: "flex", alignItems: "baseline", gap: 8, fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase", color: "#9E3B28", marginBottom: 4 })}
+            >
+              <span style={{ flexShrink: 0 }}>{groupOpen ? "▾" : "▸"}</span>
+              <span>{g.title}</span>
+              <span style={{ opacity: 0.6 }}>· {g.items.length}</span>
+            </div>
+            {groupOpen && g.items.map((c) => {
               const isDq = !!dq[c.id];
               const isOpen = !!expanded[c.id];
               return (
@@ -251,7 +265,8 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
               );
             })}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* ============ INTERVIEW PRIORITY ============ */}

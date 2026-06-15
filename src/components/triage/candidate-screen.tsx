@@ -454,45 +454,46 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
             </div>
             </div>
           </div>
+        </>
+      )}
 
-          {/* RO CAREER PROGRESSION (sourced from the RO assessment) */}
-          {candidate.careerProgression?.hasData && (
-            <div style={{ marginTop: 38 }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: `1px solid ${ink(0.15)}`, paddingBottom: 9 }}>
-                <h2 style={{ margin: 0, fontSize: 23, fontWeight: 500, letterSpacing: "-0.02em" }}>RO career progression</h2>
-                <span style={{ fontFamily: F.mono, fontSize: 12, color: ink(0.5) }}>
-                  Seat calls for {candidate.careerProgression.seatStratum} · reads {candidate.careerProgression.currentCapability}
-                </span>
-              </div>
-              <div style={{ marginTop: 10, fontSize: 14.5, lineHeight: 1.5, color: ink(0.8) }}>
-                {candidate.careerProgression.trajectory}
-                {candidate.careerProgression.confidenceNote ? ` · ${candidate.careerProgression.confidenceNote}` : ""}
-              </div>
-              <div style={{ overflowX: "auto" }}>
-              <div style={{ minWidth: narrow ? 720 : undefined }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 90px 96px 1.4fr", padding: "10px 6px", fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.03em", textTransform: "uppercase", color: ink(0.42), borderBottom: `1px solid ${ink(0.09)}`, marginTop: 12 }}>
-                <div>Role</div>
-                <div>Company</div>
-                <div>Tenure</div>
-                <div>RO stratum</div>
-                <div>Scope evidence</div>
-              </div>
-              {candidate.careerProgression.steps.map((step, idx) => (
-                <div key={idx} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 90px 96px 1.4fr", padding: "11px 6px", alignItems: "baseline", borderBottom: `1px solid ${ink(0.08)}` }}>
-                  <div style={{ fontSize: 14.5, color: C.navy, paddingRight: 8 }}>{step.role}</div>
-                  <div style={{ fontSize: 14.5, color: ink(0.78), paddingRight: 8 }}>{step.company}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 13, color: ink(0.7) }}>{step.tenure}</div>
-                  <div style={{ fontFamily: F.mono, fontSize: 13, color: C.navy }}>{step.stratumRange}</div>
-                  <div style={{ fontSize: 13, color: ink(0.7), paddingRight: 10, lineHeight: 1.45 }}>
-                    {step.verbs.length ? step.verbs.join(" · ") : "—"}
-                  </div>
-                </div>
-              ))}
-              </div>
+      {/* RO CAREER PROGRESSION (sourced from the RO assessment) — shown whenever
+          RO data exists, independent of the deep-analysis gate. */}
+      {candidate.careerProgression?.hasData && (
+        <div style={{ marginTop: 38 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: `1px solid ${ink(0.15)}`, paddingBottom: 9 }}>
+            <h2 style={{ margin: 0, fontSize: 23, fontWeight: 500, letterSpacing: "-0.02em" }}>RO career progression</h2>
+            <span style={{ fontFamily: F.mono, fontSize: 12, color: ink(0.5) }}>
+              Seat calls for {candidate.careerProgression.seatStratum} · reads {candidate.careerProgression.currentCapability}
+            </span>
+          </div>
+          <div style={{ marginTop: 10, fontSize: 14.5, lineHeight: 1.5, color: ink(0.8) }}>
+            {candidate.careerProgression.trajectory}
+            {candidate.careerProgression.confidenceNote ? ` · ${candidate.careerProgression.confidenceNote}` : ""}
+          </div>
+          <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: narrow ? 720 : undefined }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 90px 96px 1.4fr", padding: "10px 6px", fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.03em", textTransform: "uppercase", color: ink(0.42), borderBottom: `1px solid ${ink(0.09)}`, marginTop: 12 }}>
+            <div>Role</div>
+            <div>Company</div>
+            <div>Tenure</div>
+            <div>RO stratum</div>
+            <div>Scope evidence</div>
+          </div>
+          {candidate.careerProgression.steps.map((step, idx) => (
+            <div key={idx} style={{ display: "grid", gridTemplateColumns: "1.2fr 1.2fr 90px 96px 1.4fr", padding: "11px 6px", alignItems: "baseline", borderBottom: `1px solid ${ink(0.08)}` }}>
+              <div style={{ fontSize: 14.5, color: C.navy, paddingRight: 8 }}>{step.role}</div>
+              <div style={{ fontSize: 14.5, color: ink(0.78), paddingRight: 8 }}>{step.company}</div>
+              <div style={{ fontFamily: F.mono, fontSize: 13, color: ink(0.7) }}>{step.tenure}</div>
+              <div style={{ fontFamily: F.mono, fontSize: 13, color: C.navy }}>{step.stratumRange}</div>
+              <div style={{ fontSize: 13, color: ink(0.7), paddingRight: 10, lineHeight: 1.45 }}>
+                {step.verbs.length ? step.verbs.join(" · ") : "—"}
               </div>
             </div>
-          )}
-        </>
+          ))}
+          </div>
+          </div>
+        </div>
       )}
 
       {/* RÉSUMÉ */}
