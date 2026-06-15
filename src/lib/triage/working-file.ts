@@ -1,8 +1,15 @@
 import { DM } from "./theme";
 import type { Candidate, TimelineRow, WorkspaceSlice } from "./types";
 
-function stamp(): string {
-  return new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
+// Matches the prototype's nowStamp() (en-US date + time) so the stored .md reads
+// the same as the spec's buildMd() output.
+function nowStamp(): string {
+  const d = new Date();
+  return (
+    d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) +
+    " " +
+    d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  );
 }
 
 function effectiveTimeline(c: Candidate, slice: WorkspaceSlice): TimelineRow[] {
@@ -11,8 +18,12 @@ function effectiveTimeline(c: Candidate, slice: WorkspaceSlice): TimelineRow[] {
 
 /**
  * Render the living per-candidate markdown working file — "one candidate = one
- * living case file". Ports buildMd() from workspace.ts but works off the mapped
- * (real-data) Candidate, its persisted human edits, and the real Workable link.
+ * living case file". This is the faithful port of the spec's buildMd()
+ * (prototype src/lib/triage/workspace.ts): same sections, same order —
+ *   header → RO time progression → Corrections → Notes to Claude →
+ *   Interview summary (if any) → Pasted transcript (if any).
+ * It operates on the mapped (real-data) Candidate, its persisted human edits,
+ * and the real Workable link.
  */
 export function renderWorkingFile(
   c: Candidate,
@@ -32,16 +43,11 @@ export function renderWorkingFile(
     `- RO level: ${c.roLevel}\n` +
     `- Decision: ${DM(c.decision).label}${opts.disqualified ? " (DISQUALIFIED)" : ""}\n` +
     `- Workable: ${opts.workableUrl}\n` +
-    `- Last updated: ${stamp()}\n\n`;
-
-  s += `## Decision read\n\n`;
-  s += `- **Why:** ${c.why}\n`;
-  s += `- **Main risk:** ${c.flag}\n`;
-  s += `- **Next action:** ${c.next}\n\n`;
+    `- Last updated: ${nowStamp()}\n\n`;
 
   s += "## RO time progression\n\n| Period | Org/School | Role | Tenure | Scope | Signal |\n|---|---|---|---|---|---|\n";
   tl.forEach((r) => {
-    s += `| ${r.period || ""} | ${r.org || ""} | ${r.role || ""} | ${r.tenure || ""} | ${(r.scope || "").replace(/\|/g, "/")} | ${r.signal || ""} |\n`;
+    s += `| ${r.period || ""} | ${r.org || ""} | ${r.role || ""} | ${r.tenure || ""} | ${r.scope || ""} | ${r.signal || ""} |\n`;
   });
 
   s += "\n## Corrections (human, persisted)\n\n";
@@ -53,15 +59,8 @@ export function renderWorkingFile(
   if (rk.length) rk.forEach((k) => (s += `- (${k}) ${reps[k]}\n`));
   else s += "- none\n";
 
-  if (c.answers.length) {
-    s += "\n## Application answers\n\n";
-    c.answers.forEach((qa) => {
-      s += `**${qa.q}**\n\n${qa.a}\n\n`;
-      if (qa.comment) s += `> Claude: ${qa.comment}\n\n`;
-    });
-  }
-
-  if (transcript) s += `\n## Pasted / pulled transcript\n\n${transcript}\n`;
+  if (c.interview) s += `\n## Interview summary\n\n${c.interview.title}\n\n${c.interview.fit}\n`;
+  if (transcript) s += `\n## Pasted transcript\n\n${transcript}\n`;
 
   return s;
 }

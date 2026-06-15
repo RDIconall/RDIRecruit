@@ -37,6 +37,7 @@ export function TriageApp({ pool }: { pool: TriagePool }) {
               flag: read.risk || c.flag,
               next: read.next || c.next,
               redFlags: read.flags ?? c.redFlags,
+              reanalysis: read.reanalysis ?? c.reanalysis,
               survivor: read.decision === "interview" || read.decision === "short",
             }
           : c,

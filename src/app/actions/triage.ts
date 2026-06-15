@@ -8,6 +8,7 @@ import { loadOneCandidate } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { renderWorkingFile } from "@/lib/triage/working-file";
 import { recalculateRead } from "@/lib/triage/recalc";
+import { DM } from "@/lib/triage/theme";
 import type { Candidate, DecisionRead, TimelineRow, WorkspaceSlice } from "@/lib/triage/types";
 
 async function requireAuth(): Promise<string> {
@@ -43,6 +44,7 @@ function applyRead(candidate: Candidate, read: DecisionRead): Candidate {
     flag: read.risk || candidate.flag,
     next: read.next || candidate.next,
     redFlags: read.flags ?? candidate.redFlags,
+    reanalysis: read.reanalysis ?? candidate.reanalysis,
   };
 }
 
@@ -61,7 +63,7 @@ interface RecalcResult {
 async function persistAndMaybeRecalc(
   candidateId: string,
   patch: WorkspaceSlice,
-  opts: { recalc: boolean },
+  opts: { recalc: boolean; trigger?: string },
 ): Promise<RecalcResult> {
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
 
@@ -73,22 +75,45 @@ async function persistAndMaybeRecalc(
   if (!one) return { ok: false, recalculated: false, read: null, message: "Candidate not found" };
 
   let candidate = one.candidate;
+  const priorDecision = candidate.decision;
+
+  // The .md fed to Claude reflects the human edit just saved (one = post-write).
+  const baseContent = renderWorkingFile(candidate, one.slice, {
+    workableUrl: one.workableUrl,
+    disqualified: one.disqualified,
+  });
+
   let read: DecisionRead | null = null;
 
   if (opts.recalc) {
     read = await recalculateRead({
       candidate,
+      workingFile: baseContent,
       corrections: one.slice.corrections ?? [],
       transcript: one.slice.transcript ?? "",
       replies: one.slice.replies ?? {},
     });
-    if (read) candidate = applyRead(candidate, read);
+    if (read) {
+      // When a human note moved the decision, surface the before→after with the
+      // human-signal reviewer (spec: "re-analysis when a human note changes the decision").
+      if (read.decision !== priorDecision) {
+        read = {
+          ...read,
+          reanalysis: {
+            reviewer: opts.trigger ?? (updatedBy ? `${updatedBy} (human signal)` : "Human signal"),
+            before: DM(priorDecision).label,
+            after: DM(read.decision).label,
+            rec: read.timelineNote || read.why,
+          },
+        };
+      }
+      candidate = applyRead(candidate, read);
+    }
   }
 
-  const content = renderWorkingFile(candidate, one.slice, {
-    workableUrl: one.workableUrl,
-    disqualified: one.disqualified,
-  });
+  const content = read
+    ? renderWorkingFile(candidate, one.slice, { workableUrl: one.workableUrl, disqualified: one.disqualified })
+    : baseContent;
 
   await upsertWorkingFile(candidateId, read ? { content, read } : { content }, updatedBy);
 
@@ -108,17 +133,17 @@ export async function saveCorrection(input: { candidateId: string; text: string 
 
   const existing = await getWorkingFile(input.candidateId);
   const corrections = [...(existing?.workspace.corrections ?? []), { ts: nowStamp(), text }];
-  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true });
+  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction" });
 }
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
   await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true });
+  return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript" });
 }
 
 export async function runDeepAnalysis(input: { candidateId: string }): Promise<RecalcResult> {
   await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { deep: true }, { recalc: true });
+  return persistAndMaybeRecalc(input.candidateId, { deep: true }, { recalc: true, trigger: "Deep analysis" });
 }
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {

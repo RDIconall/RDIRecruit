@@ -194,6 +194,9 @@ export interface DecisionRead {
   next: string;
   timelineNote?: string;
   flags?: RedFlag[];
+  // Set when a human note/transcript moved the decision: surfaces the
+  // before→after re-analysis with the human-signal reviewer in the UI.
+  reanalysis?: Reanalysis;
   recalculatedAt?: string;
   model?: string;
 }

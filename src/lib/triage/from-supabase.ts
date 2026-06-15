@@ -480,6 +480,10 @@ export function mapCandidate(input: MapInput): Candidate {
     Object.assign(candidate, cutFieldsFor(input));
   }
 
+  if (input.read?.reanalysis) {
+    candidate.reanalysis = input.read.reanalysis;
+  }
+
   if (input.read?.timelineNote) {
     candidate.revNote = `Re-analyzed by Claude. ${input.read.timelineNote}`;
   }

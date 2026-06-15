@@ -29,7 +29,7 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
 }`;
 
 function buildUserPrompt(input: RecalcInput): string {
-  const { candidate, corrections, transcript, replies } = input;
+  const { candidate, corrections, transcript, replies, workingFile } = input;
 
   const tl = (candidate.timeline ?? [])
     .map((r) => `- ${r.period} · ${r.org} · ${r.role} · ${r.tenure} · ${r.scope} [${r.signal}]`)
@@ -50,7 +50,12 @@ function buildUserPrompt(input: RecalcInput): string {
   const reps = Object.entries(replies).filter(([, v]) => v);
   const repsText = reps.length ? reps.map(([k, v]) => `- (${k}) ${v}`).join("\n") : "none";
 
-  return `CANDIDATE: ${candidate.name}
+  return `STORED WORKING FILE (.md — this candidate's living case file):
+"""
+${(workingFile || "(empty)").slice(0, 8000)}
+"""
+
+CANDIDATE: ${candidate.name}
 Current role on file: ${candidate.role} at ${candidate.company}
 Salary ask: ${candidate.salary}
 RO capability (level label, NOT a score): ${candidate.roLevel}
@@ -85,6 +90,8 @@ Re-derive the decision read now. If the human corrections or the transcript chan
 
 export interface RecalcInput {
   candidate: Candidate;
+  /** The candidate's stored .md working file (case file), fed to Claude as context. */
+  workingFile: string;
   corrections: { ts: string; text: string }[];
   transcript: string;
   replies: Record<string, string>;
