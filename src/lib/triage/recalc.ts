@@ -113,7 +113,7 @@ REVIEWER REPLIES TO PRIOR AI COMMENTS:
 ${repsText}
 
 INTERVIEW / SCREEN TRANSCRIPT (post-application — weight heavily when present):
-${transcript || "none yet"}${specBlock}${rubricBlock}
+${(transcript || "none yet").slice(0, 24000)}${specBlock}${rubricBlock}
 
 Re-derive the decision read now. If the human corrections or the transcript change the picture, change the decision accordingly. Remember: decision vocabulary only, never a number.`;
 }
@@ -173,11 +173,18 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
       model: MODEL,
-      max_tokens: 1200,
+      // Headroom: the read now also carries careerRead + rubricFit (verdict,
+      // summary, strengths[], gaps[]). 1200 truncated the JSON mid-stream for
+      // rubric-graded candidates, which broke the parse and silently dropped
+      // the re-analysis. 3000 comfortably fits the full object.
+      max_tokens: 3000,
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: buildUserPrompt(input) }],
     });
 
+    if (response.stop_reason === "max_tokens") {
+      console.warn("Triage recalculate: response hit max_tokens — JSON may be truncated");
+    }
     const text = response.content[0]?.type === "text" ? response.content[0].text : "{}";
     const match = text.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(match?.[0] ?? "{}") as Partial<DecisionRead>;
