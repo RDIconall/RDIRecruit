@@ -1,28 +1,11 @@
 // RDI design system tokens. No new hues, no gradients, no emoji.
-// Surface is a neutral, mostly-white "document": white page, a de-blued grey
-// scale for secondary text / borders / fills, navy reserved as the primary +
-// positive-signal ink, and orange/brick as the only saturated signal colors.
 export const COLORS = {
   navy: "#162335",
   orange: "#E74424",
   cream: "#FAFAF7",
   brick: "#9E3B28", // reserved for cut / flags
   white: "#FFFFFF",
-  paper: "#FFFFFF", // page + card surface
-  panel: "#F7F7F6", // subtle neutral fill (zebra / inset)
-  inkBase: "#1A1C20", // neutral near-black
 } as const;
-
-// Neutral, de-blued grey scale. Use for secondary text, metadata, hairline
-// borders, and subtle fills. Primary text / headings stay COLORS.navy.
-export const ink = (a: number): string => `rgba(26,28,32,${a})`;
-
-// Soft, low-chrome container language: gentle radius + hairline + faint shadow.
-export const RADIUS = 12;
-export const RADIUS_SM = 8;
-export const HAIRLINE = "rgba(26,28,32,0.10)";
-export const SHADOW = "0 1px 2px rgba(16,18,22,0.04), 0 1px 3px rgba(16,18,22,0.05)";
-export const SHADOW_SOFT = "0 1px 2px rgba(16,18,22,0.05), 0 6px 20px rgba(16,18,22,0.06)";
 
 // Font stacks. The licensed RDI faces (National 2 / Söhne Mono / Tiempos
 // Headline) are substituted with the closest Google faces wired in layout.tsx
@@ -51,9 +34,9 @@ export interface DecisionMeta {
 export function DM(d: Decision): DecisionMeta {
   const m: Record<Decision, DecisionMeta> = {
     interview: { label: "Interview first", c: "#E74424", bg: "rgba(231,68,36,0.10)", b: "rgba(231,68,36,0.32)" },
-    short: { label: "Short screen", c: "#162335", bg: "rgba(26,28,32,0.05)", b: "rgba(26,28,32,0.20)" },
-    verify: { label: "Verify first", c: "#162335", bg: "transparent", b: "rgba(26,28,32,0.26)" },
-    hold: { label: "Hold", c: "rgba(26,28,32,0.55)", bg: "transparent", b: "rgba(26,28,32,0.15)" },
+    short: { label: "Short screen", c: "#162335", bg: "rgba(22,35,53,0.06)", b: "rgba(22,35,53,0.22)" },
+    verify: { label: "Verify first", c: "#162335", bg: "transparent", b: "rgba(22,35,53,0.30)" },
+    hold: { label: "Hold", c: "rgba(22,35,53,0.55)", bg: "transparent", b: "rgba(22,35,53,0.16)" },
     cut: { label: "Cut", c: "#9E3B28", bg: "rgba(158,59,40,0.07)", b: "rgba(158,59,40,0.24)" },
     blocked: { label: "Review blocked", c: "#E74424", bg: "transparent", b: "rgba(231,68,36,0.32)" },
   };
@@ -68,7 +51,7 @@ export interface ReviewerMeta {
 
 export function REV(r: ReviewerSignal): ReviewerMeta {
   const m: Record<ReviewerSignal, ReviewerMeta> = {
-    none: { label: "Not reviewed", dot: "rgba(26,28,32,0.20)", c: "rgba(26,28,32,0.45)" },
+    none: { label: "Not reviewed", dot: "rgba(22,35,53,0.20)", c: "rgba(22,35,53,0.45)" },
     conallPos: { label: "Conall positive", dot: "#162335", c: "#162335" },
     conallConcern: { label: "Conall concern", dot: "#9E3B28", c: "#9E3B28" },
     laraPos: { label: "Lara positive", dot: "#162335", c: "#162335" },
@@ -87,15 +70,15 @@ export interface SignalMeta {
 
 export function SIG(s: TimelineSignal): SignalMeta {
   const m: Record<TimelineSignal, SignalMeta> = {
-    Positive: { c: "#162335", bg: "rgba(26,28,32,0.05)" },
+    Positive: { c: "#162335", bg: "rgba(22,35,53,0.06)" },
     Promotion: { c: "#E74424", bg: "rgba(231,68,36,0.10)" },
-    Learning: { c: "rgba(26,28,32,0.6)", bg: "rgba(26,28,32,0.04)" },
+    Learning: { c: "rgba(22,35,53,0.6)", bg: "rgba(22,35,53,0.05)" },
     Strong: { c: "#E74424", bg: "rgba(231,68,36,0.10)" },
     Verify: { c: "#9E3B28", bg: "rgba(158,59,40,0.08)" },
     Ask: { c: "#9E3B28", bg: "rgba(158,59,40,0.08)" },
     Gap: { c: "#9E3B28", bg: "rgba(158,59,40,0.08)" },
-    Cert: { c: "#162335", bg: "rgba(26,28,32,0.05)" },
-    Connected: { c: "#162335", bg: "rgba(26,28,32,0.05)" },
+    Cert: { c: "#162335", bg: "rgba(22,35,53,0.06)" },
+    Connected: { c: "#162335", bg: "rgba(22,35,53,0.06)" },
     Switched: { c: "#9E3B28", bg: "rgba(158,59,40,0.08)" },
     Inflated: { c: "#9E3B28", bg: "rgba(158,59,40,0.08)" },
   };
@@ -117,7 +100,7 @@ export function CM(k: CommentKind): CommentMeta {
     thin: { label: "Thin / generic", color: "#9E3B28", hl: "rgba(158,59,40,0.08)" },
     good: { label: "Paid attention", color: "#162335", hl: "transparent" },
     ask: { label: "Ask this live", color: "#162335", hl: "transparent" },
-    neutral: { label: "Note", color: "rgba(26,28,32,0.5)", hl: "transparent" },
+    neutral: { label: "Note", color: "rgba(22,35,53,0.5)", hl: "transparent" },
   };
   return m[k] || m.neutral;
 }
