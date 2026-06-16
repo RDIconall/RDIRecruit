@@ -155,47 +155,62 @@ export async function upsertCandidateFromWorkable(
     .eq("candidate_id", candidate.id)
     .maybeSingle();
 
-  const applicationPayload = {
-    candidate_id: candidate.id,
-    answers: answersToRecord(candidate),
-    cover_letter: candidate.cover_letter ?? null,
-    resume_url: candidate.resume_url ?? null,
-    parsed_experience: parseExperience(candidate),
-    parsed_education: parseEducation(candidate),
-  };
+  const incomingAnswers = answersToRecord(candidate);
+  const incomingExperience = parseExperience(candidate);
+  const incomingEducation = parseEducation(candidate);
 
   if (existingApp?.id) {
-    const { error } = await supabase
-      .from("applications")
-      .update(applicationPayload)
-      .eq("id", existingApp.id);
-    if (error) console.error(`application update failed (${candidate.id})`, error.message);
+    // The Workable list endpoint returns only summaries — no résumé URL, parsed
+    // experience/education, answers or cover letter. A later metadata change
+    // (e.g. a stage move) re-mirrors via that same summary, so writing nulls
+    // here would wipe detail we hydrated earlier from the single-candidate
+    // endpoint. Only overwrite a field when the incoming payload actually
+    // carries it; otherwise leave the stored value untouched.
+    const update: Record<string, unknown> = {};
+    if (candidate.resume_url) update.resume_url = candidate.resume_url;
+    if (candidate.cover_letter) update.cover_letter = candidate.cover_letter;
+    if (Object.keys(incomingAnswers).length) update.answers = incomingAnswers;
+    if (incomingExperience.length) update.parsed_experience = incomingExperience;
+    if (incomingEducation.length) update.parsed_education = incomingEducation;
+    if (Object.keys(update).length) {
+      const { error } = await supabase
+        .from("applications")
+        .update(update)
+        .eq("id", existingApp.id);
+      if (error) console.error(`application update failed (${candidate.id})`, error.message);
+    }
   } else {
-    const { error } = await supabase.from("applications").insert(applicationPayload);
+    const { error } = await supabase.from("applications").insert({
+      candidate_id: candidate.id,
+      answers: incomingAnswers,
+      cover_letter: candidate.cover_letter ?? null,
+      resume_url: candidate.resume_url ?? null,
+      parsed_experience: incomingExperience,
+      parsed_education: incomingEducation,
+    });
     if (error) console.error(`application insert failed (${candidate.id})`, error.message);
   }
 
-  const needsFirstIngest =
-    options?.forceAnalyze ||
-    result.isNew ||
-    !existing?.analysis_hash;
-
-  const shouldIngestResume =
-    options?.analyze !== false && needsFirstIngest;
+  // Download + parse the résumé whenever we actually have a URL and analysis is
+  // enabled — not just on the very first ingest. ingestResumeForCandidate dedupes
+  // via the source hash, so re-calling it on an already-stored résumé is a cheap
+  // no-op. The summary mirror path (analyze:false, no URL) never triggers a
+  // download; full-detail paths (new webhook, score hydration, backfill) do.
+  const shouldIngestResume = options?.analyze !== false && Boolean(candidate.resume_url);
 
   if (shouldIngestResume) {
     try {
       const { ingestResumeForCandidate } = await import("../resume/ingest");
-      await ingestResumeForCandidate({
+      const ingested = await ingestResumeForCandidate({
         candidateId: candidate.id,
         candidateName: candidate.name,
         resumeUrl: candidate.resume_url,
         workableUpdatedAt: candidate.updated_at,
-        parsedExperience: applicationPayload.parsed_experience,
-        parsedEducation: applicationPayload.parsed_education,
+        parsedExperience: incomingExperience,
+        parsedEducation: incomingEducation,
         force: options?.forceAnalyze,
       });
-      result.applicationIngested = true;
+      result.applicationIngested = Boolean(ingested);
     } catch (error) {
       console.error(`Resume ingest failed for ${candidate.id}`, error);
     }
@@ -426,15 +441,17 @@ async function runScoreUnscoredPass(options?: {
     await Promise.all(
       batch.map(async (entry) => {
         try {
-          // Hydrate full candidate (answers, experience, résumé URL) — the list
-          // endpoint only returns summaries — then evaluate. Stale re-scores are
-          // already fully mirrored, so skip the Workable round-trip for them
-          // (keeps the bulk re-score fast enough to finish inside the budget).
+          // Hydrate full candidate (answers, experience, résumé URL + file) — the
+          // list endpoint only returns summaries — then evaluate. analyze:true so
+          // the résumé is downloaded and parsed before scoring (idempotent: skips
+          // if already ingested). Stale re-scores are already fully mirrored, so
+          // skip the Workable round-trip for them (keeps the bulk re-score fast
+          // enough to finish inside the budget).
           if (!entry.scored && entry.jobShortcode) {
             try {
               const full = await getCandidate(entry.jobShortcode, entry.id);
               await upsertCandidateFromWorkable(full, entry.jobShortcode, {
-                analyze: false,
+                analyze: true,
                 syncComments: false,
                 hydrate: true,
               });
@@ -454,6 +471,95 @@ async function runScoreUnscoredPass(options?: {
   }
 
   return { scored, failed, remaining: Math.max(0, toScore.length - processed) };
+}
+
+/**
+ * Repair candidates that were mirrored without their résumé file. The Workable
+ * summary list endpoint carries no résumé URL, so candidates imported via the
+ * bulk mirror (or scored before résumé ingest existed) end up with no stored
+ * résumé. This walks the candidate population in `created_at` order via a cursor,
+ * re-fetches full detail for those still missing a stored résumé, and ingests it.
+ * Bounded by a time budget so it chips away across sync passes without ever
+ * blocking the mirror. When the cursor reaches the end it resets, so a later run
+ * re-checks only the gaps that remain (candidates who have since uploaded).
+ */
+export async function backfillMissingResumes(options?: {
+  budgetMs?: number;
+  pageSize?: number;
+}): Promise<{ examined: number; ingested: number; failed: number; done: boolean }> {
+  if (!hasSupabase()) return { examined: 0, ingested: 0, failed: 0, done: true };
+
+  const budgetMs = options?.budgetMs ?? 40_000;
+  const pageSize = options?.pageSize ?? 100;
+  const supabase = getServiceSupabase();
+  const { readSyncState, writeSyncState } = await import("./sync-state");
+
+  const state = await readSyncState<{ cursor: string | null }>("resume_backfill", { cursor: null });
+  let cursor = state.cursor;
+  const start = Date.now();
+  let examined = 0;
+  let ingested = 0;
+  let failed = 0;
+
+  while (Date.now() - start < budgetMs) {
+    let query = supabase
+      .from("candidates")
+      .select("workable_id, job_shortcode, name, created_at")
+      .order("created_at", { ascending: true })
+      .limit(pageSize);
+    if (cursor) query = query.gt("created_at", cursor);
+
+    const { data: rows, error } = await query;
+    if (error) {
+      console.error("Resume backfill: candidate page failed", error.message);
+      break;
+    }
+
+    if (!rows?.length) {
+      // Reached the end of the population — reset the cursor so a future run
+      // re-checks for newly-uploaded résumés (rows already stored drop out).
+      await writeSyncState("resume_backfill", { cursor: null });
+      return { examined, ingested, failed, done: true };
+    }
+
+    const ids = rows.map((r) => r.workable_id as string);
+    const { data: apps } = await supabase
+      .from("applications")
+      .select("candidate_id, resume_storage_path")
+      .in("candidate_id", ids);
+    const alreadyStored = new Set(
+      (apps ?? [])
+        .filter((a) => a.resume_storage_path)
+        .map((a) => a.candidate_id as string),
+    );
+
+    for (const row of rows) {
+      cursor = row.created_at as string;
+      const id = row.workable_id as string;
+      const shortcode = row.job_shortcode as string | null;
+      if (!shortcode || alreadyStored.has(id)) continue;
+
+      examined += 1;
+      try {
+        const full = await getCandidate(shortcode, id);
+        const upsert = await upsertCandidateFromWorkable(full, shortcode, {
+          analyze: true,
+          syncComments: false,
+          hydrate: true,
+        });
+        if (upsert.applicationIngested) ingested += 1;
+      } catch (err) {
+        failed += 1;
+        console.error(`Resume backfill failed for ${id}`, err);
+      }
+
+      if (Date.now() - start >= budgetMs) break;
+    }
+
+    await writeSyncState("resume_backfill", { cursor });
+  }
+
+  return { examined, ingested, failed, done: false };
 }
 
 export async function reconcileWorkablePipeline() {

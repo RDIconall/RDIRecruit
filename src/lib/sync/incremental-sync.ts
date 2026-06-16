@@ -1,6 +1,7 @@
 import { hasAnthropic, hasSupabase, hasWorkable } from "../env";
 import { listEvents, type WorkableEvent } from "../workable/client";
 import {
+  backfillMissingResumes,
   scoreUnscoredAcrossJobs,
   syncCandidateById,
   syncChangedCandidatesForJob,
@@ -21,6 +22,8 @@ export interface SyncResult {
   candidatesSkipped: number;
   scored: number;
   rescored: number;
+  /** Résumés downloaded + parsed this pass while repairing the back catalogue. */
+  resumesBackfilled: number;
   /** Candidates still awaiting analysis after this pass (run again to continue). */
   remaining: number;
   cursor?: string | null;
@@ -159,6 +162,7 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
     candidatesSkipped: 0,
     scored: 0,
     rescored: 0,
+    resumesBackfilled: 0,
     remaining: 0,
     cursor: await getEventsCursor(),
   };
@@ -209,6 +213,19 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
       } catch (error) {
         console.error("Board summary refresh failed", error);
       }
+    }
+  }
+
+  // 5) Repair the back catalogue: candidates bulk-mirrored (or scored before
+  //    résumé ingest existed) have no stored résumé because the list endpoint
+  //    carries no URL. Chip away within a budget so it never blocks the mirror.
+  if (hasAnthropic()) {
+    try {
+      const backfillBudget = mode === "incremental" ? 15_000 : 40_000;
+      const backfill = await backfillMissingResumes({ budgetMs: backfillBudget });
+      result.resumesBackfilled = backfill.ingested;
+    } catch (error) {
+      console.error("Résumé backfill step failed", error);
     }
   }
 

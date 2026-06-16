@@ -1,13 +1,14 @@
 "use client";
 
 import { CSSProperties, useState } from "react";
-import { FONTS, DM, REV, askColor, askTierLabel } from "@/lib/triage/theme";
+import { FONTS, DM, REV, askColor, askTierLabel, ink, COLORS, RADIUS, SHADOW } from "@/lib/triage/theme";
 import type { CutGroup, Decision } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
+import { ProgressBar, SegmentBar } from "./viz";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: FONTS.mono, ...extra });
-const ink = (a: number) => `rgba(22,35,53,${a})`;
+const C = COLORS;
 
 interface Props {
   wsApi: WorkspaceApi;
@@ -47,13 +48,22 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
   const total = CANDIDATES.length;
   const nDq = Object.keys(dq).filter((k) => dq[k]).length;
   const cutRemaining = nCut - nDq;
+  const pctWorth = total > 0 ? Math.round((nWorth / total) * 100) : 0;
+  const pctCutCleared = nCut > 0 ? Math.round((nDq / nCut) * 100) : 0;
+
+  const funnel = [
+    { value: nInterview, color: C.orange, label: "Interview" },
+    { value: nShort + nVerify, color: C.navy, label: "Screen / verify" },
+    { value: nHold + nBlocked, color: ink(0.32), label: "Hold / blocked" },
+    { value: nCut, color: C.brick, label: "Cut" },
+  ];
 
   const counts = [
-    { label: "To cut now", value: nCut, color: "#9E3B28" },
     { label: "Strong interview", value: nInterview, color: "#E74424" },
     { label: "Worth screening", value: nShort + nVerify, color: "#162335" },
-    { label: "Hold", value: nHold, color: "rgba(22,35,53,0.6)" },
+    { label: "Hold", value: nHold, color: ink(0.55) },
     { label: "Review blocked", value: nBlocked, color: "#E74424" },
+    { label: "To cut now", value: nCut, color: "#9E3B28" },
   ];
 
   const cuts = CANDIDATES.filter((c) => c.decision === "cut");
@@ -87,15 +97,15 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
               pool.
             </span>
           </h1>
-          <div style={mono({ marginTop: 11, display: "flex", alignItems: "center", gap: 11, fontSize: 14, color: "rgba(22,35,53,0.62)", flexWrap: "wrap" })}>
+          <div style={mono({ marginTop: 11, display: "flex", alignItems: "center", gap: 11, fontSize: 14, color: ink(0.6), flexWrap: "wrap" })}>
             <span>{meta.jobShortcode}</span>
-            <span style={{ color: "rgba(22,35,53,0.25)" }}>·</span>
+            <span style={{ color: ink(0.25) }}>·</span>
             <span>{total} in pool</span>
-            <span style={{ color: "rgba(22,35,53,0.25)" }}>·</span>
+            <span style={{ color: ink(0.25) }}>·</span>
             <span style={{ color: "#9E3B28" }}>{nCut} to cut</span>
-            <span style={{ color: "rgba(22,35,53,0.25)" }}>·</span>
+            <span style={{ color: ink(0.25) }}>·</span>
             <span style={{ color: "#162335" }}>{nWorth} to screen</span>
-            <span style={{ color: "rgba(22,35,53,0.25)" }}>·</span>
+            <span style={{ color: ink(0.25) }}>·</span>
             <span>{nDq} disqualified</span>
           </div>
         </div>
@@ -105,37 +115,76 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
           rel="noopener noreferrer"
           style={{
             cursor: "pointer",
-            border: "1px solid rgba(22,35,53,0.22)",
-            background: "transparent",
+            border: `1px solid ${ink(0.2)}`,
+            background: "#fff",
             color: "#162335",
             borderRadius: 9999,
             padding: "9px 16px",
             fontSize: 15,
             whiteSpace: "nowrap",
             textDecoration: "none",
+            boxShadow: SHADOW,
           }}
         >
           Open job in Workable ↗
         </a>
       </div>
 
-      {/* pool read + counts */}
-      <div style={{ marginTop: 24, borderTop: "1px solid rgba(22,35,53,0.15)", paddingTop: 22 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "0 56px", alignItems: "start" }}>
-          <div>
-            <div style={mono({ fontSize: 12, letterSpacing: "0.05em", textTransform: "uppercase", color: "rgba(22,35,53,0.5)" })}>
+      {/* ============ POOL HEALTH — HERO KPI ============ */}
+      <div
+        style={{
+          marginTop: 26,
+          background: "#fff",
+          border: `1px solid ${ink(0.1)}`,
+          borderTop: `3px solid ${C.orange}`,
+          borderRadius: RADIUS,
+          boxShadow: SHADOW,
+          overflow: "hidden",
+        }}
+      >
+        <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr" }}>
+          {/* left — headline metric + funnel */}
+          <div style={{ padding: "26px 30px" }}>
+            <div style={mono({ fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase", color: ink(0.5) })}>
               Pool read — <span style={{ color: "#E74424" }}>{meta.healthState}</span>
             </div>
-            <div style={{ marginTop: 12, fontSize: 23, fontWeight: 400, lineHeight: 1.4, maxWidth: 640 }}>{meta.healthRead}</div>
+            <div style={{ marginTop: 14, display: "flex", alignItems: "baseline", gap: 12, flexWrap: "wrap" }}>
+              <span style={mono({ fontSize: 52, fontWeight: 600, lineHeight: 0.9, letterSpacing: "-0.03em", color: "#162335", fontVariantNumeric: "tabular-nums" })}>
+                {nWorth}
+              </span>
+              <span style={{ fontSize: 16, color: ink(0.6) }}>
+                worth screening
+                <span style={mono({ marginLeft: 10, fontSize: 14, color: ink(0.45) })}>
+                  / {total} in pool · {pctWorth}%
+                </span>
+              </span>
+            </div>
+            <div style={{ marginTop: 16 }}>
+              <SegmentBar segments={funnel} height={10} />
+              <div style={{ marginTop: 11, display: "flex", flexWrap: "wrap", gap: "6px 18px" }}>
+                {funnel.map((s) => (
+                  <span key={s.label} style={mono({ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: ink(0.6) })}>
+                    <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flexShrink: 0 }} />
+                    {s.label} <span style={{ color: ink(0.4) }}>{s.value}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+            <div style={{ marginTop: 18, fontSize: 18, fontWeight: 400, lineHeight: 1.45, color: ink(0.82), maxWidth: 620 }}>
+              {meta.healthRead}
+            </div>
           </div>
-          <div style={{ borderLeft: "1px solid rgba(22,35,53,0.12)", paddingLeft: 40 }}>
+          {/* right — per-bucket breakdown with thin bars */}
+          <div style={{ padding: "22px 28px", borderLeft: `1px solid ${ink(0.08)}`, background: C.panel }}>
             {counts.map((ct) => (
-              <div
-                key={ct.label}
-                style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, padding: "10px 0", borderTop: "1px solid rgba(22,35,53,0.10)" }}
-              >
-                <span style={{ fontSize: 15, color: "rgba(22,35,53,0.78)" }}>{ct.label}</span>
-                <span style={mono({ fontSize: 18, fontWeight: 500, color: ct.color, fontVariantNumeric: "tabular-nums" })}>{ct.value}</span>
+              <div key={ct.label} style={{ padding: "9px 0" }}>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12 }}>
+                  <span style={{ fontSize: 14.5, color: ink(0.72) }}>{ct.label}</span>
+                  <span style={mono({ fontSize: 17, fontWeight: 500, color: ct.color, fontVariantNumeric: "tabular-nums" })}>{ct.value}</span>
+                </div>
+                <div style={{ marginTop: 7 }}>
+                  <ProgressBar value={ct.value} max={total} color={ct.color} height={4} />
+                </div>
               </div>
             ))}
           </div>
@@ -150,7 +199,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
             <span style={{ fontFamily: FONTS.serif, fontStyle: "italic", fontWeight: 400, color: "#9E3B28", fontSize: 24 }}>— clear these first.</span>
           </h2>
           <span style={{ flex: 1 }} />
-          <span style={mono({ fontSize: 13, color: "rgba(22,35,53,0.55)" })}>
+          <span style={mono({ fontSize: 13, color: "rgba(26,28,32,0.55)" })}>
             {cutRemaining} open · {nDq} disqualified
           </span>
           <button
@@ -169,6 +218,15 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
             {openCount > 0 ? "Disqualify all open" : "Undo — restore all"}
           </button>
         </div>
+
+        {nCut > 0 && (
+          <div style={{ marginTop: 13, display: "flex", alignItems: "center", gap: 13 }}>
+            <div style={{ flex: 1, maxWidth: 380 }}>
+              <ProgressBar value={nDq} max={nCut} color={C.brick} height={5} />
+            </div>
+            <span style={mono({ fontSize: 12, color: ink(0.5), whiteSpace: "nowrap" })}>{pctCutCleared}% cleared</span>
+          </div>
+        )}
 
         {cutGroups.map((g) => {
           const groupOpen = !collapsedGroups[g.title];
@@ -196,21 +254,21 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                       gap: 20,
                       alignItems: "center",
                       padding: "13px 4px",
-                      borderTop: "1px solid rgba(22,35,53,0.09)",
-                      background: isDq ? "rgba(22,35,53,0.035)" : "transparent",
+                      borderTop: "1px solid rgba(26,28,32,0.09)",
+                      background: isDq ? "rgba(26,28,32,0.035)" : "transparent",
                     }}
                   >
                     <div onClick={() => openCandidate(c.id)} style={{ cursor: "pointer", minWidth: 0 }}>
-                      <span style={{ fontSize: 16.5, fontWeight: 500, textDecoration: isDq ? "line-through" : "none", color: isDq ? "rgba(22,35,53,0.4)" : "#162335" }}>
+                      <span style={{ fontSize: 16.5, fontWeight: 500, textDecoration: isDq ? "line-through" : "none", color: isDq ? "rgba(26,28,32,0.4)" : "#162335" }}>
                         {c.name}
                       </span>{" "}
-                      <span style={{ fontSize: 13.5, color: "rgba(22,35,53,0.5)" }}>· {c.role}</span>
+                      <span style={{ fontSize: 13.5, color: "rgba(26,28,32,0.5)" }}>· {c.role}</span>
                     </div>
                     <div
                       onClick={() => toggleExpand(c.id)}
                       title={isOpen ? "Hide evidence" : "Show evidence"}
                       aria-expanded={isOpen}
-                      style={{ cursor: "pointer", display: "flex", alignItems: "baseline", gap: 8, fontSize: 14.5, lineHeight: 1.4, color: "rgba(22,35,53,0.78)", minWidth: 0 }}
+                      style={{ cursor: "pointer", display: "flex", alignItems: "baseline", gap: 8, fontSize: 14.5, lineHeight: 1.4, color: "rgba(26,28,32,0.78)", minWidth: 0 }}
                     >
                       <span style={mono({ fontSize: 11, color: "#9E3B28", flexShrink: 0, transform: isOpen ? "none" : "none" })}>{isOpen ? "▾" : "▸"}</span>
                       <span style={{ minWidth: 0 }}>{c.cutReason}</span>
@@ -245,7 +303,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                           width: 32,
                           height: 32,
                           borderRadius: 9999,
-                          border: "1px solid rgba(22,35,53,0.28)",
+                          border: "1px solid rgba(26,28,32,0.28)",
                           background: "transparent",
                           color: "#162335",
                           fontSize: 15,
@@ -271,7 +329,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
 
       {/* ============ INTERVIEW PRIORITY ============ */}
       <div style={{ marginTop: 52 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: "1px solid rgba(22,35,53,0.15)", paddingBottom: 11 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: "1px solid rgba(26,28,32,0.15)", paddingBottom: 11 }}>
           <h2 style={{ margin: 0, fontSize: 27, fontWeight: 500, letterSpacing: "-0.02em" }}>Interview priority</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
             {chipDefs.map((chip) => (
@@ -285,7 +343,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                   padding: "4px 0",
                   fontSize: 15,
                   fontWeight: 500,
-                  color: filter === chip.key ? "#162335" : "rgba(22,35,53,0.5)",
+                  color: filter === chip.key ? "#162335" : "rgba(26,28,32,0.5)",
                   borderBottom: `2px solid ${filter === chip.key ? "#E74424" : "transparent"}`,
                   display: "flex",
                   alignItems: "center",
@@ -301,7 +359,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
 
         <div style={{ marginTop: 6, overflowX: "auto", paddingBottom: 4 }}>
           <div style={{ minWidth: 1300 }}>
-            <div style={mono({ display: "grid", gridTemplateColumns: tableCols, gap: 0, alignItems: "center", padding: "11px 8px", borderBottom: "1px solid rgba(22,35,53,0.15)", fontSize: 11.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "rgba(22,35,53,0.45)" })}>
+            <div style={mono({ display: "grid", gridTemplateColumns: tableCols, gap: 0, alignItems: "center", padding: "11px 8px", borderBottom: "1px solid rgba(26,28,32,0.15)", fontSize: 11.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "rgba(26,28,32,0.45)" })}>
               <div>#</div>
               <div>Candidate</div>
               <div>Decision</div>
@@ -318,12 +376,12 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                 <div
                   key={c.id}
                   onClick={() => openCandidate(c.id)}
-                  style={{ display: "grid", gridTemplateColumns: tableCols, gap: 0, alignItems: "center", padding: "14px 8px", borderBottom: "1px solid rgba(22,35,53,0.09)", cursor: "pointer" }}
+                  style={{ display: "grid", gridTemplateColumns: tableCols, gap: 0, alignItems: "center", padding: "14px 8px", borderBottom: "1px solid rgba(26,28,32,0.09)", cursor: "pointer" }}
                 >
-                  <div style={mono({ fontSize: 15, color: "rgba(22,35,53,0.4)", fontVariantNumeric: "tabular-nums" })}>{c.rank}</div>
+                  <div style={mono({ fontSize: 15, color: "rgba(26,28,32,0.4)", fontVariantNumeric: "tabular-nums" })}>{c.rank}</div>
                   <div style={{ paddingRight: 12, minWidth: 0 }}>
                     <div style={{ fontSize: 16.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
-                    <div style={{ marginTop: 1, fontSize: 13.5, color: "rgba(22,35,53,0.55)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.role}</div>
+                    <div style={{ marginTop: 1, fontSize: 13.5, color: "rgba(26,28,32,0.55)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.role}</div>
                   </div>
                   <div style={{ paddingRight: 10 }}>
                     <span style={mono({ display: "inline-block", fontSize: 12, letterSpacing: "0.01em", color: dm.c, background: dm.bg, border: `1px solid ${dm.b}`, borderRadius: 9999, padding: "3px 10px", lineHeight: 1.3, whiteSpace: "nowrap" })}>
@@ -334,16 +392,16 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                     <span style={{ width: 7, height: 7, borderRadius: 9999, background: rev.dot, flexShrink: 0 }} />
                     <span style={{ fontSize: 13.5, lineHeight: 1.25, color: rev.c, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{rev.label}</span>
                   </div>
-                  <div style={clamp2({ paddingRight: 16, fontSize: 14.5, lineHeight: 1.38, color: "rgba(22,35,53,0.82)" })}>{c.why}</div>
+                  <div style={clamp2({ paddingRight: 16, fontSize: 14.5, lineHeight: 1.38, color: "rgba(26,28,32,0.82)" })}>{c.why}</div>
                   <div style={{ paddingRight: 10, minWidth: 0 }}>
                     <div style={mono({ fontSize: 14, color: askColor(c.askTier), whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" })} title={`${c.salary} · ${c.roLevel}`}>
                       {c.salary} · {c.roLevel}
                     </div>
-                    <div style={clamp2({ marginTop: 1, fontSize: 12.5, lineHeight: 1.25, color: c.mismatch ? "#9E3B28" : "rgba(22,35,53,0.6)" })} title={askTierLabel(c.askTier)}>{askTierLabel(c.askTier)}</div>
+                    <div style={clamp2({ marginTop: 1, fontSize: 12.5, lineHeight: 1.25, color: c.mismatch ? "#9E3B28" : "rgba(26,28,32,0.6)" })} title={askTierLabel(c.askTier)}>{askTierLabel(c.askTier)}</div>
                   </div>
-                  <div style={clamp2({ paddingRight: 14, fontSize: 14.5, lineHeight: 1.38, color: "rgba(22,35,53,0.82)" })}>{c.flag}</div>
+                  <div style={clamp2({ paddingRight: 14, fontSize: 14.5, lineHeight: 1.38, color: "rgba(26,28,32,0.82)" })}>{c.flag}</div>
                   <div style={{ paddingRight: 8, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    <span style={clamp2({ fontSize: 14, lineHeight: 1.35, color: "rgba(22,35,53,0.82)", flex: 1, minWidth: 0 })}>{c.next}</span>
+                    <span style={clamp2({ fontSize: 14, lineHeight: 1.35, color: "rgba(26,28,32,0.82)", flex: 1, minWidth: 0 })}>{c.next}</span>
                     {(c.decision === "hold" || c.decision === "blocked") && (
                       <button
                         onClick={(e) => { e.stopPropagation(); openDeep(c.id); }}
@@ -354,7 +412,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                           width: 26,
                           height: 26,
                           borderRadius: 9999,
-                          border: "1px solid rgba(22,35,53,0.28)",
+                          border: "1px solid rgba(26,28,32,0.28)",
                           background: "transparent",
                           color: "#162335",
                           fontSize: 13,

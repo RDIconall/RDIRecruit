@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { FONTS } from "@/lib/triage/theme";
+import { FONTS, ink } from "@/lib/triage/theme";
 import type { Candidate, DecisionRead } from "@/lib/triage/types";
 import type { Viewer } from "@/lib/triage/reviewer";
 import type { TriagePool } from "@/lib/triage/load";
@@ -12,6 +12,7 @@ import { useWorkspace } from "./use-workspace";
 import { useIsNarrow } from "./use-media-query";
 import { PoolScreen } from "./pool-screen";
 import { CandidateScreen } from "./candidate-screen";
+import { TriageToolbar } from "./triage-toolbar";
 
 type View = "pool" | "candidate";
 
@@ -82,7 +83,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
       <div
         style={{
           minHeight: "100vh",
-          background: "#FAFAF7",
+          background: "#FFFFFF",
           fontFamily: FONTS.sans,
           color: "#162335",
           fontSize: 17,
@@ -98,8 +99,10 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             top: 0,
             zIndex: 40,
             height: 54,
-            background: "#FFFFFF",
-            borderBottom: "1px solid rgba(22,35,53,0.15)",
+            background: "rgba(255,255,255,0.85)",
+            backdropFilter: "saturate(180%) blur(8px)",
+            WebkitBackdropFilter: "saturate(180%) blur(8px)",
+            borderBottom: `1px solid ${ink(0.1)}`,
             display: "flex",
             alignItems: "center",
             gap: narrow ? 10 : 18,
@@ -116,7 +119,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
                 fontFamily: FONTS.mono,
                 fontSize: 12,
                 letterSpacing: "0.05em",
-                color: "rgba(22,35,53,0.55)",
+                color: ink(0.5),
                 whiteSpace: "nowrap",
                 textTransform: "uppercase",
               }}
@@ -124,7 +127,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
               Candidate triage
             </span>
           </div>
-          <div style={{ width: 1, height: 22, background: "rgba(22,35,53,0.15)" }} />
+          <div style={{ width: 1, height: 22, background: ink(0.12) }} />
 
           {/* Job switcher */}
           <select
@@ -135,7 +138,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
               fontSize: 15,
               color: "#162335",
               background: "transparent",
-              border: "1px solid rgba(22,35,53,0.18)",
+              border: `1px solid ${ink(0.16)}`,
               borderRadius: 8,
               padding: "5px 10px",
               maxWidth: narrow ? 150 : 360,
@@ -151,24 +154,13 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
 
           {isCandidate && active && (
             <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 16, flexShrink: 0, whiteSpace: "nowrap" }}>
-              <span style={{ color: "rgba(22,35,53,0.30)" }}>›</span>
+              <span style={{ color: ink(0.3) }}>›</span>
               <span style={{ color: "#162335" }}>{active.name}</span>
             </div>
           )}
           <div style={{ flex: 1 }} />
-          {!narrow && (
-            <span
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 12,
-                color: "rgba(22,35,53,0.45)",
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-              }}
-            >
-              Submitted materials only · synced from Workable
-            </span>
-          )}
+          <TriageToolbar jobShortcode={pool.meta.jobShortcode} narrow={narrow} />
+          <div style={{ width: 1, height: 22, background: ink(0.12) }} />
           <div
             style={{
               width: 28,

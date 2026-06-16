@@ -11,17 +11,20 @@ import {
   askColor,
   askTierLabel,
   logColor,
+  ink,
+  RADIUS,
+  SHADOW,
 } from "@/lib/triage/theme";
 import type { ReviewerKind, TimelineRow } from "@/lib/triage/types";
 import { REVIEWER_OPTIONS } from "@/lib/triage/reviewer";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
+import { BarSparkline } from "./viz";
 import { getWorkingFileContent } from "@/app/actions/triage";
 
 const C = COLORS;
 const F = FONTS;
-const ink = (a: number) => `rgba(22,35,53,${a})`;
 
 const TL_COLS = "104px 1.05fr 1.2fr 64px 1.35fr 150px 124px";
 
@@ -95,6 +98,12 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
   const effTimeline = wsApi.effTimeline(id);
   const transcriptSaved = (ws.transcripts[id] ?? "") === tdraft && tdraft.length > 0;
 
+  // RO stratum trajectory as a tiny burn-style series (oldest → current role).
+  const stratSeries = candidate.careerProgression?.hasData
+    ? stratumSeries(candidate.careerProgression.steps).slice().reverse()
+    : [];
+  const showStratSpark = stratSeries.filter((n) => n > 0).length >= 2;
+
   const downloadMd = async () => {
     try {
       const { content } = await getWorkingFileContent({ candidateId: id });
@@ -107,6 +116,25 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
       // ignore — download is best-effort
+    }
+  };
+
+  const saveCorrection = () => {
+    if (!corrDraft.trim()) return;
+    wsApi.addCorrection(id, corrDraft, reviewerKind);
+    setCorrDraft("");
+  };
+  const saveTranscript = () => wsApi.setTranscript(id, tdraft);
+
+  // Keyboard affordance for the short inline editor: Enter saves,
+  // Shift+Enter inserts a newline, Esc clears the draft.
+  const correctionKeys = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      saveCorrection();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      setCorrDraft("");
     }
   };
 
@@ -129,6 +157,8 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
             border: "1px solid rgba(158,59,40,0.28)",
             borderTop: `3px solid ${C.brick}`,
             background: "rgba(158,59,40,0.045)",
+            borderRadius: RADIUS,
+            boxShadow: SHADOW,
             padding: "18px 22px",
           }}
         >
@@ -214,8 +244,19 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       </div>
 
       {/* short decision read */}
-      <div style={{ marginTop: 20, maxWidth: 860 }}>
-        {readRows.map((r) => (
+      <div
+        style={{
+          marginTop: 20,
+          maxWidth: 860,
+          background: "#fff",
+          border: `1px solid ${ink(0.1)}`,
+          borderTop: `3px solid ${dm.c}`,
+          borderRadius: RADIUS,
+          boxShadow: SHADOW,
+          padding: "4px 22px 14px",
+        }}
+      >
+        {readRows.map((r, ri) => (
           <div
             key={r.label}
             style={{
@@ -224,7 +265,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               gap: 18,
               alignItems: "baseline",
               padding: "11px 0",
-              borderTop: `1px solid ${ink(0.1)}`,
+              borderTop: ri === 0 ? "none" : `1px solid ${ink(0.1)}`,
             }}
           >
             <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.04em", textTransform: "uppercase", color: r.labelColor }}>
@@ -258,7 +299,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
 
       {/* re-analysis */}
       {candidate.reanalysis && (
-        <div style={{ marginTop: 14, border: "1px solid rgba(158,59,40,0.25)", borderTop: `2px solid ${C.brick}`, background: "rgba(158,59,40,0.04)", padding: "16px 20px", maxWidth: 760 }}>
+        <div style={{ marginTop: 14, border: "1px solid rgba(158,59,40,0.25)", borderTop: `3px solid ${C.brick}`, background: "rgba(158,59,40,0.04)", borderRadius: RADIUS, boxShadow: SHADOW, padding: "16px 20px", maxWidth: 760 }}>
           <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.brick }}>
             Re-analysis · human signal — {candidate.reanalysis.reviewer}
           </div>
@@ -273,7 +314,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
 
       {/* cut evidence (#2) — the source, why it matters, and next action for a cut */}
       {candidate.decision === "cut" && (
-        <div style={{ marginTop: 14, border: `1px solid rgba(158,59,40,0.22)`, background: "rgba(158,59,40,0.035)", padding: "16px 20px", maxWidth: 760 }}>
+        <div style={{ marginTop: 14, border: `1px solid rgba(158,59,40,0.22)`, borderTop: `3px solid ${C.brick}`, background: "rgba(158,59,40,0.035)", borderRadius: RADIUS, boxShadow: SHADOW, padding: "16px 20px", maxWidth: 760 }}>
           <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.brick }}>
             Cut evidence
           </div>
@@ -317,7 +358,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       {aShowDeep && (
         <>
           {/* COMPARE STRIP */}
-          <div style={{ marginTop: 26, border: `1px solid ${ink(0.12)}`, background: "#fff", display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr 1.5fr" }}>
+          <div style={{ marginTop: 26, border: `1px solid ${ink(0.1)}`, background: "#fff", borderRadius: RADIUS, boxShadow: SHADOW, overflow: "hidden", display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr 1.5fr" }}>
             <div style={{ padding: "18px 22px", borderRight: `1px solid ${ink(0.1)}` }}>
               <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.04em", textTransform: "uppercase", color: ink(0.5) }}>Salary ask</div>
               <div style={{ marginTop: 7, fontFamily: F.mono, fontSize: 30, fontWeight: 500, color: C.navy }}>{candidate.salary}</div>
@@ -340,7 +381,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
 
           {/* CAREER READ (#6) — prose under the compare strip; degrades when no dig_in */}
           {candidate.careerRead && (
-            <div style={{ marginTop: 24, border: `1px solid ${ink(0.12)}`, borderLeft: `2px solid ${C.orange}`, background: "#fff", padding: "18px 22px" }}>
+            <div style={{ marginTop: 24, border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${C.orange}`, background: "#fff", borderRadius: RADIUS, boxShadow: SHADOW, padding: "18px 22px" }}>
               <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.05em", textTransform: "uppercase", color: ink(0.5) }}>Career read</div>
               <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: narrow ? "1fr" : "150px 1fr", gap: narrow ? "4px 0" : "10px 20px", alignItems: "baseline" }}>
                 {[
@@ -388,6 +429,11 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
                 </button>
               </div>
             </div>
+            {tlEditing && (
+              <div style={{ marginTop: 8, fontFamily: F.mono, fontSize: 11, color: ink(0.4) }}>
+                Edits save as you type · Enter or Esc to finish
+              </div>
+            )}
             <div style={{ overflowX: "auto" }}>
             <div style={{ minWidth: narrow ? 820 : undefined }}>
             <div style={{ display: "grid", gridTemplateColumns: TL_COLS, padding: "10px 6px", fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.03em", textTransform: "uppercase", color: ink(0.42), borderBottom: `1px solid ${ink(0.09)}` }}>
@@ -415,6 +461,12 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
                 <input
                   value={value}
                   onChange={(e) => wsApi.editCell(id, idx, field, e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Escape" || (e.key === "Enter" && !e.shiftKey)) {
+                      e.preventDefault();
+                      setTlEditing(false);
+                    }
+                  }}
                   readOnly={!tlEditing}
                   style={{
                     width: "100%",
@@ -467,9 +519,19 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               Seat calls for {candidate.careerProgression.seatStratum} · reads {candidate.careerProgression.currentCapability}
             </span>
           </div>
-          <div style={{ marginTop: 10, fontSize: 14.5, lineHeight: 1.5, color: ink(0.8) }}>
-            {candidate.careerProgression.trajectory}
-            {candidate.careerProgression.confidenceNote ? ` · ${candidate.careerProgression.confidenceNote}` : ""}
+          <div style={{ marginTop: 12, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 28, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14.5, lineHeight: 1.5, color: ink(0.8), flex: 1, minWidth: 240 }}>
+              {candidate.careerProgression.trajectory}
+              {candidate.careerProgression.confidenceNote ? ` · ${candidate.careerProgression.confidenceNote}` : ""}
+            </div>
+            {showStratSpark && (
+              <div style={{ flexShrink: 0 }}>
+                <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", color: ink(0.42), marginBottom: 6, textAlign: "right" }}>
+                  Stratum trajectory
+                </div>
+                <BarSparkline values={stratSeries} color={C.orange} height={28} barWidth={9} gap={4} />
+              </div>
+            )}
           </div>
           <div style={{ overflowX: "auto" }}>
           <div style={{ minWidth: narrow ? 720 : undefined }}>
@@ -517,7 +579,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       {isOpen("resume") && (candidate.resume.hasResume ? (
         <div style={{ marginTop: 16, display: "flex", flexDirection: "column", gap: 18 }}>
           {candidate.resume.roles.map((r, i) => (
-            <div key={i} style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${r.current ? C.orange : ink(0.18)}`, padding: "16px 20px" }}>
+            <div key={i} style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${r.current ? C.orange : ink(0.18)}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: "16px 20px" }}>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
                 <div style={{ minWidth: 0 }}>
                   <span style={{ fontSize: 16, fontWeight: 500, color: C.navy }}>{r.title}</span>
@@ -535,13 +597,13 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
             </div>
           ))}
           {candidate.resume.roles.length === 0 && candidate.resume.fullText && (
-            <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, padding: "18px 22px", fontSize: 14.5, lineHeight: 1.6, color: ink(0.85), whiteSpace: "pre-wrap" }}>
+            <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: "18px 22px", fontSize: 14.5, lineHeight: 1.6, color: ink(0.85), whiteSpace: "pre-wrap" }}>
               {candidate.resume.fullText}
             </div>
           )}
         </div>
       ) : (
-        <div style={{ marginTop: 14, border: "1px dashed rgba(22,35,53,0.25)", background: ink(0.02), padding: "18px 22px", fontSize: 15, color: ink(0.6) }}>
+        <div style={{ marginTop: 14, border: "1px dashed rgba(26,28,32,0.22)", background: C.panel, borderRadius: RADIUS, padding: "18px 22px", fontSize: 15, color: ink(0.6) }}>
           No résumé on file yet.{" "}
           <span style={{ color: ink(0.5) }}>Once a résumé syncs from Workable it appears here, role by role.</span>
         </div>
@@ -551,7 +613,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       <SectionTitle title="Cover letter" open={isOpen("cover")} onToggle={() => toggleSection("cover")} />
       {isOpen("cover") && (candidate.cover.hasLetter ? (
         <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 300px", gap: narrow ? 16 : 36, alignItems: "start" }}>
-          <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, padding: "30px 34px", fontSize: 16, lineHeight: 1.75, color: C.navy }}>
+          <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: "30px 34px", fontSize: 16, lineHeight: 1.75, color: C.navy }}>
             {candidate.cover.lines.map((ln, i) => (
               <span key={i}>
                 <span style={{ background: CM(ln.kind).hl, padding: "1px 0", boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" }}>{ln.t}</span>{" "}
@@ -578,7 +640,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           </div>
         </div>
       ) : (
-        <div style={{ marginTop: 14, border: "1px dashed rgba(158,59,40,0.4)", background: "rgba(158,59,40,0.04)", padding: "18px 22px", fontSize: 15, color: C.brick }}>
+        <div style={{ marginTop: 14, border: "1px dashed rgba(158,59,40,0.4)", background: "rgba(158,59,40,0.04)", borderRadius: RADIUS, padding: "18px 22px", fontSize: 15, color: C.brick }}>
           No cover letter submitted.{" "}
           <span style={{ color: ink(0.7) }}>For a role built on care and detail, a blank cover letter is itself a signal.</span>
         </div>
@@ -593,7 +655,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           const key = `ans-${i}`;
           return (
             <div key={key} style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 300px", gap: narrow ? 16 : 36, alignItems: "start" }}>
-              <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${m.color}`, padding: "18px 22px" }}>
+              <div style={{ background: "#fff", border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${m.color}`, borderRadius: RADIUS, boxShadow: SHADOW, padding: "18px 22px" }}>
                 <div style={{ fontFamily: F.mono, fontSize: 12, letterSpacing: "0.02em", color: ink(0.5) }}>{qa.q}</div>
                 <div style={{ marginTop: 8, fontSize: 15.5, lineHeight: 1.6, color: C.navy }}>
                   <span style={{ background: m.hl, padding: "1px 0" }}>{qa.a}</span>
@@ -614,7 +676,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       <SectionTitle title="Logistics check" open={isOpen("logistics")} onToggle={() => toggleSection("logistics")} right={<span style={{ fontFamily: F.mono, fontSize: 12, color: ink(0.5) }}>{candidate.logistics.mode}</span>} />
       {isOpen("logistics") && (
       <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: narrow ? "1fr" : "280px 1fr", gap: narrow ? 16 : 36, alignItems: "start" }}>
-        <div style={{ border: `1px solid ${ink(0.12)}`, background: "#fff", padding: "18px 20px" }}>
+        <div style={{ border: `1px solid ${ink(0.1)}`, background: "#fff", borderRadius: RADIUS, boxShadow: SHADOW, padding: "18px 20px" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
             <span style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5) }}>Likelihood</span>
             <span style={{ fontFamily: F.mono, fontSize: 18, fontWeight: 500, color: logColor(candidate.logistics.likelihood) }}>{candidate.logistics.likelihood}</span>
@@ -643,7 +705,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       {/* INTERVIEW SUMMARY */}
       <SectionTitle title="Interview summary" open={isOpen("interview")} onToggle={() => toggleSection("interview")} />
       {isOpen("interview") && candidate.interview && (
-        <div style={{ marginTop: 16, border: `1px solid ${ink(0.12)}`, borderTop: `2px solid ${C.navy}`, background: "#fff", padding: "20px 22px" }}>
+        <div style={{ marginTop: 16, border: `1px solid ${ink(0.1)}`, borderTop: `3px solid ${C.navy}`, background: "#fff", borderRadius: RADIUS, boxShadow: SHADOW, padding: "20px 22px" }}>
           <div style={{ fontFamily: F.mono, fontSize: 12, letterSpacing: "0.03em", color: ink(0.6) }}>{candidate.interview.title}</div>
           <div style={{ marginTop: 10, fontSize: 16, lineHeight: 1.55, color: ink(0.88) }}>{candidate.interview.fit}</div>
           <div style={{ marginTop: 12 }}>
@@ -658,7 +720,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       )}
 
       {/* Fireflies */}
-      <div style={{ marginTop: 18, border: `1px solid ${ink(0.12)}`, background: "#fff", padding: "16px 18px" }}>
+      <div style={{ marginTop: 18, border: `1px solid ${ink(0.1)}`, background: "#fff", borderRadius: RADIUS, boxShadow: SHADOW, padding: "16px 18px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
             <span style={{ width: 9, height: 9, borderRadius: 9999, background: C.orange, flexShrink: 0 }} />
@@ -720,13 +782,21 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
         <textarea
           value={tdraft}
           onChange={(e) => setTdraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              saveTranscript();
+            } else if (e.key === "Escape") {
+              setTdraft(ws.transcripts[id] ?? "");
+            }
+          }}
           placeholder="Paste an interview transcript, or pull one from Fireflies above — Claude folds it into this candidate's working file and fit read."
           style={{
             width: "100%",
             minHeight: 110,
             resize: "vertical",
             border: `1px solid ${ink(0.15)}`,
-            borderRadius: 4,
+            borderRadius: 8,
             background: "#fff",
             padding: "12px 14px",
             fontFamily: F.sans,
@@ -738,11 +808,12 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
         />
         <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <button
-            onClick={() => wsApi.setTranscript(id, tdraft)}
+            onClick={saveTranscript}
             style={{ cursor: "pointer", border: "none", background: C.navy, color: C.cream, borderRadius: 9999, padding: "9px 18px", fontFamily: F.mono, fontSize: 12.5 }}
           >
             Save transcript &amp; analyze
           </button>
+          <span style={{ fontFamily: F.mono, fontSize: 11, color: ink(0.4) }}>⌘/Ctrl+Enter to save · Shift+Enter for a new line</span>
           {transcriptSaved && <span style={{ fontFamily: F.mono, fontSize: 12, color: C.orange }}>Saved ✓ · folded into working file</span>}
         </div>
       </div>
@@ -769,13 +840,14 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           <textarea
             value={corrDraft}
             onChange={(e) => setCorrDraft(e.target.value)}
+            onKeyDown={correctionKeys}
             placeholder="e.g. Résumé mis-parsed — this person's Quartz Dx tenure was actually 19 years, not 3."
             style={{
               width: "100%",
               minHeight: 70,
               resize: "vertical",
               border: `1px solid ${ink(0.15)}`,
-              borderRadius: 4,
+              borderRadius: 8,
               background: "#fff",
               padding: "11px 13px",
               fontFamily: F.sans,
@@ -798,14 +870,14 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               ))}
             </select>
             <button
-              onClick={() => {
-                wsApi.addCorrection(id, corrDraft, reviewerKind);
-                setCorrDraft("");
-              }}
+              onClick={saveCorrection}
               style={{ cursor: "pointer", border: "none", background: C.navy, color: C.cream, borderRadius: 9999, padding: "8px 16px", fontFamily: F.mono, fontSize: 12.5 }}
             >
               Save correction &amp; re-analyze
             </button>
+          </div>
+          <div style={{ marginTop: 8, fontFamily: F.mono, fontSize: 11, color: ink(0.4) }}>
+            Enter to save · Shift+Enter for a new line · Esc to clear
           </div>
         </div>
         <div>
@@ -889,7 +961,7 @@ function MarginComment({
   onReply: (v: string) => void;
 }) {
   return (
-    <div style={{ border: `1px solid ${ink(0.12)}`, borderLeft: `3px solid ${color}`, background: "#fff", padding: "11px 13px", boxShadow: "0 1px 0 rgba(22,35,53,0.05)" }}>
+    <div style={{ border: `1px solid ${ink(0.1)}`, borderLeft: `3px solid ${color}`, background: "#fff", borderRadius: RADIUS, padding: "12px 14px", boxShadow: SHADOW }}>
       <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
         <span style={{ width: 18, height: 18, borderRadius: 9999, background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontFamily: F.mono }}>C</span>
         <span style={{ fontFamily: F.mono, fontSize: 11, letterSpacing: "0.03em", textTransform: "uppercase", color }}>{label}</span>
@@ -903,6 +975,18 @@ function MarginComment({
       />
     </div>
   );
+}
+
+const ROMAN: Record<string, number> = { I: 1, II: 2, III: 3, IV: 4, V: 5, VI: 6, VII: 7 };
+
+// Pull the highest RO stratum mentioned in a range string (e.g. "II–III" → 3)
+// so a sequence of roles renders as a glanceable trajectory sparkline.
+function stratumSeries(steps: { stratumRange: string }[]): number[] {
+  return steps.map((s) => {
+    const matches = (s.stratumRange || "").toUpperCase().match(/\b(VII|VI|IV|V|III|II|I)\b/g);
+    if (!matches || !matches.length) return 0;
+    return Math.max(...matches.map((m) => ROMAN[m] || 0));
+  });
 }
 
 function TlAddButton({ label, onClick }: { label: string; onClick: () => void }) {
