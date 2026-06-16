@@ -44,6 +44,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
   const [tlEditing, setTlEditing] = useState(false);
   const [corrDraft, setCorrDraft] = useState("");
   const [tdraft, setTdraft] = useState("");
+  const [chatDraft, setChatDraft] = useState("");
   const [reviewerKind, setReviewerKind] = useState<ReviewerKind>(viewer.kind);
   // Inline working-file (.md) viewer — loaded lazily when the section opens.
   const [wfContent, setWfContent] = useState<string | null>(null);
@@ -63,6 +64,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
 
   useEffect(() => {
     setTdraft(ws.transcripts[id] ?? "");
+    setChatDraft("");
     setTlEditing(false);
     setCorrDraft("");
     setReviewerKind(viewer.kind);
@@ -128,6 +130,15 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
 
   const corrLog = ws.corrections[id] ?? [];
   const reps = ws.replies[id] ?? {};
+  const chatLog = ws.chat[id] ?? [];
+  const chatThinking = !!wsApi.chatBusy[id];
+
+  const sendChat = (text: string) => {
+    const v = text.trim();
+    if (!v || chatThinking) return;
+    wsApi.sendChat(id, v);
+    setChatDraft("");
+  };
 
   const effTimeline = wsApi.effTimeline(id);
   const transcriptSaved = (ws.transcripts[id] ?? "") === tdraft && tdraft.length > 0;
@@ -498,6 +509,100 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           </div>
         </div>
       )}
+
+      {/* WAR ROOM — live back-and-forth with Claude, grounded in this candidate's
+          working file + rubric + transcript. Persists per candidate. */}
+      <div style={{ marginTop: 26, border: `1px solid ${ink(0.12)}`, borderTop: `2px solid ${C.orange}`, background: "#fff", maxWidth: 920 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "13px 20px", borderBottom: `1px solid ${ink(0.08)}` }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ width: 9, height: 9, borderRadius: 9999, background: C.orange, flexShrink: 0 }} />
+            <span style={{ fontFamily: F.mono, fontSize: 12, letterSpacing: "0.04em", textTransform: "uppercase", color: C.navy }}>Ask Claude · war room</span>
+          </div>
+          {chatLog.length > 0 && (
+            <button onClick={() => wsApi.clearChat(id)} style={{ cursor: "pointer", border: "none", background: "transparent", color: ink(0.45), fontFamily: F.mono, fontSize: 12, padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}>Clear</button>
+          )}
+        </div>
+
+        <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14, maxHeight: 460, overflowY: "auto" }}>
+          {chatLog.length === 0 && !chatThinking ? (
+            <div style={{ fontSize: 14.5, lineHeight: 1.55, color: ink(0.55) }}>
+              Talk through this candidate with Claude — it has the full working file, the {meta.title} rubric, the role spec, and any transcript on file. Push back on the call, ask what to test in a screen, or argue the other side.
+            </div>
+          ) : (
+            chatLog.map((m, i) => {
+              const isUser = m.role === "user";
+              return (
+                <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: isUser ? "flex-end" : "flex-start" }}>
+                  <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.03em", textTransform: "uppercase", color: ink(0.4), marginBottom: 4 }}>
+                    {isUser ? m.author || "You" : "Claude"}
+                  </div>
+                  <div
+                    style={{
+                      maxWidth: "82%",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                      fontSize: 14.5,
+                      lineHeight: 1.6,
+                      padding: "11px 15px",
+                      borderRadius: 12,
+                      border: `1px solid ${isUser ? "transparent" : ink(0.12)}`,
+                      background: isUser ? C.navy : ink(0.03),
+                      color: isUser ? C.cream : ink(0.88),
+                      borderTopRightRadius: isUser ? 3 : 12,
+                      borderTopLeftRadius: isUser ? 12 : 3,
+                    }}
+                  >
+                    {m.content}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          {chatThinking && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
+              <div style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.03em", textTransform: "uppercase", color: ink(0.4), marginBottom: 4 }}>Claude</div>
+              <div style={{ fontFamily: F.mono, fontSize: 13, color: ink(0.5), padding: "11px 15px", borderRadius: 12, borderTopLeftRadius: 3, border: `1px solid ${ink(0.12)}`, background: ink(0.03) }}>Thinking…</div>
+            </div>
+          )}
+        </div>
+
+        {chatLog.length === 0 && !chatThinking && (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", padding: "0 20px 14px" }}>
+            {["Why is this the right call?", "Argue the other side", "What should I test in a screen?"].map((q) => (
+              <button
+                key={q}
+                onClick={() => sendChat(q)}
+                style={{ cursor: "pointer", border: `1px solid ${ink(0.18)}`, background: "transparent", color: C.navy, borderRadius: 9999, padding: "6px 14px", fontFamily: F.mono, fontSize: 12 }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <div style={{ borderTop: `1px solid ${ink(0.08)}`, padding: "12px 20px", display: "flex", gap: 10, alignItems: "flex-end" }}>
+          <textarea
+            value={chatDraft}
+            onChange={(e) => setChatDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendChat(chatDraft);
+              }
+            }}
+            placeholder="Ask about this candidate…  (Enter to send · Shift+Enter for a new line)"
+            rows={2}
+            style={{ flex: 1, resize: "vertical", minHeight: 44, border: `1px solid ${ink(0.15)}`, borderRadius: 8, background: "#fff", padding: "10px 13px", fontFamily: F.sans, fontSize: 14, lineHeight: 1.5, color: C.navy, outline: "none" }}
+          />
+          <button
+            onClick={() => sendChat(chatDraft)}
+            disabled={chatThinking || !chatDraft.trim()}
+            style={{ cursor: chatThinking || !chatDraft.trim() ? "default" : "pointer", border: "none", background: chatThinking || !chatDraft.trim() ? ink(0.25) : C.navy, color: C.cream, borderRadius: 9999, padding: "10px 20px", fontFamily: F.mono, fontSize: 12.5, whiteSpace: "nowrap" }}
+          >
+            {chatThinking ? "…" : "Send"}
+          </button>
+        </div>
+      </div>
 
       {/* corrections applied */}
       {corrLog.length > 0 && (

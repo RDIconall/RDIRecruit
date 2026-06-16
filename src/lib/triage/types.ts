@@ -256,6 +256,15 @@ export interface Candidate {
 // Persisted human-edit workspace. Hydrated server-side from candidate_overlay
 // (disqualify) + candidate_working_files.workspace (everything else); edits are
 // written back through server actions (see src/app/actions/triage.ts).
+// One turn in the per-candidate "war room" conversation with Claude.
+export interface ChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  ts: string;
+  // For user turns: the human reviewer's label (e.g. "Conall"). Omitted for Claude.
+  author?: string;
+}
+
 export interface Workspace {
   dq: Record<string, boolean>;
   ovr: Record<string, TimelineRow[]>;
@@ -263,6 +272,7 @@ export interface Workspace {
   corrections: Record<string, CorrectionEntry[]>;
   transcripts: Record<string, string>;
   deep: Record<string, boolean>;
+  chat: Record<string, ChatMessage[]>;
 }
 
 // The per-candidate slice of the workspace, as stored in
@@ -274,6 +284,7 @@ export interface WorkspaceSlice {
   corrections?: CorrectionEntry[];
   transcript?: string;
   deep?: boolean;
+  chat?: ChatMessage[];
 }
 
 // Claude's re-derived decision read, stored in candidate_working_files.read.

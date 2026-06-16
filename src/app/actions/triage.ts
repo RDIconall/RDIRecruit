@@ -9,11 +9,13 @@ import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile } from "@/lib/triage/working-file";
 import { recalculateRead } from "@/lib/triage/recalc";
+import { chatWithClaude } from "@/lib/triage/chat";
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import type {
   Candidate,
+  ChatMessage,
   CorrectionEntry,
   DecisionRead,
   ReviewerKind,
@@ -325,6 +327,80 @@ export async function compareToRubric(input: { candidateId: string }): Promise<R
   await requireAuth();
   const reviewer = await reviewerIdentity();
   return persistAndMaybeRecalc(input.candidateId, {}, { recalc: true, trigger: "Rubric comparison", reviewer });
+}
+
+interface ChatResult {
+  ok: boolean;
+  messages: ChatMessage[];
+  message?: string;
+}
+
+/**
+ * Continue the per-candidate "war room" conversation with Claude. Appends the
+ * human's turn, calls Claude grounded in the candidate's working file + rubric +
+ * spec, appends the reply, and persists the whole thread to the workspace so the
+ * conversation survives reloads. Resilient: on any AI failure the human turn is
+ * still saved and a friendly notice is returned.
+ */
+export async function sendCandidateChat(input: {
+  candidateId: string;
+  message: string;
+}): Promise<ChatResult> {
+  await requireAuth();
+  const text = input.message.trim();
+  if (!text) return { ok: false, messages: [], message: "Empty message" };
+  if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
+
+  const ident = await reviewerIdentity();
+  const existing = await getWorkingFile(input.candidateId);
+  const history = existing?.workspace.chat ?? [];
+  const userMsg: ChatMessage = {
+    role: "user",
+    content: text,
+    ts: new Date().toISOString(),
+    author: ident.label,
+  };
+  const withUser = [...history, userMsg];
+
+  // Build fresh grounding context from the candidate's current working file.
+  const one = await loadOneCandidate(input.candidateId);
+  const workingFile = one
+    ? renderWorkingFile(one.candidate, one.slice, {
+        workableUrl: one.workableUrl,
+        disqualified: one.disqualified,
+      })
+    : existing?.content ?? "";
+  const rubric = one ? await getJobRubric(one.jobShortcode) : { rubricMd: "", specMd: "" };
+
+  const reply = await chatWithClaude({
+    candidateName: one?.candidate.name,
+    workingFile,
+    rubric: rubric.rubricMd,
+    jobSpec: rubric.specMd,
+    // Cap the turns we replay so a long thread can't blow the context window.
+    history: withUser.slice(-24),
+  });
+
+  const next: ChatMessage[] = reply
+    ? [...withUser, { role: "assistant", content: reply, ts: new Date().toISOString() }]
+    : withUser;
+
+  // Persist the human turn (and Claude's reply when we got one) either way.
+  await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, ident.label);
+
+  return {
+    ok: Boolean(reply),
+    messages: next,
+    message: reply ? undefined : "Claude is unavailable right now (no API key or transient error) — your message was saved.",
+  };
+}
+
+/** Clear a candidate's war-room conversation. */
+export async function clearCandidateChat(input: { candidateId: string }): Promise<{ ok: boolean }> {
+  await requireAuth();
+  if (!hasSupabase()) return { ok: false };
+  await upsertWorkingFile(input.candidateId, { workspace: { chat: [] } }, await reviewerLabel());
+  return { ok: true };
 }
 
 /** Read the active job's rubric + spec (for in-app viewing/editing). */

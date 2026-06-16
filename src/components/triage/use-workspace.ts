@@ -2,10 +2,11 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Candidate, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { Candidate, ChatMessage, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
+  clearCandidateChat,
   compareToRubric,
   resyncCandidate,
   runDeepAnalysis,
@@ -13,6 +14,7 @@ import {
   saveReply,
   saveTimeline,
   saveTranscript,
+  sendCandidateChat,
   setDisqualified,
 } from "@/app/actions/triage";
 
@@ -20,8 +22,11 @@ export interface WorkspaceApi {
   ws: Workspace;
   hydrated: boolean;
   busy: Record<string, boolean>;
+  chatBusy: Record<string, boolean>;
   notice: string | null;
   clearNotice: () => void;
+  sendChat: (id: string, text: string) => void;
+  clearChat: (id: string) => void;
   toggleDq: (id: string) => void;
   bulkDq: () => void;
   openCount: number;
@@ -54,6 +59,7 @@ export function useWorkspace(
   const router = useRouter();
   const [ws, setWs] = useState<Workspace>(initial);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [chatBusy, setChatBusy] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const wsRef = useRef(ws);
   wsRef.current = ws;
@@ -226,14 +232,42 @@ export function useWorkspace(
     [handleRecalc],
   );
 
+  const sendChat = useCallback((id: string, text: string) => {
+    const v = text.trim();
+    if (!v) return;
+    // Optimistic: show the human's turn immediately; the server returns the
+    // authoritative thread (with Claude's reply) which we then swap in.
+    const optimistic: ChatMessage = { role: "user", content: v, ts: new Date().toISOString() };
+    const log = [...(wsRef.current.chat[id] || []), optimistic];
+    setWs((w) => ({ ...w, chat: { ...w.chat, [id]: log } }));
+    setChatBusy((b) => ({ ...b, [id]: true }));
+    void sendCandidateChat({ candidateId: id, message: v })
+      .then((res) => {
+        if (res.messages?.length) {
+          setWs((w) => ({ ...w, chat: { ...w.chat, [id]: res.messages } }));
+        }
+        if (res.message) setNotice(res.message);
+      })
+      .catch(() => setNotice("Chat failed — please retry."))
+      .finally(() => setChatBusy((b) => ({ ...b, [id]: false })));
+  }, []);
+
+  const clearChat = useCallback((id: string) => {
+    setWs((w) => ({ ...w, chat: { ...w.chat, [id]: [] } }));
+    void clearCandidateChat({ candidateId: id });
+  }, []);
+
   const clearNotice = useCallback(() => setNotice(null), []);
 
   return {
     ws,
     hydrated: true,
     busy,
+    chatBusy,
     notice,
     clearNotice,
+    sendChat,
+    clearChat,
     toggleDq,
     bulkDq,
     openCount,

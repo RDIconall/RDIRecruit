@@ -35,7 +35,7 @@ export interface TriagePool {
 }
 
 function emptyWorkspace(): Workspace {
-  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {} };
+  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {}, chat: {} };
 }
 
 function emptyPool(
@@ -281,6 +281,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     if (slice.corrections) workspace.corrections[id] = slice.corrections;
     if (slice.transcript) workspace.transcripts[id] = slice.transcript;
     if (slice.deep) workspace.deep[id] = true;
+    if (slice.chat?.length) workspace.chat[id] = slice.chat;
 
     return candidate;
   });
