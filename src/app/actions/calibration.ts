@@ -80,6 +80,7 @@ export async function submitReadAdjustment(input: {
 
   // 3) Apply to this candidate.
   let overridden = false;
+  let reanalyzed = false;
   if (typeof input.correctedTotal === "number" && Number.isFinite(input.correctedTotal)) {
     const rubric = await getActiveRubric(input.jobShortcode);
     const priorCategories = (latestScore?.category_scores as CategoryScores | undefined) ?? null;
@@ -100,6 +101,7 @@ export async function submitReadAdjustment(input: {
     // Directional only: let the candidate move with the new calibration.
     try {
       await scoreCandidate(input.candidateId, { replace: true });
+      reanalyzed = true;
     } catch (error) {
       console.error("Re-score after adjustment failed", error);
     }
@@ -110,6 +112,7 @@ export async function submitReadAdjustment(input: {
   return {
     ok: true as const,
     overridden,
+    reanalyzed,
     scope: learned?.scope ?? null,
     lesson: learned?.lesson ?? null,
   };
