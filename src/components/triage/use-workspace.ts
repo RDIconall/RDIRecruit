@@ -1,10 +1,13 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { Candidate, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
+  compareToRubric,
+  resyncCandidate,
   runDeepAnalysis,
   saveCorrection,
   saveReply,
@@ -23,6 +26,8 @@ export interface WorkspaceApi {
   bulkDq: () => void;
   openCount: number;
   runDeep: (id: string) => void;
+  compareRubric: (id: string) => void;
+  resync: (id: string) => void;
   effTimeline: (id: string) => TimelineRow[];
   editCell: (id: string, idx: number, field: keyof TimelineRow, val: string) => void;
   addRow: (id: string, type: "role" | "gap" | "cert") => void;
@@ -46,6 +51,7 @@ export function useWorkspace(
   candidates: Candidate[],
   onRead: (id: string, read: DecisionRead) => void,
 ): WorkspaceApi {
+  const router = useRouter();
   const [ws, setWs] = useState<Workspace>(initial);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
@@ -80,7 +86,10 @@ export function useWorkspace(
   const toggleDq = useCallback((id: string) => {
     const next = !wsRef.current.dq[id];
     setWs((w) => ({ ...w, dq: { ...w.dq, [id]: next } }));
-    void setDisqualified({ candidateId: id, disqualified: next });
+    void setDisqualified({ candidateId: id, disqualified: next }).then((res) => {
+      if (res?.workable === "disqualified") setNotice("Disqualified in Workable too.");
+      else if (res?.workable === "failed") setNotice("Cut saved locally, but the Workable disqualify failed — retry or do it in Workable.");
+    });
   }, []);
 
   const bulkDq = useCallback(() => {
@@ -88,7 +97,15 @@ export function useWorkspace(
     const dq = { ...wsRef.current.dq };
     cuts.forEach((c) => (dq[c.id] = anyOpen));
     setWs((w) => ({ ...w, dq }));
-    void bulkDisqualify({ candidateIds: cuts.map((c) => c.id), disqualified: anyOpen });
+    void bulkDisqualify({ candidateIds: cuts.map((c) => c.id), disqualified: anyOpen }).then((res) => {
+      if (res?.workableDisqualified) {
+        setNotice(
+          `Disqualified ${res.workableDisqualified} in Workable${res.workableFailed ? ` · ${res.workableFailed} failed` : ""}.`,
+        );
+      } else if (res?.workableFailed) {
+        setNotice(`Cuts saved locally, but ${res.workableFailed} Workable disqualify call(s) failed.`);
+      }
+    });
   }, [cuts]);
 
   const runDeep = useCallback(
@@ -97,6 +114,27 @@ export function useWorkspace(
       void handleRecalc(id, () => runDeepAnalysis({ candidateId: id }));
     },
     [handleRecalc],
+  );
+
+  const compareRubric = useCallback(
+    (id: string) => {
+      void handleRecalc(id, () => compareToRubric({ candidateId: id }));
+    },
+    [handleRecalc],
+  );
+
+  const resync = useCallback(
+    (id: string) => {
+      setBusyFor(id, true);
+      void resyncCandidate({ candidateId: id })
+        .then((res) => {
+          setNotice(res.message);
+          if (res.ok) router.refresh();
+        })
+        .catch(() => setNotice("Sync failed — please retry."))
+        .finally(() => setBusyFor(id, false));
+    },
+    [router, setBusyFor],
   );
 
   const findTimeline = useCallback(
@@ -200,6 +238,8 @@ export function useWorkspace(
     bulkDq,
     openCount,
     runDeep,
+    compareRubric,
+    resync,
     effTimeline,
     editCell,
     addRow,

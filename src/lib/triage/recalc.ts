@@ -1,7 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { env, hasAnthropic } from "../env";
-import type { CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind } from "./types";
+import type { CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit } from "./types";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -33,9 +33,16 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
     "positive": "the strongest positive inference from the materials",
     "risk": "the main risk inference",
     "implication": "what this implies for the decision"
+  },
+  "rubricFit": {
+    "verdict": "a short words-only fit label vs the job rubric, e.g. Strong fit | Partial fit | Weak fit | Misaligned",
+    "summary": "2-3 sentences on how this candidate maps to the rubric's categories and gates, and the decisive reason they are (or are not) a good fit for THIS role",
+    "strengths": ["specific rubric-aligned strengths, grounded in the materials"],
+    "gaps": ["specific rubric gaps, missing evidence, or hard-gate concerns"]
   }
 }
-The "careerRead" object is optional context — include it when you have enough to say something real, otherwise omit it entirely.`;
+The "careerRead" object is optional context — include it when you have enough to say something real, otherwise omit it entirely.
+The "rubricFit" object MUST be included ONLY when a JOB RUBRIC is provided below; judge the candidate strictly against that rubric's categories, hard gates, and pattern-recognition guidance. Translate the rubric's point bands into the words-only verdict — NEVER output the numeric score itself. If no rubric is provided, omit "rubricFit" entirely.`;
 
 function buildUserPrompt(input: RecalcInput): string {
   const { candidate, corrections, transcript, replies, workingFile } = input;
@@ -64,6 +71,14 @@ function buildUserPrompt(input: RecalcInput): string {
 
   const reps = Object.entries(replies).filter(([, v]) => v);
   const repsText = reps.length ? reps.map(([k, v]) => `- (${k}) ${v}`).join("\n") : "none";
+
+  const rubricBlock = (input.rubric || "").trim()
+    ? `\n\nJOB RUBRIC (grade this candidate strictly against this — fill the "rubricFit" object):\n"""\n${input.rubric!.trim().slice(0, 7000)}\n"""`
+    : "";
+
+  const specBlock = (input.jobSpec || "").trim()
+    ? `\n\nROLE SPEC (what this job actually is):\n"""\n${input.jobSpec!.trim().slice(0, 3000)}\n"""`
+    : "";
 
   return `${reviewerLine}STORED WORKING FILE (.md — this candidate's living case file):
 """
@@ -98,7 +113,7 @@ REVIEWER REPLIES TO PRIOR AI COMMENTS:
 ${repsText}
 
 INTERVIEW / SCREEN TRANSCRIPT (post-application — weight heavily when present):
-${transcript || "none yet"}
+${transcript || "none yet"}${specBlock}${rubricBlock}
 
 Re-derive the decision read now. If the human corrections or the transcript change the picture, change the decision accordingly. Remember: decision vocabulary only, never a number.`;
 }
@@ -112,6 +127,10 @@ export interface RecalcInput {
   replies: Record<string, string>;
   /** Identity of the human whose latest correction triggered this recalc (#7). */
   reviewer?: { label?: string; kind?: ReviewerKind };
+  /** The job's grading rubric (markdown). When present, Claude fills rubricFit. */
+  rubric?: string;
+  /** The role spec / job description (markdown), for additional grounding. */
+  jobSpec?: string;
 }
 
 function parseCareerRead(value: unknown): CareerRead | undefined {
@@ -124,6 +143,22 @@ function parseCareerRead(value: unknown): CareerRead | undefined {
   const implication = str("implication");
   if (!path && !positive && !risk && !implication) return undefined;
   return { path, positive, risk, implication };
+}
+
+function parseRubricFit(value: unknown): RubricFit | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string).trim() : "");
+  const list = (k: string) =>
+    Array.isArray(v[k])
+      ? (v[k] as unknown[]).map((x) => String(x).trim()).filter(Boolean).slice(0, 12)
+      : [];
+  const verdict = str("verdict");
+  const summary = str("summary");
+  const strengths = list("strengths");
+  const gaps = list("gaps");
+  if (!verdict && !summary && !strengths.length && !gaps.length) return undefined;
+  return { verdict, summary, strengths, gaps, generatedAt: new Date().toISOString() };
 }
 
 /**
@@ -158,6 +193,7 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       next: (parsed.next || "").trim(),
       timelineNote: (parsed.timelineNote || "").trim() || undefined,
       careerRead: parseCareerRead((parsed as Record<string, unknown>).careerRead),
+      rubricFit: parseRubricFit((parsed as Record<string, unknown>).rubricFit),
       recalculatedAt: new Date().toISOString(),
       model: MODEL,
     };

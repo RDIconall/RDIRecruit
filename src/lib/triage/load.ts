@@ -4,6 +4,7 @@ import { getServiceSupabase } from "../supabase/server";
 import { getBoardFromSupabase } from "../data/board-queries";
 import { getPublishedJobs, getJobByShortcode } from "../jobs/service";
 import { wbJob } from "../workable/links";
+import { getJobRubric } from "../rubric/store";
 import type { WorkspaceSlice } from "./types";
 import { INTERVIEW_EVIDENCE_TYPES } from "../sync/candidate-hash";
 import type {
@@ -27,18 +28,29 @@ export interface TriagePool {
   meta: PoolMeta;
   jobs: JobOption[];
   configured: boolean;
+  /** The job's editable grading rubric (markdown) — empty when none is set. */
+  rubricMd: string;
+  /** The job's role spec / description (markdown) — seeded from Workable when empty. */
+  specMd: string;
 }
 
 function emptyWorkspace(): Workspace {
   return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {} };
 }
 
-function emptyPool(jobShortcode: string, jobs: JobOption[], title: string): TriagePool {
+function emptyPool(
+  jobShortcode: string,
+  jobs: JobOption[],
+  title: string,
+  rubric: { rubricMd: string; specMd: string } = { rubricMd: "", specMd: "" },
+): TriagePool {
   return {
     candidates: [],
     workspace: emptyWorkspace(),
     jobs,
     configured: hasSupabase(),
+    rubricMd: rubric.rubricMd,
+    specMd: rubric.specMd,
     meta: {
       title,
       jobShortcode,
@@ -194,11 +206,12 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const jobs: JobOption[] = jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title }));
   const jobMeta = await getJobByShortcode(jobShortcode);
   const title = jobMeta?.title ?? jobShortcode;
+  const rubric = await getJobRubric(jobShortcode);
 
-  if (!hasSupabase()) return emptyPool(jobShortcode, jobs, title);
+  if (!hasSupabase()) return emptyPool(jobShortcode, jobs, title, rubric);
 
   const board = await getBoardFromSupabase(jobShortcode);
-  if (!board?.length) return emptyPool(jobShortcode, jobs, title);
+  if (!board?.length) return emptyPool(jobShortcode, jobs, title, rubric);
 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
@@ -277,6 +290,8 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     workspace,
     jobs,
     configured: true,
+    rubricMd: rubric.rubricMd,
+    specMd: rubric.specMd,
     meta: deriveMeta(candidates, jobShortcode, title),
   };
 }

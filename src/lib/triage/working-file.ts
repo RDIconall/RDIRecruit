@@ -50,6 +50,21 @@ export function renderWorkingFile(
     s += `| ${r.period || ""} | ${r.org || ""} | ${r.role || ""} | ${r.tenure || ""} | ${r.scope || ""} | ${r.signal || ""} |\n`;
   });
 
+  if (c.rubricFit && (c.rubricFit.verdict || c.rubricFit.summary || c.rubricFit.strengths.length || c.rubricFit.gaps.length)) {
+    s += `\n## Rubric fit — ${c.rubricFit.verdict || "read"}\n\n`;
+    if (c.rubricFit.summary) s += `${c.rubricFit.summary}\n\n`;
+    if (c.rubricFit.strengths.length) {
+      s += "**Rubric-aligned strengths**\n\n";
+      c.rubricFit.strengths.forEach((x) => (s += `- ${x}\n`));
+      s += "\n";
+    }
+    if (c.rubricFit.gaps.length) {
+      s += "**Rubric gaps**\n\n";
+      c.rubricFit.gaps.forEach((x) => (s += `- ${x}\n`));
+      s += "\n";
+    }
+  }
+
   s += "\n## Corrections (human, persisted)\n\n";
   if (corr.length) corr.forEach((e) => (s += `- [${e.ts}]${e.reviewerLabel ? ` (${e.reviewerLabel})` : ""} ${e.text}\n`));
   else s += "- none\n";

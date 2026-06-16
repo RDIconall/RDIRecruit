@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   COLORS,
   FONTS,
@@ -17,7 +18,7 @@ import { REVIEWER_OPTIONS } from "@/lib/triage/reviewer";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
-import { getWorkingFileContent } from "@/app/actions/triage";
+import { getWorkingFileContent, saveJobRubric } from "@/app/actions/triage";
 
 const C = COLORS;
 const F = FONTS;
@@ -32,7 +33,8 @@ interface Props {
 }
 
 export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
-  const { candidates, findCandidate, viewer } = useTriageData();
+  const { candidates, findCandidate, viewer, meta, rubricMd, specMd } = useTriageData();
+  const router = useRouter();
   const ws = wsApi.ws;
   const candidate = findCandidate(activeId);
   const total = candidates.length;
@@ -43,9 +45,19 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
   const [corrDraft, setCorrDraft] = useState("");
   const [tdraft, setTdraft] = useState("");
   const [reviewerKind, setReviewerKind] = useState<ReviewerKind>(viewer.kind);
+  // Inline working-file (.md) viewer — loaded lazily when the section opens.
+  const [wfContent, setWfContent] = useState<string | null>(null);
+  // Rubric / spec editing.
+  const [rubricEditing, setRubricEditing] = useState(false);
+  const [specEditing, setSpecEditing] = useState(false);
+  const [rubricDraft, setRubricDraft] = useState(rubricMd);
+  const [specDraft, setSpecDraft] = useState(specMd);
+  const [rubricSaving, setRubricSaving] = useState(false);
+  const rubricFileRef = useRef<HTMLInputElement>(null);
+  const specFileRef = useRef<HTMLInputElement>(null);
   // #4: lower material sections are collapsible. Default open so the spec's
   // below-the-fold content stays visible; the 5-line read remains the headline.
-  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>({ rubric: true });
   const isOpen = (k: string) => !collapsed[k];
   const toggleSection = (k: string) => setCollapsed((c) => ({ ...c, [k]: !c[k] }));
 
@@ -54,11 +66,36 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
     setTlEditing(false);
     setCorrDraft("");
     setReviewerKind(viewer.kind);
+    setWfContent(null);
     // The pool and candidate views share the document scroll position; reset to
     // the top so a candidate opens at the header rather than mid-page.
     window.scrollTo(0, 0);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Keep rubric/spec drafts in sync with the latest server-fed values (e.g. after refresh).
+  useEffect(() => {
+    if (!rubricEditing) setRubricDraft(rubricMd);
+    if (!specEditing) setSpecDraft(specMd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rubricMd, specMd]);
+
+  // Load (and refresh) the inline working-file .md whenever the candidate changes or
+  // Claude re-derives the read (decision / why / rubric fit move after a recalc).
+  useEffect(() => {
+    let cancelled = false;
+    void getWorkingFileContent({ candidateId: id })
+      .then(({ content }) => {
+        if (!cancelled) setWfContent(content);
+      })
+      .catch(() => {
+        if (!cancelled) setWfContent("Could not load the working file. Try Download .md instead.");
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, candidate?.decision, candidate?.why, candidate?.rubricFit]);
 
   if (!candidate) return null;
 
@@ -107,6 +144,46 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch {
       // ignore — download is best-effort
+    }
+  };
+
+  const saveRubric = async (which: "rubric" | "spec") => {
+    setRubricSaving(true);
+    try {
+      await saveJobRubric({
+        jobShortcode: meta.jobShortcode,
+        ...(which === "rubric" ? { rubricMd: rubricDraft } : { specMd: specDraft }),
+      });
+      if (which === "rubric") setRubricEditing(false);
+      else setSpecEditing(false);
+      router.refresh();
+    } finally {
+      setRubricSaving(false);
+    }
+  };
+
+  // Upload a .md (or any text) file and save it as this job's rubric / spec.
+  const onUploadFile = async (which: "rubric" | "spec", file: File | null) => {
+    if (!file) return;
+    const text = await file.text();
+    if (which === "rubric") {
+      setRubricDraft(text);
+      setRubricEditing(true);
+    } else {
+      setSpecDraft(text);
+      setSpecEditing(true);
+    }
+    setRubricSaving(true);
+    try {
+      await saveJobRubric({
+        jobShortcode: meta.jobShortcode,
+        ...(which === "rubric" ? { rubricMd: text } : { specMd: text }),
+      });
+      if (which === "rubric") setRubricEditing(false);
+      else setSpecEditing(false);
+      router.refresh();
+    } finally {
+      setRubricSaving(false);
     }
   };
 
@@ -194,6 +271,23 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               Open in Workable ↗
             </a>
             <button
+              onClick={() => wsApi.resync(id)}
+              disabled={!!wsApi.busy[id]}
+              style={{
+                cursor: wsApi.busy[id] ? "default" : "pointer",
+                border: "none",
+                background: "transparent",
+                color: wsApi.busy[id] ? ink(0.4) : C.navy,
+                fontFamily: F.mono,
+                fontSize: 12.5,
+                padding: 0,
+                textDecoration: "underline",
+                textUnderlineOffset: 3,
+              }}
+            >
+              {wsApi.busy[id] ? "Syncing…" : "Sync from Workable ↻"}
+            </button>
+            <button
               onClick={() => wsApi.toggleDq(id)}
               style={{
                 cursor: "pointer",
@@ -245,6 +339,165 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           <span style={{ fontSize: 14.5, lineHeight: 1.45, color: ink(0.82) }}>{candidate.revNote}</span>
         </div>
       </div>
+
+      {/* RUBRIC FIT — Claude's read of this candidate against the job rubric */}
+      {(candidate.rubricFit || rubricMd) && (
+        <div style={{ marginTop: 16, border: `1px solid ${ink(0.12)}`, borderTop: `3px solid ${C.navy}`, background: "#fff", padding: "18px 22px", maxWidth: 860 }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.05em", textTransform: "uppercase", color: ink(0.5) }}>
+              Rubric fit{candidate.rubricFit?.verdict ? ` — ` : ""}
+              {candidate.rubricFit?.verdict && <span style={{ color: C.navy }}>{candidate.rubricFit.verdict}</span>}
+            </div>
+            <button
+              onClick={() => wsApi.compareRubric(id)}
+              disabled={!!wsApi.busy[id]}
+              style={{
+                cursor: wsApi.busy[id] ? "default" : "pointer",
+                border: `1px solid ${C.navy}`,
+                background: "transparent",
+                color: wsApi.busy[id] ? ink(0.4) : C.navy,
+                borderRadius: 9999,
+                padding: "6px 14px",
+                fontFamily: F.mono,
+                fontSize: 12,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {wsApi.busy[id] ? "Comparing…" : candidate.rubricFit ? "Re-compare to rubric ↻" : "Compare to rubric →"}
+            </button>
+          </div>
+          {candidate.rubricFit ? (
+            <>
+              {candidate.rubricFit.summary && (
+                <div style={{ marginTop: 11, fontSize: 15.5, lineHeight: 1.55, color: C.navy }}>{candidate.rubricFit.summary}</div>
+              )}
+              <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: narrow ? 14 : 28 }}>
+                <div>
+                  <div style={{ fontFamily: F.mono, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: C.navy }}>Rubric-aligned strengths</div>
+                  <div style={{ marginTop: 8 }}>
+                    {candidate.rubricFit.strengths.length ? (
+                      candidate.rubricFit.strengths.map((sigq, i) => (
+                        <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "5px 0", borderTop: `1px solid ${ink(0.08)}`, fontSize: 14, lineHeight: 1.5 }}>
+                          <span style={{ color: C.navy, flexShrink: 0, fontFamily: F.mono }}>+</span>
+                          <span style={{ color: ink(0.85) }}>{sigq}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ fontSize: 13.5, color: ink(0.5) }}>—</div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontFamily: F.mono, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: C.brick }}>Rubric gaps</div>
+                  <div style={{ marginTop: 8 }}>
+                    {candidate.rubricFit.gaps.length ? (
+                      candidate.rubricFit.gaps.map((g, i) => (
+                        <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", padding: "5px 0", borderTop: `1px solid ${ink(0.08)}`, fontSize: 14, lineHeight: 1.5 }}>
+                          <span style={{ color: C.brick, flexShrink: 0, fontFamily: F.mono }}>–</span>
+                          <span style={{ color: ink(0.85) }}>{g}</span>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ fontSize: 13.5, color: ink(0.5) }}>—</div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div style={{ marginTop: 10, fontSize: 14.5, lineHeight: 1.5, color: ink(0.6) }}>
+              No rubric comparison yet. Run a comparison to see how this candidate maps to the {meta.title} rubric and why they are (or are not) a good fit — the read is also folded into the working file.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* JOB RUBRIC & SPEC — the rubric Claude grades against, and the role spec. Both editable.
+          Collapsed by default (the rubric is long); the header sits right under the fit read. */}
+      <SectionTitle
+        title="Job rubric & spec"
+        titleSuffix={<span style={{ fontFamily: F.mono, fontSize: 13, color: ink(0.45) }}>{meta.title}</span>}
+        open={isOpen("rubric")}
+        onToggle={() => toggleSection("rubric")}
+      />
+      {isOpen("rubric") && (
+        <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: narrow ? 28 : 36, alignItems: "start" }}>
+          {/* Grading rubric */}
+          <div>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5) }}>Grading rubric</div>
+              <input
+                ref={rubricFileRef}
+                type="file"
+                accept=".md,.markdown,.txt,text/markdown,text/plain"
+                style={{ display: "none" }}
+                onChange={(e) => { void onUploadFile("rubric", e.target.files?.[0] ?? null); e.target.value = ""; }}
+              />
+              {rubricEditing ? (
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => { setRubricEditing(false); setRubricDraft(rubricMd); }} style={{ cursor: "pointer", border: "none", background: "transparent", color: ink(0.5), fontFamily: F.mono, fontSize: 12, padding: 0 }}>Cancel</button>
+                  <button onClick={() => saveRubric("rubric")} disabled={rubricSaving} style={{ cursor: "pointer", border: "none", background: "transparent", color: C.orange, fontFamily: F.mono, fontSize: 12, padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}>{rubricSaving ? "Saving…" : "Save rubric"}</button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => rubricFileRef.current?.click()} disabled={rubricSaving} style={{ cursor: "pointer", border: "none", background: "transparent", color: C.navy, fontFamily: F.mono, fontSize: 12, padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}>{rubricSaving ? "Uploading…" : "Upload .md ↑"}</button>
+                  <button onClick={() => { setRubricDraft(rubricMd); setRubricEditing(true); }} style={{ cursor: "pointer", border: "none", background: "transparent", color: ink(0.5), fontFamily: F.mono, fontSize: 12, padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}>Edit</button>
+                </div>
+              )}
+            </div>
+            {rubricEditing ? (
+              <textarea
+                value={rubricDraft}
+                onChange={(e) => setRubricDraft(e.target.value)}
+                style={{ marginTop: 10, width: "100%", minHeight: 360, resize: "vertical", border: `1px solid ${ink(0.15)}`, borderRadius: 4, background: "#fff", padding: "12px 14px", fontFamily: F.mono, fontSize: 12.5, lineHeight: 1.55, color: C.navy, outline: "none" }}
+              />
+            ) : rubricMd ? (
+              <pre style={{ marginTop: 10, maxHeight: 420, overflow: "auto", border: `1px solid ${ink(0.1)}`, background: "#fff", padding: "14px 16px", fontFamily: F.mono, fontSize: 12.5, lineHeight: 1.55, color: ink(0.85), whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{rubricMd}</pre>
+            ) : (
+              <div style={{ marginTop: 10, border: "1px dashed rgba(22,35,53,0.25)", background: ink(0.02), padding: "16px 18px", fontSize: 14, color: ink(0.6) }}>
+                No rubric set for {meta.title} yet. Upload an .md file or click Edit to paste one — Claude will then grade candidates for this job against it.
+              </div>
+            )}
+          </div>
+          {/* Role spec */}
+          <div>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5) }}>Role spec</div>
+              <input
+                ref={specFileRef}
+                type="file"
+                accept=".md,.markdown,.txt,text/markdown,text/plain"
+                style={{ display: "none" }}
+                onChange={(e) => { void onUploadFile("spec", e.target.files?.[0] ?? null); e.target.value = ""; }}
+              />
+              {specEditing ? (
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => { setSpecEditing(false); setSpecDraft(specMd); }} style={{ cursor: "pointer", border: "none", background: "transparent", color: ink(0.5), fontFamily: F.mono, fontSize: 12, padding: 0 }}>Cancel</button>
+                  <button onClick={() => saveRubric("spec")} disabled={rubricSaving} style={{ cursor: "pointer", border: "none", background: "transparent", color: C.orange, fontFamily: F.mono, fontSize: 12, padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}>{rubricSaving ? "Saving…" : "Save spec"}</button>
+                </div>
+              ) : (
+                <div style={{ display: "flex", gap: 12 }}>
+                  <button onClick={() => specFileRef.current?.click()} disabled={rubricSaving} style={{ cursor: "pointer", border: "none", background: "transparent", color: C.navy, fontFamily: F.mono, fontSize: 12, padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}>{rubricSaving ? "Uploading…" : "Upload .md ↑"}</button>
+                  <button onClick={() => { setSpecDraft(specMd); setSpecEditing(true); }} style={{ cursor: "pointer", border: "none", background: "transparent", color: ink(0.5), fontFamily: F.mono, fontSize: 12, padding: 0, textDecoration: "underline", textUnderlineOffset: 3 }}>Edit</button>
+                </div>
+              )}
+            </div>
+            {specEditing ? (
+              <textarea
+                value={specDraft}
+                onChange={(e) => setSpecDraft(e.target.value)}
+                style={{ marginTop: 10, width: "100%", minHeight: 360, resize: "vertical", border: `1px solid ${ink(0.15)}`, borderRadius: 4, background: "#fff", padding: "12px 14px", fontFamily: F.mono, fontSize: 12.5, lineHeight: 1.55, color: C.navy, outline: "none" }}
+              />
+            ) : specMd ? (
+              <pre style={{ marginTop: 10, maxHeight: 420, overflow: "auto", border: `1px solid ${ink(0.1)}`, background: "#fff", padding: "14px 16px", fontFamily: F.mono, fontSize: 12.5, lineHeight: 1.55, color: ink(0.85), whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{specMd}</pre>
+            ) : (
+              <div style={{ marginTop: 10, border: "1px dashed rgba(22,35,53,0.25)", background: ink(0.02), padding: "16px 18px", fontSize: 14, color: ink(0.6) }}>
+                No role spec yet. It seeds from the Workable job description on sync, or upload an .md file / paste one here.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* corrections applied */}
       {corrLog.length > 0 && (
@@ -357,9 +610,11 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
               </div>
             </div>
           )}
+        </>
+      )}
 
-          {/* RO TIME PROGRESSION */}
-          <div style={{ marginTop: 38 }}>
+      {/* RO TIME PROGRESSION — the RO timeline, shown for every candidate */}
+      <div style={{ marginTop: 38 }}>
             <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: `1px solid ${ink(0.15)}`, paddingBottom: 9 }}>
               <h2 style={{ margin: 0, fontSize: 23, fontWeight: 500, letterSpacing: "-0.02em" }}>RO-style time progression</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -454,8 +709,6 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
             </div>
             </div>
           </div>
-        </>
-      )}
 
       {/* RO CAREER PROGRESSION (sourced from the RO assessment) — shown whenever
           RO data exists, independent of the deep-analysis gate. */}
@@ -760,7 +1013,21 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
         }
       />
       {isOpen("workingFile") && (
-      <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: narrow ? "24px 0" : "0 40px", alignItems: "start" }}>
+        <div style={{ marginTop: 16 }}>
+          <div style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5), marginBottom: 8 }}>
+            What Claude has on this candidate ({id}.md)
+          </div>
+          {wfContent === null ? (
+            <div style={{ border: `1px solid ${ink(0.1)}`, background: "#fff", padding: "16px 18px", fontFamily: F.mono, fontSize: 12.5, color: ink(0.55) }}>
+              Loading working file…
+            </div>
+          ) : (
+            <pre style={{ maxHeight: 460, overflow: "auto", border: `1px solid ${ink(0.1)}`, background: "#fff", padding: "16px 18px", fontFamily: F.mono, fontSize: 12.5, lineHeight: 1.55, color: ink(0.85), whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{wfContent}</pre>
+          )}
+        </div>
+      )}
+      {isOpen("workingFile") && (
+      <div style={{ marginTop: 22, display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: narrow ? "24px 0" : "0 40px", alignItems: "start" }}>
         <div>
           <div style={{ fontFamily: F.mono, fontSize: 11.5, textTransform: "uppercase", letterSpacing: "0.04em", color: ink(0.5), marginBottom: 8 }}>Corrections &amp; analysis notes</div>
           <div style={{ fontSize: 14, lineHeight: 1.5, color: ink(0.7), marginBottom: 10 }}>

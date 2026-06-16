@@ -44,6 +44,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
               rev: read.rev ?? c.rev,
               revNote: read.revNote ?? c.revNote,
               careerRead: read.careerRead ?? c.careerRead,
+              rubricFit: read.rubricFit ?? c.rubricFit,
               survivor: read.decision === "interview" || read.decision === "short",
             }
           : c,
@@ -54,8 +55,16 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
   const wsApi = useWorkspace(pool.workspace, candidates, applyRead);
 
   const contextValue = useMemo(
-    () => ({ candidates, meta: pool.meta, jobs: pool.jobs, viewer, findCandidate }),
-    [candidates, pool.meta, pool.jobs, viewer, findCandidate],
+    () => ({
+      candidates,
+      meta: pool.meta,
+      jobs: pool.jobs,
+      viewer,
+      rubricMd: pool.rubricMd,
+      specMd: pool.specMd,
+      findCandidate,
+    }),
+    [candidates, pool.meta, pool.jobs, viewer, pool.rubricMd, pool.specMd, findCandidate],
   );
 
   const openPool = () => setView("pool");

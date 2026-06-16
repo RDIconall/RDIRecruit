@@ -10,6 +10,10 @@ export interface TriageData {
   jobs: JobOption[];
   /** The signed-in reviewer (Clerk-derived) — seeds the corrections reviewer picker (#7). */
   viewer: Viewer;
+  /** The active job's editable grading rubric (markdown). */
+  rubricMd: string;
+  /** The active job's role spec / description (markdown). */
+  specMd: string;
   findCandidate: (id: string) => Candidate | undefined;
 }
 

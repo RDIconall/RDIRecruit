@@ -69,6 +69,22 @@ export interface CareerRead {
   implication: string; // decision implication
 }
 
+// Claude's read of the candidate against the job's grading rubric. Words only —
+// never a numeric score (the rubric's points are summarized as a verdict label).
+export interface RubricFit {
+  verdict: string; // short fit verdict, e.g. "Strong fit" / "Partial fit" / "Weak fit"
+  summary: string; // 2-3 sentences on how they map to the rubric and why they fit (or not)
+  strengths: string[]; // rubric-aligned strengths
+  gaps: string[]; // rubric gaps / missing evidence
+  generatedAt?: string;
+}
+
+// Per-job grading rubric + role spec, stored editable in Supabase (job_rubrics).
+export interface JobRubric {
+  rubricMd: string;
+  specMd: string;
+}
+
 export type TimelineRowType = "edu" | "role" | "cert" | "gap";
 
 export interface TimelineRow {
@@ -216,6 +232,9 @@ export interface Candidate {
   // Career-read prose (deep analysis). Present only when dig_in data supports it.
   careerRead?: CareerRead;
 
+  // Claude's read of this candidate against the job rubric (#rubric-fit).
+  rubricFit?: RubricFit;
+
   reanalysis?: Reanalysis;
 
   timeline: TimelineRow[];
@@ -274,6 +293,8 @@ export interface DecisionRead {
   revNote?: string;
   // Career-read prose, optionally filled/refined by Claude (#6).
   careerRead?: CareerRead;
+  // Rubric-fit read, filled by Claude when a job rubric is available.
+  rubricFit?: RubricFit;
   recalculatedAt?: string;
   model?: string;
 }
