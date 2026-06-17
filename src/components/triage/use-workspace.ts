@@ -2,12 +2,13 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { Candidate, ChatMessage, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, ChatMessage, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
   clearCandidateChat,
   compareToRubric,
+  logActivity as logActivityAction,
   resyncCandidate,
   runDeepAnalysis,
   saveCorrection,
@@ -16,6 +17,7 @@ import {
   saveTranscript,
   sendCandidateChat,
   setDisqualified,
+  updateAssessment,
 } from "@/app/actions/triage";
 
 export interface WorkspaceApi {
@@ -29,6 +31,8 @@ export interface WorkspaceApi {
   clearChat: (id: string) => void;
   toggleDq: (id: string) => void;
   bulkDq: () => void;
+  /** Force a set of candidates to (un)disqualified — drives the board's selection bulk bar. */
+  setDqMany: (ids: string[], value: boolean) => void;
   openCount: number;
   runDeep: (id: string) => void;
   compareRubric: (id: string) => void;
@@ -40,6 +44,10 @@ export interface WorkspaceApi {
   setReply: (id: string, key: string, val: string) => void;
   setTranscript: (id: string, val: string) => void;
   addCorrection: (id: string, text: string, reviewerKind?: ReviewerKind) => void;
+  /** Append a human entry to the candidate's activity log (interview/note/comment). */
+  logActivity: (id: string, type: ActivityType, body: string) => void;
+  /** Re-run the evaluator over the activity-log delta and re-persist the pinned assessment. */
+  updateAssessment: (id: string) => void;
 }
 
 function nowStamp(): string {
@@ -113,6 +121,25 @@ export function useWorkspace(
       }
     });
   }, [cuts]);
+
+  const setDqMany = useCallback((ids: string[], value: boolean) => {
+    const targets = ids.filter(Boolean);
+    if (!targets.length) return;
+    setWs((w) => {
+      const dq = { ...w.dq };
+      targets.forEach((id) => (dq[id] = value));
+      return { ...w, dq };
+    });
+    void bulkDisqualify({ candidateIds: targets, disqualified: value }).then((res) => {
+      if (res?.workableDisqualified) {
+        setNotice(
+          `${value ? "Disqualified" : "Reinstated"} ${res.workableDisqualified} in Workable${res.workableFailed ? ` · ${res.workableFailed} failed` : ""}.`,
+        );
+      } else if (res?.workableFailed) {
+        setNotice(`Saved locally, but ${res.workableFailed} Workable call(s) failed.`);
+      }
+    });
+  }, []);
 
   const runDeep = useCallback(
     (id: string) => {
@@ -257,6 +284,49 @@ export function useWorkspace(
     void clearCandidateChat({ candidateId: id });
   }, []);
 
+  const logActivity = useCallback((id: string, type: ActivityType, body: string) => {
+    const v = body.trim();
+    if (!v) return;
+    const optimistic: ActivityEntry = {
+      id: `tmp-${Date.now()}`,
+      type,
+      author: "You",
+      body: v,
+      at: new Date().toISOString(),
+    };
+    const log = [...(wsRef.current.activity[id] || []), optimistic];
+    setWs((w) => ({ ...w, activity: { ...w.activity, [id]: log } }));
+    void logActivityAction({ candidateId: id, type, body: v })
+      .then((res) => {
+        if (res.ok && res.entry) {
+          // Swap the optimistic row for the persisted one (real id + author + ts).
+          setWs((w) => ({
+            ...w,
+            activity: {
+              ...w.activity,
+              [id]: (w.activity[id] || []).map((e) => (e.id === optimistic.id ? res.entry! : e)),
+            },
+          }));
+        } else if (res.message) {
+          setNotice(res.message);
+        }
+      })
+      .catch(() => setNotice("Couldn't save to the activity log — please retry."));
+  }, []);
+
+  const updateAssessmentCb = useCallback(
+    (id: string) => {
+      void handleRecalc(id, async () => {
+        const res = await updateAssessment({ candidateId: id });
+        if (res.ok && res.read) {
+          setWs((w) => ({ ...w, regen: { ...w.regen, [id]: res.regenAt || nowStamp() } }));
+        }
+        return res;
+      });
+    },
+    [handleRecalc],
+  );
+
   const clearNotice = useCallback(() => setNotice(null), []);
 
   return {
@@ -270,6 +340,7 @@ export function useWorkspace(
     clearChat,
     toggleDq,
     bulkDq,
+    setDqMany,
     openCount,
     runDeep,
     compareRubric,
@@ -281,5 +352,7 @@ export function useWorkspace(
     setReply,
     setTranscript,
     addCorrection,
+    logActivity,
+    updateAssessment: updateAssessmentCb,
   };
 }

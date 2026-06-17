@@ -1,17 +1,16 @@
 "use client";
 
 import { useCallback, useMemo, useState, useTransition } from "react";
-import Image from "next/image";
 import { useRouter } from "next/navigation";
-import { FONTS } from "@/lib/triage/theme";
+import { APP } from "@/lib/triage/app-theme";
 import type { Candidate, DecisionRead } from "@/lib/triage/types";
 import type { Viewer } from "@/lib/triage/reviewer";
 import type { TriagePool } from "@/lib/triage/load";
 import { TriageDataProvider } from "./context";
 import { useWorkspace } from "./use-workspace";
 import { useIsNarrow } from "./use-media-query";
-import { PoolScreen } from "./pool-screen";
-import { CandidateScreen } from "./candidate-screen";
+import { PoolBoard } from "./pool-board";
+import { CandidateDossier } from "./candidate-dossier";
 
 type View = "pool" | "candidate";
 
@@ -22,7 +21,6 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
   const [candidates, setCandidates] = useState<Candidate[]>(pool.candidates);
   const [view, setView] = useState<View>("pool");
   const [activeId, setActiveId] = useState<string>(pool.candidates[0]?.id ?? "");
-  const [filter, setFilter] = useState<string>("all");
 
   const findCandidate = useCallback(
     (id: string) => candidates.find((c) => c.id === id),
@@ -72,10 +70,6 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
     setActiveId(id);
     setView("candidate");
   };
-  const openDeep = (id: string) => {
-    wsApi.runDeep(id);
-    openCandidate(id);
-  };
 
   const switchJob = (shortcode: string) => {
     startTransition(() => {
@@ -91,10 +85,10 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
       <div
         style={{
           minHeight: "100vh",
-          background: "#FAFAF7",
-          fontFamily: FONTS.sans,
-          color: "#162335",
-          fontSize: 17,
+          background: APP.surface,
+          fontFamily: APP.sans,
+          color: APP.ink,
+          fontSize: 18,
           lineHeight: 1.5,
           opacity: isPending ? 0.6 : 1,
           transition: "opacity 120ms",
@@ -107,46 +101,35 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             top: 0,
             zIndex: 40,
             height: 54,
-            background: "#FFFFFF",
-            borderBottom: "1px solid rgba(22,35,53,0.15)",
+            background: "rgba(255,255,255,0.92)",
+            backdropFilter: "saturate(1.1) blur(6px)",
+            borderBottom: `1px solid ${APP.hair}`,
             display: "flex",
             alignItems: "center",
-            gap: narrow ? 10 : 18,
+            gap: 14,
             padding: narrow ? "0 14px" : "0 28px",
           }}
         >
           <div
-            style={{ display: "flex", alignItems: "center", gap: 11, cursor: "pointer", flexShrink: 0 }}
+            style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", flexShrink: 0, fontWeight: 700, fontSize: 17, letterSpacing: "-0.02em" }}
             onClick={openPool}
           >
-            <Image src="/logo-mark.svg" alt="RDI" width={42} height={22} style={{ height: 22, width: "auto", display: "block" }} priority />
-            <span
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 12,
-                letterSpacing: "0.05em",
-                color: "rgba(22,35,53,0.55)",
-                whiteSpace: "nowrap",
-                textTransform: "uppercase",
-              }}
-            >
-              Candidate triage
-            </span>
+            RDIRecruit
           </div>
-          <div style={{ width: 1, height: 22, background: "rgba(22,35,53,0.15)" }} />
+          <div style={{ width: 1, height: 18, background: APP.hair }} />
 
-          {/* Job switcher */}
+          {/* Job switcher (the job context / breadcrumb) */}
           <select
             value={pool.meta.jobShortcode}
             onChange={(e) => switchJob(e.target.value)}
             style={{
-              fontFamily: FONTS.sans,
+              fontFamily: APP.sans,
               fontSize: 15,
-              color: "#162335",
+              color: isCandidate ? APP.secondary : APP.ink,
               background: "transparent",
-              border: "1px solid rgba(22,35,53,0.18)",
-              borderRadius: 8,
-              padding: "5px 10px",
+              border: "1px solid transparent",
+              borderRadius: 6,
+              padding: "4px 6px",
               maxWidth: narrow ? 150 : 360,
               cursor: "pointer",
             }}
@@ -159,71 +142,41 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
           </select>
 
           {isCandidate && active && (
-            <div style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 16, flexShrink: 0, whiteSpace: "nowrap" }}>
-              <span style={{ color: "rgba(22,35,53,0.30)" }}>›</span>
-              <span style={{ color: "#162335" }}>{active.name}</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 15, flexShrink: 0, whiteSpace: "nowrap" }}>
+              <span style={{ color: "#C9C9C9" }}>/</span>
+              <span style={{ color: APP.ink }}>{active.name}</span>
             </div>
           )}
           <div style={{ flex: 1 }} />
-          {!narrow && (
-            <span
-              style={{
-                fontFamily: FONTS.mono,
-                fontSize: 12,
-                color: "rgba(22,35,53,0.45)",
-                whiteSpace: "nowrap",
-                flexShrink: 0,
-              }}
-            >
-              Submitted materials only · synced from Workable
-            </span>
-          )}
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 9999,
-              background: "#162335",
-              color: "#FAFAF7",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: 14,
-              fontWeight: 500,
-              flexShrink: 0,
-            }}
-          >
-            C
-          </div>
         </div>
 
         {wsApi.notice && (
           <div
             onClick={wsApi.clearNotice}
             style={{
-              background: "rgba(231,68,36,0.08)",
-              borderBottom: "1px solid rgba(231,68,36,0.25)",
-              color: "#162335",
-              fontFamily: FONTS.mono,
+              background: APP.accentSoft,
+              borderBottom: `1px solid ${APP.accentBorder}`,
+              color: APP.ink,
+              fontFamily: APP.mono,
               fontSize: 12.5,
               padding: "8px 28px",
               cursor: "pointer",
             }}
           >
-            {wsApi.notice} <span style={{ color: "rgba(22,35,53,0.45)" }}>· dismiss</span>
+            {wsApi.notice} <span style={{ color: APP.muted }}>· dismiss</span>
           </div>
         )}
 
         {!pool.configured && (
-          <div style={{ padding: "12px 28px", background: "rgba(158,59,40,0.06)", borderBottom: "1px solid rgba(158,59,40,0.2)", fontFamily: FONTS.mono, fontSize: 12.5, color: "#9E3B28" }}>
+          <div style={{ padding: "12px 28px", background: APP.weakSoft, borderBottom: `1px solid ${APP.weakBorder}`, fontFamily: APP.mono, fontSize: 12.5, color: APP.weak }}>
             Live data source not configured in this environment — showing an empty pool.
           </div>
         )}
 
         {view === "pool" || !active ? (
-          <PoolScreen wsApi={wsApi} filter={filter} setFilter={setFilter} openCandidate={openCandidate} openDeep={openDeep} />
+          <PoolBoard wsApi={wsApi} openCandidate={openCandidate} />
         ) : (
-          <CandidateScreen wsApi={wsApi} activeId={activeId} openPool={openPool} />
+          <CandidateDossier wsApi={wsApi} activeId={activeId} openPool={openPool} />
         )}
       </div>
     </TriageDataProvider>

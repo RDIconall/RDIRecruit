@@ -7,13 +7,15 @@ import { upsertOverlay } from "@/lib/data/overlay";
 import { loadOneCandidate } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
-import { renderWorkingFile } from "@/lib/triage/working-file";
+import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
 import { recalculateRead } from "@/lib/triage/recalc";
 import { chatWithClaude } from "@/lib/triage/chat";
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import type {
+  ActivityEntry,
+  ActivityType,
   Candidate,
   ChatMessage,
   CorrectionEntry,
@@ -329,6 +331,125 @@ export async function compareToRubric(input: { candidateId: string }): Promise<R
   return persistAndMaybeRecalc(input.candidateId, {}, { recalc: true, trigger: "Rubric comparison", reviewer });
 }
 
+// ---- Activity log (HANDOFF-v2 §2) — the human-authored record ----
+
+async function fetchActivity(candidateId: string): Promise<ActivityEntry[]> {
+  if (!hasSupabase()) return [];
+  const supabase = getServiceSupabase();
+  const { data } = await supabase
+    .from("activity")
+    .select("id, type, author, body, created_at")
+    .eq("candidate_id", candidateId)
+    .order("created_at", { ascending: true });
+  return ((data ?? []) as Array<{ id: string; type: string | null; author: string | null; body: string; created_at: string }>).map((r) => ({
+    id: r.id,
+    type: r.type === "interview" || r.type === "comment" ? r.type : "note",
+    author: r.author || "—",
+    body: r.body,
+    at: r.created_at,
+  }));
+}
+
+/** Fold the activity log into recalc inputs: interviews → transcript, notes/comments → corrections. */
+function activityDigest(acts: ActivityEntry[]): { transcript: string; notes: CorrectionEntry[] } {
+  const transcript = acts
+    .filter((a) => a.type === "interview")
+    .map((a) => `[${a.author}] ${a.body}`)
+    .join("\n\n");
+  const notes: CorrectionEntry[] = acts
+    .filter((a) => a.type !== "interview")
+    .map((a) => ({ ts: a.at, text: a.body, reviewerLabel: a.author }));
+  return { transcript, notes };
+}
+
+/** Append a human entry to the candidate's activity log. Claude never writes here. */
+export async function logActivity(input: {
+  candidateId: string;
+  type: ActivityType;
+  author?: string;
+  body: string;
+}): Promise<{ ok: boolean; entry: ActivityEntry | null; message?: string }> {
+  await requireAuth();
+  const body = input.body.trim();
+  if (!body) return { ok: false, entry: null, message: "Empty entry" };
+  if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
+
+  const ident = await reviewerIdentity();
+  const author = input.author?.trim() || ident.label || "You";
+  const supabase = getServiceSupabase();
+  const { data, error } = await supabase
+    .from("activity")
+    .insert({ candidate_id: input.candidateId, type: input.type, author, body })
+    .select("id, created_at")
+    .single();
+  if (error || !data) {
+    console.error("logActivity failed", error);
+    return { ok: false, entry: null, message: "Save failed — please retry." };
+  }
+  revalidatePath("/");
+  return { ok: true, entry: { id: data.id as string, type: input.type, author, body, at: data.created_at as string } };
+}
+
+/**
+ * "Update assessment" (HANDOFF-v2 §2, Build Spec §1): re-run the evaluator over
+ * the DELTA — the activity log (interviews → transcript, notes/comments folded as
+ * corrections) plus the stored working file — and re-persist the pinned assessment.
+ * Free-chat turns never reach here; only this re-persists the read.
+ */
+export async function updateAssessment(input: {
+  candidateId: string;
+}): Promise<RecalcResult & { regenAt?: string }> {
+  await requireAuth();
+  if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
+
+  const one = await loadOneCandidate(input.candidateId);
+  if (!one) return { ok: false, recalculated: false, read: null, message: "Candidate not found" };
+
+  const acts = await fetchActivity(input.candidateId);
+  const { transcript, notes } = activityDigest(acts);
+  const combinedTranscript = [one.slice.transcript ?? "", transcript].filter(Boolean).join("\n\n");
+  const corrections = [...(one.slice.corrections ?? []), ...notes];
+
+  const baseContent = renderWorkingFile(one.candidate, one.slice, {
+    workableUrl: one.workableUrl,
+    disqualified: one.disqualified,
+  });
+  const rubric = await getJobRubric(one.jobShortcode);
+  const priorDecision = one.candidate.decision;
+
+  let read = await recalculateRead({
+    candidate: one.candidate,
+    workingFile: baseContent,
+    corrections,
+    transcript: combinedTranscript,
+    replies: one.slice.replies ?? {},
+    rubric: rubric.rubricMd,
+    jobSpec: rubric.specMd,
+  });
+
+  if (!read) {
+    return { ok: true, recalculated: false, read: null, message: "Saved. Claude re-analysis unavailable (no API key or transient error)." };
+  }
+
+  if (read.decision !== priorDecision) {
+    read = {
+      ...read,
+      reanalysis: {
+        reviewer: "Activity log",
+        before: DM(priorDecision).label,
+        after: DM(read.decision).label,
+        rec: read.timelineNote || read.why,
+      },
+    };
+  }
+
+  const candidate = applyRead(one.candidate, read);
+  const content = renderWorkingFile(candidate, one.slice, { workableUrl: one.workableUrl, disqualified: one.disqualified });
+  await upsertWorkingFile(input.candidateId, { content, read }, await reviewerLabel());
+  revalidatePath("/");
+  return { ok: true, recalculated: true, read, regenAt: nowStamp() };
+}
+
 interface ChatResult {
   ok: boolean;
   messages: ChatMessage[];
@@ -362,7 +483,9 @@ export async function sendCandidateChat(input: {
   };
   const withUser = [...history, userMsg];
 
-  // Build fresh grounding context from the candidate's current working file.
+  // Build fresh grounding context from the candidate's current working file plus
+  // the verbatim source materials (cover letter, answers, résumé, transcripts) so
+  // Claude can quote and verify the actual text, not just the summarized read.
   const one = await loadOneCandidate(input.candidateId);
   const workingFile = one
     ? renderWorkingFile(one.candidate, one.slice, {
@@ -370,11 +493,19 @@ export async function sendCandidateChat(input: {
         disqualified: one.disqualified,
       })
     : existing?.content ?? "";
+  const baseMaterials = one ? renderCandidateMaterials(one.candidate) : "";
+  const acts = await fetchActivity(input.candidateId);
+  const activityBlock = acts.length
+    ? `## Activity log (${acts.length} ${acts.length === 1 ? "entry" : "entries"})\n\n` +
+      acts.map((a) => `- [${a.type}] ${a.author} (${a.at.slice(0, 10)}): ${a.body}`).join("\n")
+    : "";
+  const materials = [baseMaterials, activityBlock].filter(Boolean).join("\n\n");
   const rubric = one ? await getJobRubric(one.jobShortcode) : { rubricMd: "", specMd: "" };
 
   const reply = await chatWithClaude({
     candidateName: one?.candidate.name,
     workingFile,
+    materials,
     rubric: rubric.rubricMd,
     jobSpec: rubric.specMd,
     // Cap the turns we replay so a long thread can't blow the context window.

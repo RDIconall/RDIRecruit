@@ -21,6 +21,7 @@ import type {
 } from "../types";
 import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
+import { avatarColor, initialsOf } from "./app-theme";
 import type {
   AnswerRow,
   Candidate,
@@ -41,6 +42,7 @@ import type {
   ReviewerSignal,
   TimelineRow,
   TimelineSignal,
+  VerdictRead,
 } from "./types";
 
 export interface CandidateEvaluations {
@@ -604,6 +606,74 @@ function implicationFor(decision: Decision): string {
   }[decision];
 }
 
+/**
+ * The cached "Answers" read for the pool board — the application answers graded
+ * OWNED/SURFACE/EVASIVE, collapsed to a single verdict. Never a numeric score.
+ */
+function answersReadFrom(grades: AnswerGradePayload[]): VerdictRead {
+  if (!grades.length) return { label: "—", level: "none" };
+  let owned = 0,
+    evasive = 0,
+    surface = 0;
+  for (const g of grades) {
+    const v = (g.verdict ?? "").toUpperCase();
+    if (v === "OWNED") owned++;
+    else if (v === "EVASIVE") evasive++;
+    else surface++;
+  }
+  if (evasive > 0 || surface > owned) return { label: "Thin", level: "weak" };
+  if (surface === 0) return { label: "Strong", level: "strong" };
+  return { label: "Mixed", level: "mixed" };
+}
+
+/**
+ * The cached "Vs. spec" read for the pool board — fit against the job rubric/spec.
+ * Prefers a Claude-persisted rubricFit verdict; otherwise derives from the
+ * decision so the column is never blank for a scored candidate.
+ */
+function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
+  const verdict = input.read?.rubricFit?.verdict?.trim();
+  if (verdict) {
+    const v = verdict.toLowerCase();
+    const level = /strong|excellent|direct/.test(v)
+      ? "strong"
+      : /weak|poor|thin|miss/.test(v)
+        ? "weak"
+        : "mixed";
+    return { label: verdict, level };
+  }
+  switch (decision) {
+    case "interview":
+      return { label: "Strong fit", level: "strong" };
+    case "short":
+    case "verify":
+      return { label: "Partial", level: "mixed" };
+    case "hold":
+      return { label: "Weak fit", level: "weak" };
+    case "cut":
+      return { label: "Below bar", level: "weak" };
+    default:
+      return { label: "—", level: "none" };
+  }
+}
+
+/** Total years of experience, from the earliest parsed role start to now. */
+function experienceFrom(application: ApplicationLite | null, ro: RoAssessmentRow | null): string {
+  const years: number[] = [];
+  for (const e of application?.parsed_experience ?? []) {
+    const m = String(e.start ?? "").match(/\d{4}/);
+    if (m) years.push(Number(m[0]));
+  }
+  if (years.length) {
+    const span = new Date().getFullYear() - Math.min(...years);
+    if (span >= 30) return "30+ yr";
+    if (span > 0) return `${span} yr`;
+  }
+  const totalTenure = (ro?.per_role ?? []).reduce((sum, r) => sum + (r.years ?? 0), 0);
+  if (totalTenure >= 1) return `${Math.round(totalTenure)} yr`;
+  return "—";
+}
+
 export function mapCandidate(input: MapInput): Candidate {
   const decision = deriveDecision(input);
   const invest = input.evals.invest;
@@ -684,6 +754,14 @@ export function mapCandidate(input: MapInput): Candidate {
     careerRead: careerReadFrom(input),
     rubricFit: input.read?.rubricFit,
     workableUrl: workableUrlFor(input.candidate, input.jobShortcode),
+
+    // v2 app-board fields — derived from cached data only.
+    initials: initialsOf(input.candidate.name || "?"),
+    avatarColor: avatarColor(input.candidate.workable_id || input.candidate.name || "x"),
+    locationShort: location,
+    experience: experienceFrom(input.application, ro),
+    answersRead: answersReadFrom(input.evals.answerGrades),
+    specRead: specReadFrom(input, decision),
   };
 
   if (decision === "cut") {

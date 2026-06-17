@@ -79,3 +79,62 @@ export function renderWorkingFile(
 
   return s;
 }
+
+// Per-section caps so a long résumé or transcript can't blow the context window.
+const COVER_CAP = 12000;
+const ANSWERS_CAP = 10000;
+const RESUME_CAP = 14000;
+const TRANSCRIPT_CAP = 12000;
+
+function cap(text: string, max: number): string {
+  const t = text.trim();
+  return t.length <= max ? t : t.slice(0, max - 1).trimEnd() + "…";
+}
+
+/**
+ * Serialize the candidate's RAW source materials — cover letter, application
+ * answers, résumé text, and any interview/Fireflies transcripts — as a single
+ * markdown block. The working file (renderWorkingFile) is the analysis layer and
+ * deliberately omits these verbatim sources; the "war room" chat needs them so
+ * Claude can quote and verify the actual text (e.g. a cover-letter claim) rather
+ * than reasoning only from the summarized read. Degrades gracefully: sections
+ * with no data on file are skipped, and an empty result returns "".
+ */
+export function renderCandidateMaterials(c: Candidate): string {
+  const sections: string[] = [];
+
+  if (c.cover?.hasLetter && c.cover.lines.length) {
+    const body = c.cover.lines.map((ln) => ln.t).join("\n\n");
+    sections.push(`## Cover letter (verbatim)\n\n${cap(body, COVER_CAP)}`);
+  }
+
+  if (c.answers?.length) {
+    const body = c.answers
+      .filter((a) => (a.q || a.a) && (a.a || "").trim())
+      .map((a) => `**Q: ${a.q || "Application question"}**\n${a.a}`)
+      .join("\n\n");
+    if (body.trim()) sections.push(`## Application answers (verbatim)\n\n${cap(body, ANSWERS_CAP)}`);
+  }
+
+  if (c.resume?.hasResume) {
+    if (c.resume.fullText?.trim()) {
+      sections.push(`## Résumé (extracted text)\n\n${cap(c.resume.fullText, RESUME_CAP)}`);
+    } else if (c.resume.roles.length) {
+      const body = c.resume.roles
+        .map((r) => {
+          const head = `### ${r.title} — ${r.company} (${r.period}${r.current ? " · current" : ""})`;
+          const bullets = r.bullets.length ? "\n" + r.bullets.map((b) => `- ${b}`).join("\n") : "";
+          return head + bullets;
+        })
+        .join("\n\n");
+      sections.push(`## Résumé (parsed roles)\n\n${cap(body, RESUME_CAP)}`);
+    }
+  }
+
+  const recordings = (c.fireflies ?? []).filter((f) => f.transcript?.trim());
+  for (const f of recordings) {
+    sections.push(`## Interview transcript — ${f.title}${f.date && f.date !== "—" ? ` (${f.date})` : ""}\n\n${cap(f.transcript, TRANSCRIPT_CAP)}`);
+  }
+
+  return sections.join("\n\n");
+}

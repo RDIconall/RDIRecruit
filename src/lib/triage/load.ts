@@ -16,7 +16,7 @@ import type {
   RoleReadPayload,
   VerificationPayload,
 } from "../types";
-import type { Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
+import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
 import { mapCandidate, type ApplicationLite, type CandidateEvaluations } from "./from-supabase";
 import { getWorkingFiles } from "./store";
 
@@ -35,7 +35,14 @@ export interface TriagePool {
 }
 
 function emptyWorkspace(): Workspace {
-  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {}, chat: {} };
+  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {}, chat: {}, activity: {}, regen: {} };
+}
+
+type ActivityRow = { id: string; candidate_id: string; type: string | null; author: string | null; body: string; created_at: string };
+
+function toActivityEntry(r: ActivityRow): ActivityEntry {
+  const type = r.type === "interview" || r.type === "comment" ? r.type : "note";
+  return { id: r.id, type, author: r.author || "—", body: r.body, at: r.created_at };
 }
 
 function emptyPool(
@@ -216,13 +223,21 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRes, evalRes, narrRes, evidenceRes, workingFiles] = await Promise.all([
+  const [appsRes, evalRes, narrRes, evidenceRes, activityRes, workingFiles] = await Promise.all([
     supabase.from("applications").select("candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url").in("candidate_id", ids),
     supabase.from("evaluations").select("candidate_id, kind, payload, created_at").in("candidate_id", ids),
     supabase.from("narratives").select("candidate_id, segments, generated_at").in("candidate_id", ids).order("generated_at", { ascending: false }),
     supabase.from("evidence").select("*").in("candidate_id", ids).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
+    supabase.from("activity").select("id, candidate_id, type, author, body, created_at").in("candidate_id", ids).order("created_at", { ascending: true }),
     getWorkingFiles(ids),
   ]);
+
+  const activityByCandidate = new Map<string, ActivityEntry[]>();
+  for (const r of (activityRes.data ?? []) as ActivityRow[]) {
+    const list = activityByCandidate.get(r.candidate_id) ?? [];
+    list.push(toActivityEntry(r));
+    activityByCandidate.set(r.candidate_id, list);
+  }
 
   const appsByCandidate = new Map<string, ApplicationLite>();
   for (const a of (appsRes.data ?? []) as Array<{ candidate_id: string } & ApplicationLite>) {
@@ -282,6 +297,8 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     if (slice.transcript) workspace.transcripts[id] = slice.transcript;
     if (slice.deep) workspace.deep[id] = true;
     if (slice.chat?.length) workspace.chat[id] = slice.chat;
+    const acts = activityByCandidate.get(id);
+    if (acts?.length) workspace.activity[id] = acts;
 
     return candidate;
   });

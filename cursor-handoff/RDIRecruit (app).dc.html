@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:#FFFFFF;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+  ::selection{background:#2563EB;color:#fff}
+  input,button,textarea{font-family:inherit}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:rgba(0,0,0,0.16)}
+  @media (prefers-reduced-motion: reduce){*{transition:none !important}}
+  @keyframes ccdots{0%,80%,100%{opacity:.15}40%{opacity:1}}
+</style>
+</helmet>
+
+<div style="min-height:100vh; background:#FFFFFF; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif; color:#1A1A1A; font-size:18px; line-height:1.5;">
+
+  <!-- ============ TOP BAR ============ -->
+  <div style="position:sticky; top:0; z-index:40; height:54px; background:rgba(255,255,255,0.92); backdrop-filter:saturate(1.1) blur(6px); border-bottom:1px solid #E6E6E6; display:flex; align-items:center; gap:14px; padding:0 28px;">
+    <div style="display:flex; align-items:center; gap:9px; cursor:pointer; flex-shrink:0; font-weight:700; font-size:17px; letter-spacing:-0.02em;" onClick="{{ goPool }}">RDIRecruit</div>
+    <div style="width:1px; height:18px; background:#E6E6E6;"></div>
+    <div style="display:flex; align-items:center; gap:8px; font-size:15px; flex-shrink:0; white-space:nowrap;">
+      <span style="cursor:pointer; color:{{ crumbColor }};" onClick="{{ goPool }}">Director, Research &amp; Science</span>
+      <sc-if value="{{ isCandidate }}" hint-placeholder-val="{{ false }}">
+        <span style="color:#C9C9C9;">/</span>
+        <span style="color:#1A1A1A;">{{ aName }}</span>
+      </sc-if>
+    </div>
+    <div style="flex:1;"></div>
+
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- =================== POOL TABLE ======================= -->
+  <!-- ===================================================== -->
+  <sc-if value="{{ isPool }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="Pool table" style="max-width:1180px; margin:0 auto; padding:24px 28px 90px;">
+
+    <div style="margin-bottom:6px; min-height:34px; display:flex; align-items:center;">
+      <sc-if value="{{ anySel }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex; align-items:center; gap:14px; width:100%; background:#1A1A1A; color:#fff; border-radius:6px; padding:7px 8px 7px 16px;">
+          <span style="font-size:13.5px; font-weight:600;">{{ selCount }} selected</span>
+          <span style="width:1px; height:16px; background:rgba(255,255,255,0.2);"></span>
+          <button onClick="{{ bulkDisqualify }}" style="cursor:pointer; background:#C0392B; color:#fff; border:none; border-radius:4px; padding:6px 14px; font-size:13px; font-weight:500;" style-hover="background:#A93226;">Disqualify {{ selCount }}</button>
+          <span style="flex:1;"></span>
+          <button onClick="{{ clearSel }}" style="cursor:pointer; background:transparent; color:rgba(255,255,255,0.7); border:none; padding:6px 12px; font-size:13px;">Clear</button>
+        </div>
+      </sc-if>
+      <sc-if value="{{ notAnySel }}" hint-placeholder-val="{{ true }}">
+        <div style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:#8A8A8A;">{{ poolCount }} candidates · {{ disqCount }} disqualified · tick rows to disqualify in bulk</div>
+      </sc-if>
+    </div>
+
+    <sc-if value="{{ isWide }}" hint-placeholder-val="{{ true }}">
+    <div style="margin-top:14px; overflow-x:auto;"><div style="min-width:1000px;">
+      <div style="display:grid; grid-template-columns:26px 34px minmax(140px,1.2fr) minmax(100px,0.9fr) 90px 48px 70px 88px 106px 64px 170px; gap:0; align-items:end; padding:0 6px 7px; border-bottom:1px solid #1A1A1A; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:10.5px; letter-spacing:0.04em; text-transform:uppercase; color:#9A9A9A;">
+        <div style="display:flex; align-items:center;"><span onClick="{{ toggleAll }}" style="cursor:pointer; width:15px; height:15px; border-radius:3px; border:1.5px solid {{ allCheckBorder }}; background:{{ allCheckBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px;">{{ allCheckMark }}</span></div>
+        <div></div>
+        <div>Candidate</div>
+        <div>Company</div>
+        <div>Location</div>
+        <div style="text-align:right;">Exp.</div>
+        <div style="text-align:right; padding-right:14px;">Ask</div>
+        <div style="padding-left:14px;">Answers</div>
+        <div>Vs. spec</div>
+        <div style="text-align:right;">RO</div>
+        <div style="text-align:right;">Actions</div>
+      </div>
+
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+        <div style="padding:15px 6px 6px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; color:#9A9A9A; display:flex; gap:8px; align-items:baseline; border-bottom:1px solid #EDEDED;"><span style="color:#1A1A1A; font-weight:600;">{{ g.label }}</span><span>{{ g.count }}</span></div>
+        <sc-for list="{{ g.rows }}" as="c" hint-placeholder-count="3">
+        <div onClick="{{ c.open }}" style="display:grid; grid-template-columns:26px 34px minmax(140px,1.2fr) minmax(100px,0.9fr) 90px 48px 70px 88px 106px 64px 170px; gap:0; align-items:center; padding:6px 6px; border-bottom:1px solid #F0F0F0; cursor:pointer; background:{{ c.rowBg }}; opacity:{{ c.rowOpacity }}; transition:background 120ms ease;" style-hover="background:#F6F8FF;">
+          <div style="display:flex; align-items:center;"><span onClick="{{ c.onToggle }}" style="cursor:pointer; width:15px; height:15px; border-radius:3px; border:1.5px solid {{ c.checkBorder }}; background:{{ c.checkBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; flex-shrink:0;">{{ c.checkMark }}</span></div>
+          <div style="width:24px; height:24px; border-radius:9999px; background:{{ c.avBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:9.5px; font-weight:600; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;">{{ c.initials }}</div>
+          <div style="min-width:0; padding-right:12px;">
+            <div style="font-size:14px; font-weight:600; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-decoration:{{ c.nameDecoration }};">{{ c.name }}</div>
+            <div style="font-size:11.5px; color:#8A8A8A; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.position }}</div>
+          </div>
+          <div style="min-width:0; padding-right:12px; font-size:13.5px; color:#3A3A3A; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.company }}</div>
+          <div style="padding-right:10px; font-size:13px; color:#595959; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.locShort }}</div>
+          <div style="text-align:right; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px; color:#3A3A3A; font-variant-numeric:tabular-nums;">{{ c.years }}</div>
+          <div style="text-align:right; padding-right:14px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px; color:#1A1A1A; font-variant-numeric:tabular-nums;">{{ c.salary }}</div>
+          <div style="display:flex; align-items:center; gap:8px; padding-left:14px;">
+            <span style="width:8px; height:8px; border-radius:9999px; flex-shrink:0; background:{{ c.ansFill }}; border:1.5px solid {{ c.ansColor }};"></span>
+            <span style="font-size:13px; color:{{ c.ansColor }};">{{ c.answers }}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="width:8px; height:8px; border-radius:9999px; flex-shrink:0; background:{{ c.specFill }}; border:1.5px solid {{ c.specColor }};"></span>
+            <span style="font-size:13px; color:{{ c.specColor }}; white-space:nowrap;">{{ c.spec }}</span>
+          </div>
+          <div style="text-align:right; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px; color:#1A1A1A; white-space:nowrap;">{{ c.roLevel }}</div>
+          <div style="display:flex; justify-content:flex-end; align-items:center; gap:9px;">
+            <a href="{{ c.workable }}" target="_blank" rel="noopener" onClick="{{ c.onWk }}" style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11.5px; color:#8A8A8A; text-decoration:none; white-space:nowrap;" style-hover="color:#2563EB;">Workable ↗</a>
+            <sc-if value="{{ c.notDisqualified }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ c.onDisq }}" style="cursor:pointer; background:transparent; color:#C0392B; border:1px solid #E3C9C4; border-radius:4px; padding:4px 9px; font-size:11.5px; font-weight:500; white-space:nowrap;" style-hover="background:#FBECEA; border-color:#C0392B;">Disqualify</button>
+            </sc-if>
+            <sc-if value="{{ c.disqualified }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ c.onReinstate }}" style="cursor:pointer; background:transparent; color:#595959; border:1px solid #CFCFCF; border-radius:4px; padding:4px 9px; font-size:11.5px; font-weight:500; white-space:nowrap;" style-hover="border-color:#1A1A1A;">Reinstate</button>
+            </sc-if>
+          </div>
+        </div>
+      </sc-for>
+      </sc-for>
+    </div></div>
+
+    <p style="margin:22px 6px 0; font-size:14px; line-height:1.5; color:#9A9A9A; max-width:780px;">Verdict dots: filled reads strong, hollow reads mixed, red reads weak. Both AI reads are cached at ingest — opening a candidate never re-runs the model.</p>
+    </sc-if>
+
+    <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:8px; display:flex; flex-direction:column;">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="3">
+        <div style="padding:16px 2px 6px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:10.5px; letter-spacing:0.06em; text-transform:uppercase; color:#9A9A9A; display:flex; gap:8px; align-items:baseline; border-bottom:1px solid #EDEDED;"><span style="color:#1A1A1A; font-weight:600;">{{ g.label }}</span><span>{{ g.count }}</span></div>
+        <sc-for list="{{ g.rows }}" as="c" hint-placeholder-count="3">
+        <div onClick="{{ c.open }}" style="display:flex; flex-direction:column; gap:8px; padding:13px 2px; border-bottom:1px solid #EDEDED; cursor:pointer; opacity:{{ c.rowOpacity }};" style-hover="background:#F6F8FF;">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span onClick="{{ c.onToggle }}" style="cursor:pointer; width:16px; height:16px; border-radius:3px; border:1.5px solid {{ c.checkBorder }}; background:{{ c.checkBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; flex-shrink:0;">{{ c.checkMark }}</span>
+            <div style="width:30px; height:30px; border-radius:9999px; background:{{ c.avBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-weight:600; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; flex-shrink:0;">{{ c.initials }}</div>
+            <div style="min-width:0; flex:1;">
+              <div style="font-size:15px; font-weight:600; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-decoration:{{ c.nameDecoration }};">{{ c.name }}</div>
+              <div style="font-size:12px; color:#8A8A8A; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.position }} · {{ c.company }}</div>
+            </div>
+            <div style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px; color:#1A1A1A; flex-shrink:0;">{{ c.roLevel }}</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding-left:42px; font-size:12.5px; color:#595959;">
+            <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; color:#1A1A1A;">{{ c.salary }}</span>
+            <span>{{ c.locShort }}</span>
+            <span style="display:flex; align-items:center; gap:6px;"><span style="width:7px; height:7px; border-radius:9999px; background:{{ c.ansFill }}; border:1.5px solid {{ c.ansColor }};"></span><span style="color:{{ c.ansColor }};">{{ c.answers }}</span></span>
+            <span style="display:flex; align-items:center; gap:6px;"><span style="width:7px; height:7px; border-radius:9999px; background:{{ c.specFill }}; border:1.5px solid {{ c.specColor }};"></span><span style="color:{{ c.specColor }};">{{ c.spec }}</span></span>
+            <span style="flex:1;"></span>
+            <sc-if value="{{ c.notDisqualified }}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{ c.onDisq }}" style="cursor:pointer; background:transparent; color:#C0392B; border:1px solid #E3C9C4; border-radius:4px; padding:4px 10px; font-size:12px; font-weight:500;" style-hover="background:#FBECEA;">Disqualify</button>
+            </sc-if>
+            <sc-if value="{{ c.disqualified }}" hint-placeholder-val="{{ false }}">
+              <button onClick="{{ c.onReinstate }}" style="cursor:pointer; background:transparent; color:#595959; border:1px solid #CFCFCF; border-radius:4px; padding:4px 10px; font-size:12px; font-weight:500;" style-hover="border-color:#1A1A1A;">Reinstate</button>
+            </sc-if>
+          </div>
+        </div>
+        </sc-for>
+      </sc-for>
+    </div>
+    </sc-if>
+
+    <sc-if value="{{ hasDisq }}" hint-placeholder-val="{{ false }}">
+    <div style="margin-top:18px; border-top:1px solid #EDEDED; padding-top:12px;">
+      <button onClick="{{ toggleDisq }}" style="cursor:pointer; background:transparent; border:none; padding:4px 0; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:#8A8A8A;" style-hover="color:#1A1A1A;">{{ disqToggleLabel }}</button>
+      <sc-if value="{{ showDisq }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:8px; display:flex; flex-direction:column;">
+          <sc-for list="{{ disqRows }}" as="c" hint-placeholder-count="0">
+            <div onClick="{{ c.open }}" style="display:flex; align-items:center; gap:10px; padding:8px 4px; border-bottom:1px solid #F4F4F4; cursor:pointer; opacity:0.55;" style-hover="opacity:0.85;">
+              <div style="width:22px; height:22px; border-radius:9999px; background:{{ c.avBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:600; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; flex-shrink:0;">{{ c.initials }}</div>
+              <div style="min-width:0; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;"><span style="font-size:13.5px; font-weight:600; text-decoration:line-through;">{{ c.name }}</span> <span style="font-size:12.5px; color:#8A8A8A;">· {{ c.company }}</span></div>
+              <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:#9A9A9A; white-space:nowrap;">{{ c.roLevel }}</span>
+              <button onClick="{{ c.onReinstate }}" style="cursor:pointer; background:transparent; color:#595959; border:1px solid #CFCFCF; border-radius:4px; padding:3px 10px; font-size:11.5px; font-weight:500; white-space:nowrap;" style-hover="border-color:#1A1A1A;">Reinstate</button>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+    </div>
+    </sc-if>
+  </div>
+  </sc-if>
+
+  <!-- ===================================================== -->
+  <!-- ============== CANDIDATE — CASE STUDY ================ -->
+  <!-- ===================================================== -->
+  <sc-if value="{{ isCandidate }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Candidate dossier" style="max-width:780px; margin:0 auto; padding:28px 28px 150px;">
+
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px;"><span style="color:{{ accent }}; cursor:pointer;" onClick="{{ goPool }}">← Pool</span><a href="{{ aWorkableUrl }}" target="_blank" rel="noopener" style="color:#595959; text-decoration:none;" style-hover="color:#2563EB;">Open in Workable ↗</a></div>
+
+    <!-- HEADLINE -->
+    <div style="margin-top:24px; display:flex; align-items:center; gap:18px;">
+      <div style="width:46px; height:46px; border-radius:9999px; background:{{ aAvBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:600; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; flex-shrink:0;">{{ aInitials }}</div>
+      <div style="min-width:0;">
+        <h1 style="margin:0; font-size:28px; font-weight:700; letter-spacing:-0.02em; line-height:1.04;">{{ aName }}</h1>
+        <div style="margin-top:4px; font-size:14px; color:#595959;">{{ aPosition }} · {{ aCompany }}</div>
+      </div>
+    </div>
+
+    <!-- DOSSIER FACTS (same data as the table) -->
+    <div style="margin-top:18px; border-top:1px solid #1A1A1A; display:grid; grid-template-columns:1fr 1fr; column-gap:32px;">
+      <sc-for list="{{ aFacts }}" as="f" hint-placeholder-count="10">
+        <div style="display:grid; grid-template-columns:130px 1fr; gap:10px; padding:7px 2px; border-bottom:1px solid #EDEDED; align-items:baseline;">
+          <div style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; letter-spacing:0.02em; color:#9A9A9A;">{{ f.label }}</div>
+          <div style="font-size:13.5px; color:{{ f.color }};">{{ f.value }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- ===== CLAUDE ASSESSMENT (top of page) ===== -->
+    <div style="margin-top:24px; background:#1A1A1A; color:#fff; padding:24px 26px; border-radius:6px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap;">
+        <h2 style="margin:0; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:rgba(255,255,255,0.55);">Claude's assessment</h2>
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px; color:rgba(255,255,255,0.5);">{{ aAssessModel }}</span>
+      </div>
+      <p style="margin:11px 0 0; font-size:16px; line-height:1.6; color:#fff; text-wrap:pretty;">{{ aAssessVerdict }}</p>
+      <div style="margin-top:20px;">
+        <div>
+          <div style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:10.5px; letter-spacing:0.04em; text-transform:uppercase; color:rgba(255,255,255,0.45);">Reviewed</div>
+          <div style="margin-top:8px;">
+            <sc-for list="{{ aAssessReviewed }}" as="r" hint-placeholder-count="4">
+              <div style="display:flex; gap:9px; align-items:baseline; padding:3px 0; font-size:14px; color:rgba(255,255,255,0.86);"><span style="color:{{ accent }};">·</span><span>{{ r.t }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+      <div style="margin-top:20px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.16); display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px; color:rgba(255,255,255,0.55);">Assessed {{ aAssessTs }}</span>
+        <span style="color:rgba(255,255,255,0.25);">·</span>
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px; color:rgba(255,255,255,0.55);">saved to {{ aAssessFile }}</span>
+        <span style="flex:1;"></span>
+        <button onClick="{{ downloadMd }}" style="cursor:pointer; background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.35); border-radius:4px; padding:6px 14px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px;" style-hover="background:rgba(255,255,255,0.12);">Download .md</button>
+      </div>
+      <sc-if value="{{ aRegenerated }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:14px; border-left:2px solid {{ accent }}; padding:6px 0 6px 14px; font-size:13.5px; line-height:1.5; color:rgba(255,255,255,0.82);">{{ aRegenNote }}</div>
+      </sc-if>
+    </div>
+
+    <!-- ===== THE BIO ===== -->
+    <h2 style="margin:54px 0 18px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">The bio</h2>
+    <sc-for list="{{ aBio }}" as="p" hint-placeholder-count="3">
+      <p style="margin:0 0 13px; font-size:15.5px; line-height:1.72; color:#1A1A1A; text-wrap:pretty;"><sc-if value="{{ p.hasLead }}" hint-placeholder-val="{{ false }}"><span style="font-weight:600;">{{ p.lead }}</span> </sc-if>{{ p.t }}</p>
+    </sc-for>
+    <p style="margin:4px 0 0; font-size:15.5px; line-height:1.65; color:#262626; text-wrap:pretty;"><span style="font-weight:600;">His biggest accomplishment.</span> {{ aTopAccomplishment }} That reads as <span style="font-weight:600; color:{{ accent }};">{{ aRoLevel }}</span> work.</p>
+
+    <!-- ===== WHAT THE APPLICATION SAYS ===== -->
+    <h2 style="margin:54px 0 16px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">What the application says</h2>
+    <p style="margin:0 0 18px; font-size:15.5px; line-height:1.65; color:#1A1A1A; text-wrap:pretty;">{{ aAppLede }}</p>
+    <sc-for list="{{ aAppRows }}" as="r" hint-placeholder-count="4">
+      <div style="margin:0 0 20px;">
+        <div style="font-size:15.5px; font-weight:600; color:#1A1A1A; margin-bottom:3px;">{{ r.label }}</div>
+        <p style="margin:0; font-size:15.5px; line-height:1.6; color:#1A1A1A; text-wrap:pretty;">{{ r.value }}</p>
+      </div>
+    </sc-for>
+    <p style="margin:18px 0 0; padding:16px 0 0; border-top:1px solid #EDEDED; font-size:14px; line-height:1.6; color:#3A3A3A; text-wrap:pretty;"><span style="font-weight:600;">Commute.</span> Lives in {{ aLocation }} — {{ aCommuteLine }}</p>
+    <p style="margin:4px 0 0; font-size:12.5px; line-height:1.5; color:#9A9A9A;">{{ aCommuteSource }}</p>
+
+    <!-- ===== THE RECORD ===== -->
+    <h2 style="margin:54px 0 16px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">The record</h2>
+    <sc-if value="{{ isWide }}" hint-placeholder-val="{{ true }}">
+    <div style="overflow-x:auto;"><div style="min-width:720px;">
+      <div style="display:grid; grid-template-columns:112px minmax(140px,1fr) minmax(130px,1fr) 64px minmax(200px,1.5fr) 58px; gap:0 16px; padding:0 4px 10px; border-bottom:1px solid #1A1A1A; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:#9A9A9A;">
+        <div>Years</div><div>Organization</div><div>Role</div><div style="text-align:right;">Tenure</div><div>Biggest accomplishment</div><div style="text-align:right;">RO</div>
+      </div>
+      <sc-for list="{{ aWork }}" as="w" hint-placeholder-count="6">
+        <div style="display:grid; grid-template-columns:112px minmax(140px,1fr) minmax(130px,1fr) 64px minmax(200px,1.5fr) 58px; gap:0 16px; padding:11px 4px; align-items:baseline; border-bottom:1px solid #EDEDED;">
+          <div style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px; color:#595959; font-variant-numeric:tabular-nums; white-space:nowrap;">{{ w.span }}</div>
+          <div style="font-size:15px; font-weight:600; color:#1A1A1A; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ w.org }}</div>
+          <div style="font-size:14.5px; color:#3A3A3A; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ w.role }}</div>
+          <div style="text-align:right; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px; color:#8A8A8A; font-variant-numeric:tabular-nums; white-space:nowrap;">{{ w.tenure }}</div>
+          <div style="font-size:14px; color:#595959; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ w.acc }}</div>
+          <div style="text-align:right; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px; color:{{ w.roColor }}; white-space:nowrap;">{{ w.ro }}</div>
+        </div>
+      </sc-for>
+    </div></div>
+    </sc-if>
+
+    <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
+    <div style="display:flex; flex-direction:column;">
+      <sc-for list="{{ aWork }}" as="w" hint-placeholder-count="6">
+        <div style="padding:12px 2px; border-bottom:1px solid #EDEDED;">
+          <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px;">
+            <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px; color:#595959; white-space:nowrap;">{{ w.span }}</span>
+            <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12.5px; color:{{ w.roColor }}; white-space:nowrap;">{{ w.ro }}</span>
+          </div>
+          <div style="margin-top:3px; font-size:15px; font-weight:600; color:#1A1A1A;">{{ w.org }}</div>
+          <div style="font-size:13.5px; color:#3A3A3A;">{{ w.role }} · {{ w.tenure }}</div>
+          <div style="margin-top:5px; font-size:13.5px; line-height:1.5; color:#595959; text-wrap:pretty;">{{ w.acc }}</div>
+        </div>
+      </sc-for>
+    </div>
+    </sc-if>
+
+    <!-- ===== RO PROGRESSION CHART ===== -->
+    <h2 style="margin:54px 0 6px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">Level over time</h2>
+    <p style="margin:0 0 16px; font-size:13.5px; line-height:1.55; color:#595959; max-width:620px; text-wrap:pretty;">{{ aChartCaption }}</p>
+    <svg viewBox="0 0 900 250" preserveAspectRatio="xMidYMid meet" style="width:100%; height:auto; display:block; overflow:visible;">
+      <sc-for list="{{ chartGrid }}" as="g" hint-placeholder-count="5">
+        <line x1="44" y1="{{ g.y }}" x2="876" y2="{{ g.y }}" stroke="#ECECEC" stroke-width="1"></line>
+        <text x="38" y="{{ g.ty }}" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="#9A9A9A">{{ g.label }}</text>
+      </sc-for>
+      <sc-for list="{{ chartYears }}" as="t" hint-placeholder-count="5">
+        <text x="{{ t.x }}" y="236" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="11" fill="#9A9A9A">{{ t.label }}</text>
+      </sc-for>
+      <line x1="{{ projX1 }}" y1="{{ projY1 }}" x2="{{ projX2 }}" y2="{{ projY2 }}" stroke="{{ accent }}" stroke-width="1.5" stroke-dasharray="3 4"></line>
+      <text x="{{ projLabelX }}" y="{{ projLabelY }}" text-anchor="end" font-family="ui-monospace, Menlo, monospace" font-size="11.5" fill="{{ accent }}">{{ projLabel }}</text>
+      <polyline points="{{ chartLine }}" fill="none" stroke="#1A1A1A" stroke-width="1.75" stroke-linejoin="round"></polyline>
+      <sc-for list="{{ chartNodes }}" as="n" hint-placeholder-count="8">
+        <circle cx="{{ n.cx }}" cy="{{ n.cy }}" r="{{ n.r }}" fill="{{ n.fill }}" stroke="#1A1A1A" stroke-width="1.75"></circle>
+        <text x="{{ n.lx }}" y="{{ n.ly }}" text-anchor="{{ n.anchor }}" font-family="ui-monospace, Menlo, monospace" font-size="10.5" fill="{{ n.labelColor }}">{{ n.label }}</text>
+      </sc-for>
+    </svg>
+
+    <!-- ===== RESUME ===== -->
+    <h2 style="margin:54px 0 16px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">Résumé, as sent</h2>
+    <div style="border:1px solid #E0E0E0;">
+      <div style="background:#1A1A1A; color:#fff; display:flex; align-items:center; gap:12px; padding:11px 16px;">
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:13px;">{{ aResumeFile }}</span>
+        <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11.5px; color:rgba(255,255,255,0.5);">{{ syncLabel }}</span>
+        <span style="flex:1;"></span>
+        <button onClick="{{ resync }}" style="cursor:pointer; background:transparent; color:#fff; border:1px solid rgba(255,255,255,0.35); border-radius:4px; padding:5px 12px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px;" style-hover="background:rgba(255,255,255,0.12);">{{ resyncLabel }}</button>
+        <a href="{{ aResumeHref }}" download="" style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:#fff; text-decoration:none; border:1px solid rgba(255,255,255,0.35); border-radius:4px; padding:5px 12px;" style-hover="background:rgba(255,255,255,0.12);">Download</a>
+      </div>
+      <div style="background:#F5F5F4; padding:24px; max-height:560px; overflow-y:auto;">
+        <sc-if value="{{ aHasResumeDoc }}" hint-placeholder-val="{{ true }}">
+        <div style="background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.08); max-width:640px; margin:0 auto; padding:44px 52px; font-size:14px; line-height:1.55; color:#1A1A1A;">
+          <div style="font-size:23px; font-weight:700; letter-spacing:-0.01em;">{{ aName }}</div>
+          <div style="margin-top:4px; font-size:13px; color:#8A8A8A;">{{ aResumeSubhead }}</div>
+          <div style="margin-top:24px;">
+            <sc-for list="{{ aResumeRoles }}" as="r" hint-placeholder-count="6">
+              <div style="padding:15px 0; border-top:1px solid #EDEDED;">
+                <div style="display:flex; align-items:baseline; justify-content:space-between; gap:14px;">
+                  <div style="font-size:15px; font-weight:600;">{{ r.role }}</div>
+                  <div style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11.5px; color:#9A9A9A; white-space:nowrap;">{{ r.dates }}</div>
+                </div>
+                <div style="margin-top:2px; font-size:14px; font-weight:500; color:#3A3A3A;">{{ r.org }}</div>
+                <div style="margin-top:7px; font-size:13px; line-height:1.55; color:#595959; text-wrap:pretty;">{{ r.detail }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        </sc-if>
+        <sc-if value="{{ aNoResumeDoc }}" hint-placeholder-val="{{ false }}">
+        <div style="background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.08); max-width:640px; margin:0 auto; padding:38px 46px; font-size:15px; line-height:1.6; color:#595959;">{{ aResumeStub }} <a href="{{ aWorkableUrl }}" target="_blank" rel="noopener" style="color:{{ accent }}; text-decoration:none;">Open in Workable ↗</a></div>
+        </sc-if>
+      </div>
+    </div>
+
+    <!-- ===== COVER LETTER ===== -->
+    <h2 style="margin:54px 0 16px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">Cover letter</h2>
+    <div style="border-left:2px solid #E0E0E0; padding:2px 0 2px 24px;">
+      <sc-for list="{{ aCover }}" as="p" hint-placeholder-count="3">
+        <p style="margin:0 0 14px; font-size:15px; line-height:1.7; color:#262626; text-wrap:pretty;">{{ p.t }}</p>
+      </sc-for>
+    </div>
+
+    <!-- ===== APPLICATION ANSWERS ===== -->
+    <h2 style="margin:54px 0 4px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">Application answers</h2>
+    <p style="margin:0 0 18px; font-size:12.5px; color:#9A9A9A;">In the order he answered. Claude's note follows each.</p>
+    <div style="display:flex; flex-direction:column; gap:30px;">
+      <sc-for list="{{ aAnswers }}" as="qa" hint-placeholder-count="4">
+        <div>
+          <div style="font-size:14.5px; font-weight:600; color:#1A1A1A;">{{ qa.q }}</div>
+          <p style="margin:8px 0 0; font-size:15px; line-height:1.65; color:#262626; text-wrap:pretty;">{{ qa.a }}</p>
+          <div style="margin-top:14px; border-left:2px solid {{ qa.barColor }}; padding:2px 0 2px 16px;">
+            <span style="font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:11px; letter-spacing:0.04em; text-transform:uppercase; color:{{ qa.barColor }};">Claude · {{ qa.verdict }}</span>
+            <p style="margin:5px 0 0; font-size:15px; line-height:1.55; color:#595959; text-wrap:pretty;">{{ qa.comment }}</p>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- ===== ACTIVITY LOG ===== -->
+    <h2 style="margin:54px 0 4px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">Activity log</h2>
+    <p style="margin:0 0 18px; font-size:13.5px; line-height:1.55; color:#595959; max-width:620px;">The record for this candidate. Log an interview — paste a transcript or type your notes — or drop a comment. Anyone on the team can add to it; Claude reads all of it in the war room below.</p>
+
+    <div style="border:1px solid #E0E0E0; border-radius:6px; padding:12px; margin-bottom:20px;">
+      <div style="display:flex; gap:5px; margin-bottom:10px;">
+        <sc-for list="{{ atypeTabs }}" as="t" hint-placeholder-count="3">
+          <button onClick="{{ t.on }}" style="cursor:pointer; background:{{ t.bg }}; color:{{ t.color }}; border:1px solid #E0E0E0; border-radius:4px; padding:5px 13px; font-size:12.5px; font-weight:500;">{{ t.label }}</button>
+        </sc-for>
+      </div>
+      <textarea value="{{ adraft }}" onChange="{{ onAdraft }}" placeholder="{{ atypePlaceholder }}" style="width:100%; min-height:78px; resize:vertical; background:#fff; border:none; padding:2px; font-family:inherit; font-size:14px; line-height:1.55; color:#1A1A1A; outline:none;"></textarea>
+      <div style="margin-top:8px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+        <input value="{{ cauthor }}" onChange="{{ onCauthor }}" placeholder="Name" style="width:104px; background:#fff; border:1px solid #D8D8D8; border-radius:4px; padding:6px 10px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:#1A1A1A; outline:none;" style-focus="border-color:#1A1A1A;">
+        <sc-if value="{{ isInterviewType }}" hint-placeholder-val="{{ true }}">
+          <button onClick="{{ pullFireflies }}" style="cursor:pointer; background:transparent; border:1px solid #CFCFCF; border-radius:4px; padding:6px 11px; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; font-size:12px; color:{{ ffColor }};" style-hover="border-color:#1A1A1A;">{{ ffLabel }}</button>
+        </sc-if>
+        <span style="flex:1;"></span>
+        <button onClick="{{ logActivity }}" style="cursor:pointer; background:#1A1A1A; color:#fff; border:none; border-radius:4px; padding:7px 16px; font-size:13px; font-weight:500;" style-hover="background:#000;">Log to record</button>
+      </div>
+    </div>
+
+    <div style="display:flex; flex-direction:column;">
+      <sc-for list="{{ activityFeed }}" as="m" hint-placeholder-count="2">
+        <div style="display:flex; gap:12px; padding-bottom:16px;">
+          <div style="display:flex; flex-direction:column; align-items:center; flex-shrink:0;">
+            <div style="width:28px; height:28px; border-radius:9999px; background:{{ m.tagColor }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:10.5px; font-weight:600; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;">{{ m.avInitials }}</div>
+            <div style="flex:1; width:1px; background:#E6E6E6; margin-top:4px;"></div>
+          </div>
+          <div style="flex:1; min-width:0; padding-top:3px;">
+            <div style="font-size:13.5px; color:#595959;"><span style="font-weight:600; color:#1A1A1A;">{{ m.who }}</span> {{ m.action }} · {{ m.reltime }}</div>
+            <div style="margin-top:5px; font-size:14px; line-height:1.55; color:#262626; white-space:pre-wrap; text-wrap:pretty;">{{ m.text }}</div>
+          </div>
+        </div>
+      </sc-for>
+      <sc-if value="{{ activityEmpty }}" hint-placeholder-val="{{ false }}">
+        <div style="font-size:13.5px; color:#9A9A9A; padding:2px 0;">No activity logged yet.</div>
+      </sc-if>
+    </div>
+
+    <!-- ===== CLAUDE WAR ROOM (chat) ===== -->
+    <h2 style="margin:50px 0 4px; font-size:11px; font-weight:600; letter-spacing:0.07em; text-transform:uppercase; color:#A8A8A8;">Claude war room</h2>
+    <p style="margin:0 0 16px; font-size:13.5px; line-height:1.55; color:#595959; max-width:620px;">Chat with Claude about this candidate. It can see the activity log ({{ activityCount }} entries), the résumé, the application answers, and the job spec.</p>
+
+    <div style="border:1px solid #E0E0E0; border-radius:8px; overflow:hidden;">
+      <div style="padding:16px; display:flex; flex-direction:column; gap:14px; background:#FCFCFB;">
+        <sc-for list="{{ chatFeed }}" as="m" hint-placeholder-count="2">
+          <div style="display:flex; gap:10px;">
+            <div style="width:26px; height:26px; border-radius:9999px; background:{{ m.avBg }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:10px; font-weight:600; font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace; flex-shrink:0;">{{ m.avInitials }}</div>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:12.5px; color:#595959;"><span style="font-weight:600; color:#1A1A1A;">{{ m.who }}</span> · {{ m.reltime }}</div>
+              <sc-if value="{{ m.isThinking }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:5px; font-size:13.5px; color:#8A8A8A;">Thinking<span style="animation:ccdots 1.2s infinite;">.</span><span style="animation:ccdots 1.2s 0.2s infinite;">.</span><span style="animation:ccdots 1.2s 0.4s infinite;">.</span></div>
+              </sc-if>
+              <sc-if value="{{ m.notThinking }}" hint-placeholder-val="{{ true }}">
+                <div style="margin-top:5px; display:inline-block; background:{{ m.bubbleBg }}; border-radius:6px; padding:9px 13px; font-size:14px; line-height:1.55; color:#1A1A1A; white-space:pre-wrap; text-wrap:pretty;">{{ m.text }}</div>
+                <sc-if value="{{ m.showUpdate }}" hint-placeholder-val="{{ false }}">
+                  <div><button onClick="{{ m.onUpdate }}" style="margin-top:9px; cursor:pointer; background:{{ accent }}; color:#fff; border:none; border-radius:4px; padding:6px 13px; font-size:12.5px; font-weight:500;" style-hover="background:#1D4ED8;">Update assessment →</button></div>
+                </sc-if>
+              </sc-if>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <div style="border-top:1px solid #E6E6E6; padding:12px; background:#fff;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <input value="{{ cdraft }}" onChange="{{ onCdraft }}" placeholder="Ask Claude about this candidate…" style="flex:1; min-width:0; background:#fff; border:1px solid #D8D8D8; border-radius:4px; padding:9px 13px; font-size:14px; color:#1A1A1A; outline:none;" style-focus="border-color:#1A1A1A;">
+          <button onClick="{{ sendChat }}" style="cursor:pointer; background:#1A1A1A; color:#fff; border:none; border-radius:4px; padding:9px 18px; font-size:13.5px; font-weight:500;" style-hover="background:#000;">Send</button>
+        </div>
+        <div style="margin-top:9px;">
+          <button onClick="{{ factorIn }}" style="cursor:pointer; background:transparent; color:{{ accent }}; border:1px solid #CBD9F5; border-radius:4px; padding:5px 11px; font-size:12px; font-weight:500;" style-hover="background:#F0F5FF;">↻ Factor in the latest activity</button>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:16px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+      <button onClick="{{ regenerate }}" style="cursor:pointer; background:transparent; color:#595959; border:none; padding:4px 0; font-size:13px; text-decoration:underline; text-underline-offset:3px;">Regenerate assessment manually</button>
+      <span style="font-size:12.5px; color:#9A9A9A;">{{ regenHint }}</span>
+    </div>
+
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  state = {
+    view: 'pool',
+    activeId: 'gregory',
+    activity: {},   // id → [{type, author, text, at}]
+    chat: {},       // id → [{role, text, at, thinking, showUpdate}]
+    regen: {},
+    adraft: '',
+    atype: 'interview',
+    cdraft: '',
+    cauthor: 'Conall',
+    isMobile: false,
+    disq: {},
+    sel: {},
+    sync: {},
+    showDisq: false,
+  };
+
+  now() {
+    try { return new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }); }
+    catch (e) { return 'Jun 16, 2026'; }
+  }
+  componentDidMount() {
+    this._mq = () => { const m = (window.innerWidth || 1200) < 760; if (m !== this.state.isMobile) this.setState({ isMobile: m }); };
+    this._mq();
+    window.addEventListener('resize', this._mq);
+  }
+  componentWillUnmount() { if (this._mq) window.removeEventListener('resize', this._mq); }
+  rel(at) {
+    const m = Math.max(0, Math.round((Date.now() - at) / 60000));
+    if (m < 1) return 'just now';
+    if (m < 60) return m + ' min ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + (h === 1 ? ' hr ago' : ' hrs ago');
+    const d = Math.floor(h / 24);
+    return d + (d === 1 ? ' day ago' : ' days ago');
+  }
+
+  goPool = () => this.setState({ view: 'pool' });
+  open = (id) => this.setState({ view: 'candidate', activeId: id, tdraft: '' });
+
+  toggleSel = (id, e) => { if (e) e.stopPropagation(); const s = { ...this.state.sel }; if (s[id]) delete s[id]; else s[id] = true; this.setState({ sel: s }); };
+  toggleAll = () => { const all = this.all(); const allSel = all.length > 0 && all.every(c => (this.state.sel || {})[c.id]); const s = {}; if (!allSel) all.forEach(c => { s[c.id] = true; }); this.setState({ sel: s }); };
+  clearSel = () => this.setState({ sel: {} });
+  disqualify = (id, e) => { if (e) e.stopPropagation(); this.setState({ disq: { ...this.state.disq, [id]: true } }); };
+  reinstate = (id, e) => { if (e) e.stopPropagation(); const d = { ...this.state.disq }; delete d[id]; this.setState({ disq: d }); };
+  bulkDisqualify = () => { const d = { ...this.state.disq }; Object.keys(this.state.sel || {}).forEach(id => { d[id] = true; }); this.setState({ disq: d, sel: {} }); };
+  resync = () => {
+    const id = this.state.activeId;
+    this.setState({ sync: { ...this.state.sync, [id]: { status: 'pulling' } } });
+    setTimeout(() => { this.setState({ sync: { ...this.state.sync, [id]: { status: 'synced', ts: this.now() } } }); }, 1150);
+  };
+  toggleDisq = () => this.setState({ showDisq: !this.state.showDisq });
+
+  // ---- activity log + war-room chat ----
+  act(id) { return (this.state.activity || {})[id] || []; }
+  chatOf(id) { return (this.state.chat || {})[id] || []; }
+
+  setAtype = (t) => this.setState({ atype: t });
+  onAdraft = (e) => this.setState({ adraft: e.target.value });
+  onCauthor = (e) => this.setState({ cauthor: e.target.value });
+  onCdraft = (e) => this.setState({ cdraft: e.target.value });
+
+  pullFireflies = () => {
+    const c = this.find(this.state.activeId);
+    const t = (c.fireflies || '').trim(); if (!t) return;
+    this.setState({ adraft: t, atype: 'interview' });
+  };
+  logActivity = () => {
+    const id = this.state.activeId; const v = (this.state.adraft || '').trim(); if (!v) return;
+    const author = (this.state.cauthor || 'You').trim() || 'You';
+    const item = { type: this.state.atype || 'note', author, text: v, at: Date.now() };
+    this.setState({ activity: { ...this.state.activity, [id]: [...this.act(id), item] }, adraft: '' });
+  };
+
+  pushChat(id, item) { this.setState({ chat: { ...this.state.chat, [id]: [...this.chatOf(id), item] } }); }
+  clearChatUpdates(id) { this.setState({ chat: { ...this.state.chat, [id]: this.chatOf(id).map(x => ({ ...x, showUpdate: false })) } }); }
+  replaceChatThinking(id, item) {
+    const l = [...this.chatOf(id)];
+    for (let i = l.length - 1; i >= 0; i--) { if (l[i].thinking) { l.splice(i, 1); break; } }
+    l.push(item);
+    this.setState({ chat: { ...this.state.chat, [id]: l } });
+  }
+  claudeRespond(id, makeText) {
+    this.clearChatUpdates(id);
+    this.pushChat(id, { role: 'claude', thinking: true, at: Date.now() });
+    setTimeout(() => { this.replaceChatThinking(id, { role: 'claude', text: makeText(), at: Date.now(), showUpdate: true }); }, 950);
+  }
+  sendChat = () => {
+    const id = this.state.activeId; const v = (this.state.cdraft || '').trim(); if (!v) return;
+    this.pushChat(id, { role: 'user', author: (this.state.cauthor || 'You'), text: v, at: Date.now() });
+    this.setState({ cdraft: '' });
+    this.claudeRespond(id, () => this.chatReply(id, v));
+  };
+  factorIn = () => {
+    const id = this.state.activeId; const n = this.act(id).length;
+    this.claudeRespond(id, () => 'Re-read the activity log — ' + n + ' entr' + (n === 1 ? 'y' : 'ies') + '. ' + this.logSummary(id) + ' Want me to fold this into the assessment up top?');
+  };
+  chatReply(id, text) {
+    const t = text.toLowerCase(); const n = this.act(id).length;
+    if (/comp|salary|\$|pay/.test(t)) return '$185k is real for this level. Across the log the team flags comp as the one open question, not a quality concern — I would treat it as a fundraise decision, not a reason to pass.';
+    if (/reloc|huntsman|stale|where|locat/.test(t)) return 'The logged interview resolves the stale Huntsman end-date — he relocated to LA and is winding down there. I would mark that risk closed.';
+    if (/panel|interview|next|move|advance|stage/.test(t)) return 'From the log, the one thing left to test in a panel is people-management scope; the analytical-validation depth is already well evidenced.';
+    if (/weak|risk|concern|against|worst|bad/.test(t)) return 'The honest risks: comp sits at the top of band, and people-management scope is lighter than the IC depth. Neither is disqualifying against this seat.';
+    return 'Read against the file and the ' + n + ' activity-log entr' + (n === 1 ? 'y' : 'ies') + '. It is consistent with the strong read; nothing here moves the recommendation on its own.';
+  }
+  logSummary(id) {
+    const a = this.act(id);
+    const iv = a.filter(x => x.type === 'interview').length, cm = a.filter(x => x.type === 'comment').length, nt = a.filter(x => x.type === 'note').length;
+    const parts = [];
+    if (iv) parts.push(iv + ' interview' + (iv > 1 ? 's' : ''));
+    if (cm) parts.push(cm + ' comment' + (cm > 1 ? 's' : ''));
+    if (nt) parts.push(nt + ' note' + (nt > 1 ? 's' : ''));
+    return parts.length ? 'It holds ' + parts.join(' and ') + '.' : 'It is empty so far.';
+  }
+  applyUpdate = () => {
+    const id = this.state.activeId; const n = this.act(id).length;
+    this.clearChatUpdates(id);
+    this.pushChat(id, { role: 'claude', text: 'Done — folded the activity log into the assessment at the top of the page.', at: Date.now(), done: true });
+    this.setState({ regen: { ...this.state.regen, [id]: { ts: this.now(), n } } });
+  };
+  regenerate = () => {
+    const id = this.state.activeId; const n = this.act(id).length;
+    this.setState({ regen: { ...this.state.regen, [id]: { ts: this.now(), n } } });
+  };
+  downloadMd = () => {
+    const c = this.find(this.state.activeId);
+    try {
+      const blob = new Blob([this.buildMd(c)], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = c.id + '.md'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {}
+  };
+  buildMd(c) {
+    const id = c.id;
+    const acts = this.act(id);
+    const comments = acts.filter(x => x.type === 'comment');
+    const tr = acts.filter(x => x.type === 'interview').map(x => x.text).join('\n\n');
+    const rg = this.state.regen[id];
+    let s = '# Candidate: ' + c.name + '\n\n';
+    s += '- Position: ' + c.position + '\n- Company: ' + c.company + '\n- Location: ' + c.location + '\n';
+    s += '- Salary ask: ' + c.salary + '\n- Experience: ' + c.years + '\n- RO level: ' + c.roLevel + '\n- Decision: ' + c.decision + '\n';
+    s += '- Workable: ' + c.workable + '\n\n';
+    s += '## Bio\n\n' + c.bio.map(p => p.t).join('\n\n') + '\n\n';
+    s += '## The record\n\n| Years | Organization | Role | Tenure | Accomplishment | RO |\n|---|---|---|---|---|---|\n';
+    c.work.forEach(w => { s += '| ' + w.span + ' | ' + w.org + ' | ' + w.role + ' | ' + w.tenure + ' | ' + w.acc + ' | ' + w.ro + ' |\n'; });
+    s += '\n## Claude assessment\n\n' + c.assess.verdict + '\n\n';
+    s += 'Reviewed:\n' + c.assess.reviewed.map(x => '- ' + x).join('\n') + '\n\n';
+    s += 'Hand back to a human:\n' + c.assess.needsYou.map(x => '- ' + x).join('\n') + '\n\n';
+    s += 'Assessed: ' + (rg ? rg.ts : c.assess.ts) + ' · ' + c.assess.model + '\n\n';
+    s += '## Team comments\n\n' + (comments.length ? comments.map(m => '- ' + m.author + ': ' + m.text).join('\n') : '- none') + '\n\n';
+    s += '## Interview log\n\n' + (tr || '- none') + '\n';
+    return s;
+  }
+
+  // verdict styling — monochrome + one red
+  VS(level) {
+    if (level === 'strong') return { fill: '#1A1A1A', color: '#1A1A1A' };
+    if (level === 'weak') return { fill: 'transparent', color: '#C0392B' };
+    return { fill: 'transparent', color: '#78716C' };
+  }
+  // normalize legacy commute colors to the neutral palette
+  nc(x) { return ({ '#162335': '#1A1A1A', 'rgba(22,35,53,0.7)': '#78716C', '#9E3B28': '#C0392B' })[x] || x; }
+
+  buildChart(pts, projYear, projRo) {
+    const yrs = pts.map(p => p.year);
+    const minY = Math.min.apply(null, yrs);
+    const maxY = Math.max(projYear, Math.max.apply(null, yrs));
+    const xOf = (y) => 60 + (maxY === minY ? 0 : (y - minY) / (maxY - minY)) * 800;
+    const yOf = (ro) => 200 - (ro - 1) * 42.5;
+    const grid = [1, 2, 3, 4, 5].map(ro => ({ y: yOf(ro), ty: yOf(ro) + 3.5, label: 'RO-' + ro }));
+    const line = pts.map(p => xOf(p.year).toFixed(1) + ',' + yOf(p.ro).toFixed(1)).join(' ');
+    const nodes = pts.map((p, i) => {
+      const cx = xOf(p.year), cy = yOf(p.ro);
+      const above = i % 2 === 0;
+      return {
+        cx: cx.toFixed(1), cy: cy.toFixed(1), r: p.edu ? 3.5 : 5,
+        fill: p.edu ? '#FFFFFF' : '#1A1A1A',
+        lx: cx.toFixed(1), ly: (above ? cy - 12 : cy + 18).toFixed(1),
+        anchor: 'middle', labelColor: p.edu ? '#9A9A9A' : '#595959', label: p.label,
+      };
+    });
+    const last = pts[pts.length - 1];
+    const years = [];
+    for (let i = 0; i < 5; i++) {
+      const yr = Math.round(minY + (maxY - minY) * i / 4);
+      years.push({ x: xOf(yr).toFixed(1), label: "'" + String(yr).slice(2) });
+    }
+    return {
+      grid, line, nodes, years,
+      projX1: xOf(last.year).toFixed(1), projY1: yOf(last.ro).toFixed(1),
+      projX2: xOf(projYear).toFixed(1), projY2: yOf(projRo).toFixed(1),
+      projLabelX: xOf(projYear).toFixed(1), projLabelY: (yOf(projRo) - 9).toFixed(1),
+    };
+  }
+
+  data() {
+    return [
+      {
+        id: 'gregory', name: 'Gregory Fillmore', initials: 'GF',
+        position: 'Director, Research & Science', company: 'Huntsman Cancer Institute',
+        location: 'Calabasas, CA', locShort: 'Calabasas, CA',
+        years: '30+ yr', salary: '$185k', roLevel: 'RO-4 → 5', decision: 'Verify first',
+        answers: 'Strong', ansLevel: 'strong', spec: 'Strong fit', specLevel: 'strong',
+        workable: 'https://rditrials.workable.com/backend/jobs/379AA16E8F/candidates/8f2c',
+        salaryVector: 'A fundraise call, not a budget line',
+        roTrend: 'Owned-function, bending up',
+        bio: [
+          { lead: "Research technician, University of Utah · 1987–92.", t: "A research technician at the University of Utah in 1987, where he helped build a hot-air, glass-capillary PCR rig that fed the design of the Roche LightCycler." },
+          { lead: "Ph.D. and postdoc, Utah State / Utah · 1993–2005.", t: "A Ph.D. in microbiology and virology at Utah State over seven years running a ten-person lab, then a four-year postdoc back at Utah — a ~100-line leukemia and lymphoma cell bank, and multiplex diagnostic assays co-developed with ARUP." },
+          { lead: "Ribomed, then Cepheid · 2005–2009.", t: "He led assay development on a $3.5M DARPA biodefense detector at Ribomed, then at Cepheid took multiplex real-time PCR assays — Influenza, HIV/HBV, STDs — from primer design through FDA submission on the SmartCycler and GeneXpert platforms." },
+          { lead: "Roche Molecular Systems · 2009–2015.", t: "Eight years at Roche Molecular Systems, principal scientist to senior manager — owning the control-material biorepository behind Roche's worldwide assay R&D and directing global surveillance of discrepant samples across the commercial portfolio." },
+          { lead: "Huntsman Cancer Institute · 2015–present.", t: "Since 2015 he has directed the Biorepository and Molecular Pathology Core at Huntsman Cancer Institute: 25 staff, a $2M budget, CAP and CLIA accreditation, and ddPCR/NGS/NanoString diagnostics. Research assistant professor of pathology since 2019." },
+          { t: "The shape is a steady, deepening IVD operator who has both carried assays to clearance and run an accredited lab — the rare candidate who has lived on both sides of the submission." },
+        ],
+        topAccomplishment: "At Cepheid, carrying multiplex PCR assays from primer design all the way to FDA submission — exactly the burden the Director seat exists to take off us.",
+        appLede: "A strong, coherent file. The story the materials tell holds together — and it's the story this seat needs.",
+        appRows: [
+          { label: 'Target salary', value: "$185k. For a judgment layer who removes science and lab key-person risk, this reads as a fundraise decision, not a budget rejection." },
+          { label: 'His answers', value: "Thought-through and specific, anchored to the résumé. Low AI-likeness — the detail is the kind you don't fabricate." },
+          { label: 'Cover letter', value: "Did the homework on RDI's IVD-only focus. The voice is consistent across résumé, letter, and answers — one person wrote all three." },
+          { label: 'Against the spec', value: "A direct hit on the Director scope: assay validation through clearance, plus running an accredited CLIA/CAP lab. The rare both-sides candidate." },
+        ],
+        commute: { sentence: '17 miles from the Van Nuys lab, about 19 minutes against traffic and closer to 30 in the morning crawl.', tag: '≈ 19 min', color: '#162335', source: 'Commute looked up Jun 16, 2026 · fastest driving route via US-101 S through Tarzana, ~17 mi.' },
+        work: [
+          { span: '2015 – present', org: 'Huntsman Cancer Inst.', role: 'Director, Research & Science', tenure: '10+ yr', acc: 'Runs a CAP/CLIA molecular-pathology core — 25 staff, $2M budget, design control & accreditation.', ro: 'RO-4→5', edu: false },
+          { span: '2013 – 2015', org: 'Roche Molecular Systems', role: 'Senior Manager', tenure: '2.1 yr', acc: "Directed global surveillance of discrepant samples across Roche's commercial Dx portfolio.", ro: 'RO-4', edu: false },
+          { span: '2009 – 2013', org: 'Roche Molecular Systems', role: 'Principal Scientist', tenure: '4.0 yr', acc: "Owned the control-material biorepository feeding Roche's worldwide assay R&D.", ro: 'RO-3→4', edu: false },
+          { span: '2007 – 2009', org: 'Cepheid', role: 'Senior Scientist', tenure: '2.7 yr', acc: 'Took multiplex PCR assays (Flu, HIV/HBV, STDs) from primer design through FDA submission on GeneXpert.', ro: 'RO-3', edu: false },
+          { span: '2005 – 2007', org: 'Ribomed Biotech', role: 'Supervisor, Nucleic Acids', tenure: '2.1 yr', acc: 'Led assay development for a $3.5M DARPA biodefense detector; supervised four across BSL-2/3.', ro: 'RO-2→3', edu: false },
+          { span: '2000 – 2005', org: 'University of Utah', role: 'Postdoctoral Fellow', tenure: '4.3 yr', acc: 'Built a ~100-line leukemia/lymphoma cell bank; co-developed multiplex Dx assays with ARUP.', ro: 'RO-2', edu: false },
+          { span: '1993 – 2000', org: 'Utah State University', role: 'Ph.D. — Microbiology & Virology', tenure: '7.2 yr', acc: 'dsRNA virus sequencing and recombinant cloning; ran lab ops for ten; graduate TA.', ro: 'RO-1→2', edu: true },
+          { span: '1987 – 1992', org: 'University of Utah', role: 'Research Technician', tenure: '5.7 yr', acc: 'Built a hot-air, glass-capillary PCR prototype that fed the design of the Roche LightCycler.', ro: 'RO-1', edu: false },
+        ],
+        chartPts: [
+          { year: 1987, ro: 1.0, label: 'Tech' },
+          { year: 1996, ro: 1.4, label: 'Ph.D.', edu: true },
+          { year: 2002, ro: 2.0, label: 'Postdoc' },
+          { year: 2006, ro: 2.5, label: 'Ribomed' },
+          { year: 2008, ro: 3.0, label: 'Cepheid' },
+          { year: 2011, ro: 3.4, label: 'Roche PS' },
+          { year: 2014, ro: 4.0, label: 'Roche SM' },
+          { year: 2018, ro: 4.3, label: 'Director' },
+        ],
+        projYear: 2026, projRo: 4.8, projLabel: 'climbing → RO-5',
+        chartCaption: 'Bench technician in 1987 to an accredited-lab director today — a steady climb that is still bending up. Hollow node marks the Ph.D.; filled nodes are jobs.',
+        resume: {
+          hasDoc: true, file: 'Fillmore_Gregory_Resume.pdf', pages: 'Synced from Workable', href: 'Fillmore-Resume.docx',
+          subhead: 'Greater Salt Lake City Area · 8 roles, 1987–present · IVD assay development & accredited-lab operations',
+          roles: [
+            { role: 'Director, Research & Science', org: 'Huntsman Cancer Institute, University of Utah', dates: 'Jul 2015 – Present', detail: 'Directs the Biorepository & Molecular Pathology Core Facility — procurement, processing, and biobank storage of clinical samples; HIPAA consent compliance; authors and manages IRB protocols. Supervises Tissue/Blood labs (25 staff, Technician–Associate Director) and a Molecular Diagnostics group running ddPCR, NanoString, MassArray, and NGS on patient samples. Owns CAP and CLIA certification; $2M annual budget. ISBER, Total Cancer Care/ORIEN, and University Institutional Biosafety committees. Research Assistant Professor in Pathology (2019).' },
+            { role: 'Senior Manager', org: 'Roche Molecular Systems', dates: 'Jul 2013 – Jul 2015', detail: 'Ran the RMS Culture Collection and global surveillance of discrepant samples across Roche\u2019s worldwide Dx portfolio. Supervised ten scientists under cGMP/GLP/ISO; led regulatory audits.' },
+            { role: 'Principal Scientist', org: 'Roche Molecular Systems', dates: 'Aug 2009 – Jul 2013', detail: 'Owned the control-material biorepository feeding worldwide assay R&D. PI for the BSL-3 and Select Agent repository; supervised eight scientists.' },
+            { role: 'Senior Scientist', org: 'Cepheid', dates: 'Jan 2007 – Aug 2009', detail: 'Developed multiplex real-time PCR assays (Influenza, HIV/HBV, STDs) on SmartCycler/GeneXpert from primer design through FDA submission. Owned V&V, guardbanding, lyophilization, and DOE.' },
+            { role: 'Supervisor, Nucleic Acids Detection', org: 'Ribomed Biotechnologies', dates: 'Jan 2005 – Jan 2007', detail: 'Led nucleic-acid assay development for a $3.5M DARPA biodefense detector; supervised four technicians across BSL-2/3.' },
+            { role: 'Postdoctoral Fellow', org: 'University of Utah', dates: 'Oct 2000 – Jan 2005', detail: 'Built a ~100-line leukemia/lymphoma cell bank; co-developed multiplex diagnostic assays with ARUP using qRT-PCR and proteomics.' },
+            { role: 'Graduate Research Assistant (Ph.D.)', org: 'Utah State University', dates: 'Sep 1993 – Oct 2000', detail: 'dsRNA virus life cycles; genomic sequencing and recombinant cloning. Ran lab ops for ten; TA for graduate microbiology and virology.' },
+            { role: 'Research Technician', org: 'University of Utah', dates: 'May 1987 – Dec 1992', detail: 'Developed rapid-cycle PCR protocols; built a hot-air, glass-capillary PCR prototype that fed the design of the Roche LightCycler.' },
+          ],
+        },
+        cover: [
+          { t: "I have spent my career on one side or the other of a diagnostic submission — developing the assay, or running the lab that has to stand behind it. RDI is the first place I have seen that does both under one roof, and that is the reason I am writing." },
+          { t: "At Cepheid I carried multiplex PCR assays from primer design through FDA submission on the GeneXpert platform. At Roche I owned the control materials behind the company's worldwide assay R&D. For the last decade I have run a CAP- and CLIA-accredited molecular-pathology core at Huntsman — 25 people, a $2M budget, and the accreditation that comes with real patient samples." },
+          { t: "I am not looking for a bigger title. I am looking to put that whole arc to work in one place, on diagnostics that have to clear and then hold up. If that is the seat, I would like to talk." },
+        ],
+        questions: [
+          { q: 'Q1 — Why this seat, and why RDI?', a: "Because RDI is the rare shop where assay development and an accredited lab sit in the same building. I have spent thirty years moving between those two worlds — Cepheid on the development side, Huntsman on the lab side. The seat lets me stop translating between them and own both.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Motivation read off actions, not wants — the both-sides arc is real and the reason is specific to RDI's structure. No template language." },
+          { q: 'Q2 — Walk us through validating a new assay end to end.', a: "Analytical validation first — LoB, LoD, and precision to CLSI EP17 and EP05, with the bridging study designed before the first sample runs. Then method comparison against the predicate, lot-to-lot, and stability. I freeze the design under design control before clinical samples, so the submission package writes itself from the records.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Names the right standards unprompted (EP17/EP05) and sequences them correctly. This is portable knowledge, not recall of one product." },
+          { q: 'Q3 — A CAP/CLIA finding you owned.', a: "We took a deficiency on competency assessment documentation in a CAP inspection. I owned it — rebuilt the assessment schedule, tied it to the LIS so it could not lapse silently, and we closed it before the response deadline with no repeat at the next cycle.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Owns a weak spot rather than dressing it up — the integrity signal we look for. Concrete mechanism (tied to the LIS), not just 'fixed it.'" },
+          { q: 'Q4 — Hardest cross-functional call you made.', a: "Pulling a control-material lot at Roche that had passed spec but trended toward an assay's target region. Manufacturing wanted to ship; I held it, sequenced it, and we caught real variance. It cost a schedule slip and an uncomfortable meeting, but shipping it would have cost more downstream.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Took risk off the company at a real cost to himself — exactly the owner-complement behavior. Worth confirming the slip's magnitude live." },
+          { q: 'Q5 — What would make this worth it for you?', a: "Scope, not title. I want to own the science and the lab end to end and be measured on whether the diagnostics clear and hold. $185k is my number; I am open to how it is structured against what we build.", verdict: 'Surface', level: 'mixed', barColor: '#78716C', comment: "Clear on motivation; the comp line is honest but open-ended. This is the conversation to have early — the number is real for the level." },
+        ],
+        assess: {
+          verdict: "Reads as the strongest fit in the pool for the Director seat: a thirty-year IVD operator who has carried assays to FDA submission and run an accredited molecular-pathology lab. Decision is Verify first — not on quality, but on one stale fact and a comp conversation worth having before any panel.",
+          reviewed: [
+            'Résumé — 8 roles, 1987–present, parsed clean',
+            'Cover letter — 3 paragraphs',
+            '5 application answers',
+            'Public professional profile (job-relevant fields only)',
+            'Stated salary — $185k',
+          ],
+          needsYou: [
+            'Confirm he is still at Huntsman — the profile end-date looks stale against a Calabasas address.',
+            'Open the comp conversation early: $185k is real for this level; decide if it is a fundraise call.',
+          ],
+          model: 'claude-sonnet-4-6', ts: 'Jun 14, 2026 8:12 PM', file: 'gregory-fillmore.md',
+        },
+        seedActivity: [
+          { type: 'interview', who: 'Conall', agoMin: 2880, text: 'Short screen, 25 min. Walked validation end to end — analytical first (EP17/EP05), bridging study before the first sample, design control before clinical. Asked about Calabasas: he relocated to LA last year and is winding down at Huntsman.' },
+          { type: 'comment', who: 'Lara', agoMin: 1500, text: 'Comp is the only real question for me. The science is clearly there — worth fast-tracking before he is gone.' },
+        ],
+        seedChat: [
+          { role: 'claude', agoMin: 2870, text: 'Opening read: the strongest fit in the pool for the Director seat. The logged interview closes the stale-Huntsman question. One thing left for a human — the comp conversation. Ask me anything against the file or the activity log.' },
+        ],
+        fireflies: "Short screen — Gregory Fillmore / Conall · 25 min\n\nConall: Walk me through validating a new assay end to end.\nGregory: Analytical validation first — LoB, LoD, precision to EP17 and EP05, bridging study designed before the first sample. Then method comparison against the predicate, lot-to-lot, stability. I freeze design control before clinical samples.\nConall: You're in Calabasas now — are you still at Huntsman?\nGregory: I relocated to LA last year. I've been winding down at Huntsman and consulting; the profile just hasn't caught up.\nConall (note): Resolves the stale end-date. Strong on analytical validation, slightly thin on people-management scope — worth a full panel.",
+      },
+
+      {
+        id: 'priya', name: 'Priya Raman', initials: 'PR',
+        position: 'Associate Director, Assay Development', company: 'Lucira / Pfizer',
+        location: 'Pasadena, CA', locShort: 'Pasadena, CA',
+        years: '16 yr', salary: '$170k', roLevel: 'RO-4', decision: 'Interview first',
+        answers: 'Strong', ansLevel: 'strong', spec: 'Strong fit', specLevel: 'strong',
+        workable: 'https://rditrials.workable.com/backend/jobs/379AA16E8F/candidates/a1b2',
+        salaryVector: 'In range for the level',
+        roTrend: 'Senior IC into ownership',
+        bio: [
+          { t: "Priya Raman did her Ph.D. in molecular biology, then spent her whole career in assay development — scientist to senior scientist to associate director, most recently leading point-of-care assay development through the Lucira-into-Pfizer transition. She has owned development from feasibility through verification and has shipped a CLIA-waived molecular test, which is squarely the work this seat needs." },
+        ],
+        topAccomplishment: "Led a point-of-care molecular assay to CLIA waiver — feasibility through verification, including the human-factors work the waiver turns on.",
+        appLede: "A clean, strong file. Slightly less lab-operations depth than the top of the pool, but a direct development match.",
+        appRows: [
+          { label: 'Target salary', value: "$170k. In range for an RO-4 development lead; no fundraise question here." },
+          { label: 'Her answers', value: "Specific and grounded. Low AI-likeness; the POC and human-factors detail is hard to fake." },
+          { label: 'Cover letter', value: "Researched RDI's IVD focus. Consistent voice across the file." },
+          { label: 'Against the spec', value: "Strong on assay development and clearance; lighter on running an accredited lab day to day." },
+        ],
+        commute: { sentence: 'about 24 miles east, roughly 35 minutes off-peak and longer in the morning.', tag: '≈ 35 min', color: 'rgba(22,35,53,0.7)', source: 'Commute looked up Jun 16, 2026 · ~24 mi via SR-134 W through Glendale.' },
+        work: [
+          { span: '2021 – present', org: 'Lucira / Pfizer', role: 'Associate Director, Assay Dev', tenure: '4.5 yr', acc: 'Led POC molecular assay development through the Lucira-to-Pfizer transition.', ro: 'RO-3→4', edu: false },
+          { span: '2016 – 2021', org: 'Cepheid', role: 'Senior Scientist', tenure: '5.0 yr', acc: 'Owned verification for cartridge-based respiratory panels.', ro: 'RO-3', edu: false },
+          { span: '2012 – 2016', org: 'Grifols', role: 'Scientist', tenure: '4.0 yr', acc: 'Immunoassay development and lot bridging on banked samples.', ro: 'RO-2', edu: false },
+          { span: '2008 – 2012', org: 'UC San Diego', role: 'Ph.D. — Molecular Biology', tenure: '4.0 yr', acc: 'Single-molecule detection methods.', ro: 'RO-1→2', edu: true },
+        ],
+        chartPts: [
+          { year: 2010, ro: 1.5, label: 'Ph.D.', edu: true },
+          { year: 2014, ro: 2.0, label: 'Grifols' },
+          { year: 2018, ro: 3.0, label: 'Cepheid' },
+          { year: 2023, ro: 3.6, label: 'Assoc Dir' },
+        ],
+        projYear: 2027, projRo: 4.1, projLabel: '→ RO-4',
+        chartCaption: 'A clean development track — scientist to associate director, owning more each step.',
+        resume: { hasDoc: false, file: 'Raman-Resume.pdf', pages: '', href: '', subhead: '', roles: [], stub: 'Résumé is on file in Workable as a PDF.' },
+        cover: [
+          { t: "I build diagnostic assays and take them through clearance. I led a point-of-care molecular test to CLIA waiver, which means I have lived the human-factors and reproducibility work that decides whether a POC test actually waives." },
+          { t: "RDI's IVD-only focus is why I am applying — I want to do this work where it is the whole company, not one program among many." },
+        ],
+        questions: [
+          { q: 'Q1 — Why this seat, and why RDI?', a: "I want to develop diagnostics where IVD is the whole business. I have taken a POC test to CLIA waiver and want to do that kind of end-to-end work without it being one of twelve competing programs.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Motivation specific to RDI's focus; backed by a real waiver, not a wish." },
+          { q: 'Q2 — Walk us through validating a new assay end to end.', a: "Feasibility and analytical first — LoD, precision, interference — then method comparison and reproducibility across sites and operators, which is where POC waivers live or die. Design control throughout.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Correct emphasis on reproducibility for a waiver. Portable, not product-specific." },
+          { q: 'Q3 — What would make this worth it?', a: "Owning development end to end and being close to the lab side, which I have less of. $170k is my number.", verdict: 'Surface', level: 'mixed', barColor: '#78716C', comment: "Honest about the lab-ops gap — the one area to probe against this seat." },
+        ],
+        assess: {
+          verdict: "A strong development match for the Director seat with a real clearance under her belt. Lighter on accredited-lab operations than the top candidate, but interview-ready on the development side.",
+          reviewed: ['Résumé — 4 roles, parsed clean', 'Cover letter — 2 paragraphs', '3 application answers', 'Public professional profile', 'Stated salary — $170k'],
+          needsYou: ['Probe lab-operations depth — she owns development, less so day-to-day accredited-lab running.'],
+          model: 'claude-sonnet-4-6', ts: 'Jun 14, 2026 7:48 PM', file: 'priya-raman.md',
+        },
+        fireflies: '',
+      },
+
+      {
+        id: 'daniel', name: 'Daniel Cho', initials: 'DC',
+        position: 'Principal Scientist, Molecular Dx', company: 'Thermo Fisher',
+        location: 'Irvine, CA', locShort: 'Irvine, CA',
+        years: '14 yr', salary: '$165k', roLevel: 'RO-3 → 4', decision: 'Short screen',
+        answers: 'Mixed', ansLevel: 'mixed', spec: 'Partial', specLevel: 'mixed',
+        workable: 'https://rditrials.workable.com/backend/jobs/379AA16E8F/candidates/c3d4',
+        salaryVector: 'High for the level shown',
+        roTrend: 'Deep IC, ownership unclear',
+        bio: [
+          { t: "Daniel Cho is a principal scientist in molecular diagnostics at Thermo Fisher with a master's and fourteen years in assay R&D. The science depth is real, but the file reads as a strong individual contributor rather than someone who has owned a function or a lab — which is the question for a Director seat." },
+        ],
+        topAccomplishment: "Co-developed a multiplex respiratory panel still in Thermo's catalog — strong bench work, though ownership of the program is hard to read from the materials.",
+        appLede: "Genuine science depth, but the materials don't yet show function-level ownership. A short screen settles it.",
+        appRows: [
+          { label: 'Target salary', value: "$165k. High for the RO-3 scope the file actually demonstrates; the level has to justify it." },
+          { label: 'His answers', value: "Strong on technique, vaguer on what he owned versus contributed to. Some answers lean generic." },
+          { label: 'Cover letter', value: "Competent but says little specific about RDI." },
+          { label: 'Against the spec', value: "Bench depth is there; the function-ownership the Director seat needs is not yet evidenced." },
+        ],
+        commute: { sentence: 'about 55 miles south down the 405 — 70 to 100 minutes each way in normal traffic. A brutal daily drive.', tag: '≈ 90 min', color: '#9E3B28', source: 'Commute looked up Jun 16, 2026 · ~55 mi via I-405 N.' },
+        work: [
+          { span: '2022 – present', org: 'Thermo Fisher', role: 'Principal Scientist', tenure: '3.5 yr', acc: 'Co-developed a multiplex respiratory panel; bench lead, not program owner.', ro: 'RO-3→4', edu: false },
+          { span: '2016 – 2022', org: 'Bio-Rad', role: 'Senior Scientist', tenure: '6.0 yr', acc: 'Assay optimization and lot release.', ro: 'RO-3', edu: false },
+          { span: '2012 – 2016', org: 'Quest Diagnostics', role: 'Scientist', tenure: '4.0 yr', acc: 'Method validation in a high-volume reference lab.', ro: 'RO-2', edu: false },
+          { span: '2010 – 2012', org: 'UC Irvine', role: 'M.S. — Biochemistry', tenure: '2.0 yr', acc: 'Protein engineering.', ro: 'RO-1→2', edu: true },
+        ],
+        chartPts: [
+          { year: 2011, ro: 1.5, label: 'M.S.', edu: true },
+          { year: 2014, ro: 2.0, label: 'Quest' },
+          { year: 2019, ro: 3.0, label: 'Bio-Rad' },
+          { year: 2023, ro: 3.4, label: 'Principal' },
+        ],
+        projYear: 2027, projRo: 3.7, projLabel: '→ RO-3/4',
+        chartCaption: 'A deep IC climb that has flattened near the IC ceiling — the open question is ownership.',
+        resume: { hasDoc: false, file: 'Cho-Resume.pdf', pages: '', href: '', subhead: '', roles: [], stub: 'Résumé is on file in Workable as a PDF.' },
+        cover: [{ t: "I am a molecular diagnostics scientist with deep assay-development experience and am looking for a senior role where I can apply it." }],
+        questions: [
+          { q: 'Q1 — Why this seat, and why RDI?', a: "I am ready for a director-level role and RDI's diagnostics focus is a good fit for my background.", verdict: 'Surface', level: 'mixed', barColor: '#78716C', comment: "Generic — 'good fit for my background' says nothing specific about RDI or the seat." },
+          { q: 'Q2 — A function or program you owned end to end.', a: "I was a key contributor on our respiratory panel and worked closely with the program lead on the development plan.", verdict: 'Surface', level: 'mixed', barColor: '#78716C', comment: "'Key contributor', 'worked closely with the lead' — tells on itself. Did not own the program. The exact thing to test." },
+        ],
+        assess: {
+          verdict: "Real bench depth, but the materials read as a strong IC, not a function owner. Short screen to settle ownership before any director-level interview; the $165k ask sits above the scope shown.",
+          reviewed: ['Résumé — 4 roles, parsed clean', 'Cover letter — 1 paragraph', '2 application answers', 'Public professional profile', 'Stated salary — $165k'],
+          needsYou: ['Settle ownership — did he own a program or contribute to one? The answers point to the latter.'],
+          model: 'claude-sonnet-4-6', ts: 'Jun 14, 2026 7:31 PM', file: 'daniel-cho.md',
+        },
+        fireflies: '',
+      },
+
+      {
+        id: 'wei', name: 'Wei Zhang', initials: 'WZ',
+        position: 'Senior Scientist, IVD', company: 'QuidelOrtho',
+        location: 'Carlsbad, CA', locShort: 'Carlsbad, CA',
+        years: '11 yr', salary: '$150k', roLevel: 'RO-3', decision: 'Verify first',
+        answers: 'Strong', ansLevel: 'strong', spec: 'Partial', specLevel: 'mixed',
+        workable: 'https://rditrials.workable.com/backend/jobs/379AA16E8F/candidates/e5f6',
+        salaryVector: 'Fair for the level',
+        roTrend: 'Climbing, pre-ownership',
+        bio: [
+          { t: "Wei Zhang is a senior IVD scientist at QuidelOrtho with a Ph.D. and eleven years in immunoassay and molecular development. The answers are strong and specific, but the file is a senior IC a level below the seat, and Carlsbad means a relocation — both worth confirming before a director-level interview." },
+        ],
+        topAccomplishment: "Owned analytical validation for a cleared cardiac immunoassay — solid RO-3 work, a level under the seat.",
+        appLede: "A genuinely good scientist reading a level below the Director seat, with a relocation to confirm.",
+        appRows: [
+          { label: 'Target salary', value: "$150k. Fair for RO-3; below the seat's level, which is the real question." },
+          { label: 'Her answers', value: "Strong and specific — low AI-likeness, backed by the résumé." },
+          { label: 'Cover letter', value: "Well written, consistent voice; clear on why IVD." },
+          { label: 'Against the spec', value: "Strong development, but not yet function- or lab-ownership. A develop-into-the-seat candidate." },
+        ],
+        commute: { sentence: 'about 110 miles south — a relocation, not a commute.', tag: 'relocation', color: '#9E3B28', source: 'Commute looked up Jun 16, 2026 · ~110 mi from Carlsbad; a daily drive is not realistic — confirm relocation.' },
+        work: [
+          { span: '2021 – present', org: 'QuidelOrtho', role: 'Senior Scientist, IVD', tenure: '5.0 yr', acc: 'Owned analytical validation for a cleared cardiac immunoassay.', ro: 'RO-3', edu: false },
+          { span: '2016 – 2021', org: 'Beckman Coulter', role: 'Scientist', tenure: '5.0 yr', acc: 'Immunoassay development and interference studies.', ro: 'RO-2', edu: false },
+          { span: '2013 – 2016', org: 'University of Washington', role: 'Ph.D. — Bioengineering', tenure: '4.0 yr', acc: 'Microfluidic assay platforms.', ro: 'RO-1→2', edu: true },
+        ],
+        chartPts: [
+          { year: 2014, ro: 1.5, label: 'Ph.D.', edu: true },
+          { year: 2018, ro: 2.0, label: 'Beckman' },
+          { year: 2023, ro: 3.0, label: 'Sr Sci' },
+        ],
+        projYear: 2027, projRo: 3.3, projLabel: '→ RO-3+',
+        chartCaption: 'A steady climb to senior IC — one level short of the seat, still rising.',
+        resume: { hasDoc: false, file: 'Zhang-Resume.pdf', pages: '', href: '', subhead: '', roles: [], stub: 'Résumé is on file in Workable as a PDF.' },
+        cover: [{ t: "I have spent eleven years making IVD assays clear and hold up, and I want to do that work at a company where diagnostics are the whole point." }],
+        questions: [
+          { q: 'Q1 — Walk us through validating a new assay end to end.', a: "Analytical validation to CLSI — LoB/LoD/LoQ, precision to EP05, linearity to EP06 — then interference, method comparison, and stability. I keep the validation plan under design control from the start.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Correct standards, correctly sequenced (EP05/EP06). Portable knowledge — strong for the level." },
+          { q: 'Q2 — Are you open to relocation?', a: "Yes, for the right role. I have family in LA and would relocate for this one.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Direct, with a concrete reason (family in LA) — but verify, since the address anchors to Carlsbad." },
+        ],
+        assess: {
+          verdict: "A strong scientist reading one level below the Director seat, with a relocation to confirm. Verify first — the level gap and the move both need settling before a director-level interview.",
+          reviewed: ['Résumé — 3 roles, parsed clean', 'Cover letter — 1 paragraph', '2 application answers', 'Public professional profile', 'Stated salary — $150k'],
+          needsYou: ['Confirm relocation — the address anchors to Carlsbad.', 'Decide whether this is a develop-into-the-seat hire one level down.'],
+          model: 'claude-sonnet-4-6', ts: 'Jun 14, 2026 7:12 PM', file: 'wei-zhang.md',
+        },
+        fireflies: '',
+      },
+
+      {
+        id: 'sofia', name: 'Sofia Marin', initials: 'SM',
+        position: 'R&D Manager, Diagnostics', company: 'Bio-Rad',
+        location: 'Long Beach, CA', locShort: 'Long Beach, CA',
+        years: '12 yr', salary: '$158k', roLevel: 'RO-3', decision: 'Short screen',
+        answers: 'Mixed', ansLevel: 'mixed', spec: 'Partial', specLevel: 'mixed',
+        workable: 'https://rditrials.workable.com/backend/jobs/379AA16E8F/candidates/g7h8',
+        salaryVector: 'Mid for the level',
+        roTrend: 'Manager, breadth over depth',
+        bio: [
+          { t: "Sofia Marin manages an R&D group at Bio-Rad, twelve years across diagnostics with a people-management track the pure scientists lack. The breadth is a real asset, but the IVD assay-development and clearance depth this seat turns on is thinner — the inverse trade-off from the bench candidates." },
+        ],
+        topAccomplishment: "Built and runs a six-person R&D group — genuine management scope, lighter on hands-on clearance work.",
+        appLede: "Strong on management, lighter on assay-development depth. A short screen to weigh the trade.",
+        appRows: [
+          { label: 'Target salary', value: "$158k. Mid for an RO-3 manager; reasonable." },
+          { label: 'Her answers', value: "Confident on team and process, thinner on assay specifics." },
+          { label: 'Cover letter', value: "Well written; leans on leadership over technical depth." },
+          { label: 'Against the spec', value: "Management scope is a plus; hands-on IVD clearance depth is the gap." },
+        ],
+        commute: { sentence: 'about 35 miles south, 50 to 75 minutes in normal traffic. Long but doable.', tag: '≈ 60 min', color: 'rgba(22,35,53,0.7)', source: 'Commute looked up Jun 16, 2026 · ~35 mi via I-405 N.' },
+        work: [
+          { span: '2020 – present', org: 'Bio-Rad', role: 'R&D Manager, Diagnostics', tenure: '5.5 yr', acc: 'Built and runs a six-person assay R&D group.', ro: 'RO-3', edu: false },
+          { span: '2016 – 2020', org: 'Beckman Coulter', role: 'Senior Associate Scientist', tenure: '4.0 yr', acc: 'Assay development and tech transfer.', ro: 'RO-2→3', edu: false },
+          { span: '2012 – 2016', org: 'Hologic', role: 'Associate Scientist', tenure: '4.0 yr', acc: 'Molecular assay QC.', ro: 'RO-2', edu: false },
+        ],
+        chartPts: [
+          { year: 2013, ro: 2.0, label: 'Hologic' },
+          { year: 2017, ro: 2.5, label: 'Beckman' },
+          { year: 2022, ro: 3.0, label: 'Manager' },
+        ],
+        projYear: 2027, projRo: 3.4, projLabel: '→ RO-3+',
+        chartCaption: 'Moved into management early — breadth and team scope ahead of bench depth.',
+        resume: { hasDoc: false, file: 'Marin-Resume.pdf', pages: '', href: '', subhead: '', roles: [], stub: 'Résumé is on file in Workable as a PDF.' },
+        cover: [{ t: "I lead diagnostics R&D teams and care most about building the systems and people that make assay development repeatable. I would bring that to RDI." }],
+        questions: [
+          { q: 'Q1 — A function you owned end to end.', a: "I built our assay R&D group from three people to six and put in the development process we run today — stage gates, design reviews, the works.", verdict: 'Owned', level: 'strong', barColor: '#1A1A1A', comment: "Real management ownership — built the team and the process. The strength of this file." },
+          { q: 'Q2 — Walk us through validating a new assay end to end.', a: "My team handles the bench detail; I make sure the plan, the reviews, and the timeline hold and that we hit the design-control gates.", verdict: 'Surface', level: 'mixed', barColor: '#78716C', comment: "Manages the process but defers the technical detail — the depth gap for a seat that needs hands-on IVD judgment." },
+        ],
+        assess: {
+          verdict: "The inverse of the bench candidates: real management scope, lighter assay-development depth. Short screen to weigh whether the seat needs hands-on clearance judgment more than it needs a manager.",
+          reviewed: ['Résumé — 3 roles, parsed clean', 'Cover letter — 1 paragraph', '2 application answers', 'Public professional profile', 'Stated salary — $158k'],
+          needsYou: ['Decide the trade — does this seat need a hands-on IVD developer or a team manager first?'],
+          model: 'claude-sonnet-4-6', ts: 'Jun 14, 2026 6:55 PM', file: 'sofia-marin.md',
+        },
+        fireflies: '',
+      },
+
+      {
+        id: 'webb', name: 'Marcus Webb', initials: 'MW',
+        position: 'Lab Director', company: 'Desert Valley Reference Lab',
+        location: 'Phoenix, AZ', locShort: 'Phoenix, AZ',
+        years: '20 yr', salary: '$195k', roLevel: 'RO-4', decision: 'Hold',
+        answers: 'Thin', ansLevel: 'weak', spec: 'Weak', specLevel: 'weak',
+        workable: 'https://rditrials.workable.com/backend/jobs/379AA16E8F/candidates/i9j0',
+        salaryVector: 'Tops the pool; level is lab-ops, not IVD dev',
+        roTrend: 'Senior, but adjacent discipline',
+        bio: [
+          { t: "Marcus Webb directs a regional reference lab — twenty years of high-volume clinical operations and CLIA oversight. The lab-operations seniority is real, but it is the operations half of the seat without the assay-development and clearance half, and the application itself is thin. Out-of-state, top-of-pool ask." },
+        ],
+        topAccomplishment: "Runs an accredited high-volume reference lab — strong operations, but no IVD development or clearance work on file.",
+        appLede: "Lab-operations seniority without the development side, a thin application, and a relocation. Holds.",
+        appRows: [
+          { label: 'Target salary', value: "$195k — tops the pool, for the operations half of the seat only." },
+          { label: 'His answers', value: "Thin and generic; little specific to IVD development or to RDI." },
+          { label: 'Cover letter', value: "Brief and templated — low care for a senior application." },
+          { label: 'Against the spec', value: "Operations depth, but no assay development or clearance — half the seat." },
+        ],
+        commute: { sentence: 'in Phoenix — a relocation across state lines, no LA ties on file.', tag: 'relocation', color: '#9E3B28', source: 'Commute looked up Jun 16, 2026 · ~370 mi from Phoenix via I-10 W; relocation required.' },
+        work: [
+          { span: '2020 – present', org: 'Desert Valley Ref. Lab', role: 'Lab Director', tenure: '5.5 yr', acc: 'Runs a high-volume CLIA reference lab; operations and accreditation.', ro: 'RO-4', edu: false },
+          { span: '2016 – 2020', org: 'Sonora Quest', role: 'Assistant Director', tenure: '4.0 yr', acc: 'Lab operations and quality.', ro: 'RO-3→4', edu: false },
+          { span: '2010 – 2016', org: 'LabCorp', role: 'Supervisor', tenure: '6.0 yr', acc: 'Bench operations supervision.', ro: 'RO-3', edu: false },
+          { span: '2004 – 2010', org: 'LabCorp', role: 'Medical Technologist', tenure: '6.0 yr', acc: 'High-volume clinical testing.', ro: 'RO-2', edu: false },
+        ],
+        chartPts: [
+          { year: 2006, ro: 2.0, label: 'MedTech' },
+          { year: 2013, ro: 3.0, label: 'Supervisor' },
+          { year: 2018, ro: 3.6, label: 'Asst Dir' },
+          { year: 2022, ro: 4.0, label: 'Lab Dir' },
+        ],
+        projYear: 2027, projRo: 4.0, projLabel: 'flat → RO-4',
+        chartCaption: 'A solid operations climb — but in the lab-ops discipline, not IVD development.',
+        resume: { hasDoc: false, file: 'Webb-Resume.pdf', pages: '', href: '', subhead: '', roles: [], stub: 'Résumé is on file in Workable as a PDF.' },
+        cover: [{ t: "I am an experienced lab director seeking a senior leadership opportunity where I can apply my operations and quality background." }],
+        questions: [
+          { q: 'Q1 — Why this seat, and why RDI?', a: "I am looking for my next leadership role and believe my lab experience would be an asset.", verdict: 'Thin', level: 'weak', barColor: '#C0392B', comment: "Generic — nothing about IVD development or RDI specifically. Low care for a senior application." },
+          { q: 'Q2 — Your assay-development experience.', a: "My focus has been on lab operations rather than development, but I work with assays daily.", verdict: 'Thin', level: 'weak', barColor: '#C0392B', comment: "Concedes no development experience — that is half of this seat. Holds." },
+        ],
+        assess: {
+          verdict: "Lab-operations seniority without the assay-development and clearance half of the seat, a thin application, and a relocation at the top-of-pool ask. Decision is Hold — not a fit for what this seat is actually for.",
+          reviewed: ['Résumé — 4 roles, parsed clean', 'Cover letter — 1 paragraph', '2 application answers', 'Public professional profile', 'Stated salary — $195k'],
+          needsYou: ['None pressing — the development gap is disqualifying for this seat unless the scope changes.'],
+          model: 'claude-sonnet-4-6', ts: 'Jun 14, 2026 6:40 PM', file: 'marcus-webb.md',
+        },
+        fireflies: '',
+      },
+    ];
+  }
+
+  mk(o) {
+    const initials = o.name.split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase();
+    const ansMap = { strong: 'Strong', mixed: 'Mixed', weak: 'Thin' };
+    const specMap = { strong: 'Strong fit', mixed: 'Partial', weak: 'Weak' };
+    const yrs = parseInt(o.years) || 12;
+    const start = 2026 - yrs;
+    const id = o.name.toLowerCase().replace(/[^a-z]+/g, '-');
+    const pts = [
+      { year: start, ro: Math.max(1, o.roNum - 2), label: 'Start' },
+      { year: 2026 - Math.round(yrs / 2), ro: Math.max(1.5, o.roNum - 1), label: 'Mid' },
+      { year: 2024, ro: o.roNum, label: 'Now' },
+    ];
+    const bar = (lv) => lv === 'strong' ? '#1A1A1A' : lv === 'weak' ? '#C0392B' : '#78716C';
+    return {
+      id, name: o.name, initials, position: o.position, company: o.company,
+      location: o.loc, locShort: o.loc, years: o.years, salary: o.salary,
+      roLevel: o.ro, decision: o.dec,
+      answers: ansMap[o.ans], ansLevel: o.ans, spec: specMap[o.spec], specLevel: o.spec,
+      workable: 'https://rditrials.workable.com/backend/jobs/379AA16E8F/candidates/' + id,
+      salaryVector: 'Within band for the level', roTrend: 'See record',
+      bio: [{ t: o.name + ' is a ' + o.position.toLowerCase() + ' at ' + o.company + ' with ' + o.years + ' in IVD assay work. The file reads as a ' + (o.ans === 'strong' ? 'credible, specific' : o.ans === 'weak' ? 'thin' : 'mixed') + ' application against the Director scope; the cached AI read and the record are below.' }],
+      topAccomplishment: 'Owned validation and development work consistent with a ' + o.ro + ' track.',
+      appLede: o.ans === 'strong' ? 'A solid file worth a closer read against the Director scope.' : (o.ans === 'weak' ? 'A thin file for this seat.' : 'A mixed file with a clear question to settle.'),
+      appRows: [
+        { label: 'Target salary', value: o.salary + '. ' + (/Hold/.test(o.dec) ? 'High relative to the scope shown.' : 'Reasonable for the level.') },
+        { label: 'Answers', value: o.ans === 'strong' ? 'Specific and grounded, low AI-likeness.' : o.ans === 'weak' ? 'Thin and generic.' : 'Specific in places, generic in others.' },
+        { label: 'Cover letter', value: o.ans === 'weak' ? 'Brief and templated.' : 'Coherent; consistent voice across the file.' },
+        { label: 'Against the spec', value: o.spec === 'strong' ? 'Direct fit on assay development and clearance.' : o.spec === 'weak' ? 'Misses the development half of the seat.' : 'Partial — real strengths and a gap against the scope.' },
+      ],
+      commute: { sentence: 'in ' + o.loc + (o.reloc ? ' — a relocation.' : ', roughly ' + (o.min || 40) + ' minutes from the Van Nuys lab.'), tag: o.reloc ? 'relocation' : '≈ ' + (o.min || 40) + ' min', color: o.reloc ? '#9E3B28' : 'rgba(22,35,53,0.7)', source: 'Commute looked up Jun 16, 2026.' },
+      work: [
+        { span: start + ' – present', org: o.company, role: o.position, tenure: '—', acc: 'Current role; see the application for detail.', ro: o.ro, edu: false },
+        { span: (start - 5) + ' – ' + start, org: 'Earlier roles', role: 'Scientist → Senior Scientist', tenure: '—', acc: 'Progressive IVD development roles.', ro: 'RO-' + Math.max(1, Math.round(o.roNum - 1)), edu: false },
+      ],
+      chartPts: pts, projYear: 2027, projRo: Math.min(5, o.roNum + 0.4), projLabel: '→ ' + o.ro,
+      chartCaption: 'A ' + o.years + ' track in IVD, reading around ' + o.ro + '.',
+      resume: { hasDoc: false, file: o.name.split(' ').pop() + '-Resume.pdf', pages: '', href: '', subhead: '', roles: [], stub: 'Résumé is on file in Workable as a PDF.' },
+      cover: [{ t: 'I have spent ' + o.years + ' developing IVD assays and want to do that work where diagnostics are the whole company.' }],
+      questions: [
+        { q: 'Q1 — Why this seat, and why RDI?', a: o.ans === 'weak' ? 'I am looking for my next role and believe my background would be an asset.' : 'I want to own IVD development end to end at a company focused only on diagnostics.', verdict: o.ans === 'strong' ? 'Owned' : o.ans === 'weak' ? 'Thin' : 'Surface', level: o.ans, barColor: bar(o.ans), comment: o.ans === 'strong' ? 'Specific and grounded — real signal.' : o.ans === 'weak' ? 'Generic — low signal.' : 'Some signal, some generic.' },
+        { q: 'Q2 — Walk us through validating a new assay end to end.', a: o.ans === 'weak' ? 'I work with assays daily and follow our standard process.' : 'Analytical validation first — LoD, precision, interference to CLSI — then method comparison and stability under design control.', verdict: o.ans === 'strong' ? 'Owned' : o.ans === 'weak' ? 'Thin' : 'Surface', level: o.ans, barColor: bar(o.ans), comment: o.ans === 'strong' ? 'Correct standards, correctly sequenced.' : o.ans === 'weak' ? 'No real method detail.' : 'Right shape, light on specifics.' },
+      ],
+      assess: {
+        verdict: 'Cached read: ' + (o.ans === 'strong' && o.spec === 'strong' ? 'strong on both axes.' : (o.ans === 'weak' || o.spec === 'weak') ? 'weak against this seat.' : 'mixed — one question to settle.') + ' Decision is ' + o.dec + '.',
+        reviewed: ['Résumé — parsed clean', 'Cover letter', 'Application answers', 'Public professional profile', 'Stated salary — ' + o.salary],
+        needsYou: [o.reloc ? 'Confirm relocation — out-of-area address.' : 'Settle the open question noted in the summary.'],
+        model: 'claude-sonnet-4-6', ts: 'Jun 14, 2026', file: id + '.md',
+      },
+      fireflies: '',
+    };
+  }
+
+  extra() {
+    const o = [
+      { name: 'Tomás Herrera', position: 'Senior R&D Scientist', company: 'Hologic', loc: 'San Jose, CA', years: '15 yr', salary: '$172k', ro: 'RO-3→4', roNum: 3.6, ans: 'strong', spec: 'strong', dec: 'Interview first', min: 55 },
+      { name: 'Anika Patel', position: 'Staff Scientist, Assay Dev', company: 'Roche', loc: 'San Diego, CA', years: '13 yr', salary: '$160k', ro: 'RO-3', roNum: 3.0, ans: 'strong', spec: 'mixed', dec: 'Short screen', reloc: true },
+      { name: 'Rafael Mendes', position: 'R&D Manager', company: 'Abbott', loc: 'Lake Forest, CA', years: '16 yr', salary: '$178k', ro: 'RO-3→4', roNum: 3.6, ans: 'mixed', spec: 'strong', dec: 'Interview first', min: 75 },
+      { name: 'Yuki Tanaka', position: 'Senior Scientist', company: 'Bio-Techne', loc: 'Newark, CA', years: '11 yr', salary: '$155k', ro: 'RO-3', roNum: 3.0, ans: 'strong', spec: 'strong', dec: 'Interview first', reloc: true },
+      { name: 'Grace Okafor', position: 'Validation Lead', company: 'Danaher', loc: 'Sunnyvale, CA', years: '12 yr', salary: '$158k', ro: 'RO-3', roNum: 3.0, ans: 'strong', spec: 'mixed', dec: 'Short screen', reloc: true },
+      { name: 'Ben Lindqvist', position: 'Principal Scientist', company: 'Illumina', loc: 'San Diego, CA', years: '18 yr', salary: '$190k', ro: 'RO-4', roNum: 4.0, ans: 'mixed', spec: 'mixed', dec: 'Verify first', reloc: true },
+      { name: 'Carla Ruiz', position: 'Assay Dev Lead', company: 'Lucira', loc: 'Emeryville, CA', years: '13 yr', salary: '$164k', ro: 'RO-3→4', roNum: 3.5, ans: 'strong', spec: 'mixed', dec: 'Verify first', reloc: true },
+      { name: 'Jon Park', position: 'Principal Scientist, PCR', company: 'Cepheid', loc: 'Sunnyvale, CA', years: '17 yr', salary: '$186k', ro: 'RO-4', roNum: 4.0, ans: 'mixed', spec: 'strong', dec: 'Interview first', reloc: true },
+      { name: 'Nadia Hassan', position: 'Senior Scientist, Immunoassay', company: 'Beckman Coulter', loc: 'Brea, CA', years: '13 yr', salary: '$161k', ro: 'RO-3', roNum: 3.0, ans: 'strong', spec: 'strong', dec: 'Interview first', min: 50 },
+      { name: 'Mei Lin', position: 'Senior Scientist, Molecular', company: 'Cepheid', loc: 'Sunnyvale, CA', years: '10 yr', salary: '$148k', ro: 'RO-3', roNum: 2.9, ans: 'strong', spec: 'mixed', dec: 'Short screen', reloc: true },
+      { name: 'Derek Nwosu', position: 'Staff Engineer, Dx Systems', company: 'Becton Dickinson', loc: 'San Jose, CA', years: '14 yr', salary: '$168k', ro: 'RO-3', roNum: 3.1, ans: 'mixed', spec: 'mixed', dec: 'Short screen', reloc: true },
+      { name: 'Priscilla Adeyemi', position: 'Senior Scientist', company: 'Thermo Fisher', loc: 'Carlsbad, CA', years: '12 yr', salary: '$159k', ro: 'RO-3', roNum: 3.0, ans: 'strong', spec: 'mixed', dec: 'Short screen', reloc: true },
+      { name: 'Lily Chen', position: 'Staff Scientist', company: 'Roche', loc: 'Pleasanton, CA', years: '14 yr', salary: '$170k', ro: 'RO-3→4', roNum: 3.5, ans: 'strong', spec: 'mixed', dec: 'Short screen', reloc: true },
+      { name: 'Elena Vasquez', position: 'Validation Scientist', company: 'Grifols', loc: 'Los Angeles, CA', years: '8 yr', salary: '$138k', ro: 'RO-2→3', roNum: 2.5, ans: 'strong', spec: 'mixed', dec: 'Verify first', min: 35 },
+      { name: 'Marcus Lee', position: 'R&D Director', company: 'Stage One Dx', loc: 'Pasadena, CA', years: '21 yr', salary: '$205k', ro: 'RO-4→5', roNum: 4.4, ans: 'mixed', spec: 'mixed', dec: 'Verify first', min: 40 },
+      { name: 'Hannah Cole', position: 'Scientist II, IVD', company: 'QuidelOrtho', loc: 'San Diego, CA', years: '9 yr', salary: '$142k', ro: 'RO-2→3', roNum: 2.5, ans: 'mixed', spec: 'mixed', dec: 'Hold', reloc: true },
+      { name: 'Owen Pratt', position: 'Scientist II', company: 'Hologic', loc: 'San Diego, CA', years: '7 yr', salary: '$132k', ro: 'RO-2', roNum: 2.0, ans: 'mixed', spec: 'weak', dec: 'Hold', reloc: true },
+      { name: 'Sam Whitfield', position: 'Lab Manager', company: 'LabCorp', loc: 'Phoenix, AZ', years: '19 yr', salary: '$182k', ro: 'RO-4', roNum: 4.0, ans: 'weak', spec: 'weak', dec: 'Hold', reloc: true },
+    ];
+    return o.map(x => this.mk(x));
+  }
+
+  all() { return this.data().concat(this.extra()); }
+  find(id) { return this.all().find(c => c.id === id) || this.all()[0]; }
+
+  renderVals() {
+    const st = this.state;
+    const all = this.all();
+    const accent = '#2563EB';
+
+    const rows = all.map(c => {
+      const av = this.VS(c.ansLevel), sv = this.VS(c.specLevel);
+      const dq = !!(st.disq || {})[c.id];
+      const seld = !!(st.sel || {})[c.id];
+      return {
+        open: () => this.open(c.id),
+        rowBg: seld ? '#F0F5FF' : (c.id === st.activeId ? '#F6F8FF' : 'transparent'),
+        rowOpacity: dq ? 0.5 : 1,
+        nameDecoration: dq ? 'line-through' : 'none',
+        selected: seld, disqualified: dq, notDisqualified: !dq,
+        onToggle: (e) => this.toggleSel(c.id, e),
+        onDisq: (e) => this.disqualify(c.id, e),
+        onReinstate: (e) => this.reinstate(c.id, e),
+        checkBg: seld ? '#1A1A1A' : '#fff', checkBorder: seld ? '#1A1A1A' : '#C9C9C9', checkMark: seld ? '\u2713' : '',
+        avBg: dq ? '#B0B0B0' : '#1A1A1A', initials: c.initials,
+        name: c.name, position: c.position, company: c.company, locShort: c.locShort,
+        years: c.years, salary: c.salary,
+        answers: c.answers, ansFill: av.fill, ansColor: av.color,
+        spec: c.spec, specFill: sv.fill, specColor: sv.color,
+        roLevel: c.roLevel, decision: c.decision, fitScore: (c.ansLevel === 'strong' ? 2 : c.ansLevel === 'mixed' ? 1 : 0) + (c.specLevel === 'strong' ? 2 : c.specLevel === 'mixed' ? 1 : 0),
+        workable: c.workable, onWk: (e) => { if (e) e.stopPropagation(); },
+      };
+    });
+    const poolStrong = all.filter(c => c.ansLevel === 'strong' && c.specLevel === 'strong').length;
+    const selCount = Object.keys(st.sel || {}).length;
+    const anySel = selCount > 0;
+    const allSelected = all.length > 0 && all.every(c => (st.sel || {})[c.id]);
+    const disqCount = Object.keys(st.disq || {}).length;
+    const decOrder = ['Interview first', 'Verify first', 'Short screen', 'Hold'];
+    const activeRows = rows.filter(r => !r.disqualified);
+    const groups = decOrder.map(d => ({ label: d, rows: activeRows.filter(r => r.decision === d).sort((a, b) => b.fitScore - a.fitScore) })).filter(g => g.rows.length).map(g => ({ label: g.label, rows: g.rows, count: g.rows.length }));
+    const disqRows = rows.filter(r => r.disqualified);
+
+    const c = this.find(st.activeId);
+    const av = this.VS(c.ansLevel), sv = this.VS(c.specLevel);
+    const commuteColor = this.nc(c.commute.color);
+    const commuteVal = c.commute.tag === 'relocation' ? 'Relocation required' : c.commute.tag + ' to Van Nuys';
+
+    const aFacts = [
+      { label: 'Current position', value: c.position, color: '#1A1A1A' },
+      { label: 'Current company', value: c.company, color: '#1A1A1A' },
+      { label: 'Location', value: c.location, color: '#1A1A1A' },
+      { label: 'Commute', value: commuteVal, color: commuteColor },
+      { label: 'Experience', value: c.years, color: '#1A1A1A' },
+      { label: 'Salary ask', value: c.salary, color: '#1A1A1A' },
+      { label: 'RO level', value: c.roLevel, color: '#1A1A1A' },
+      { label: 'Answers (AI read)', value: c.answers, color: av.color },
+      { label: 'Fit vs. spec (AI read)', value: c.spec, color: sv.color },
+      { label: 'Recommendation', value: c.decision, color: '#1A1A1A' },
+    ];
+
+    const work = c.work.map(w => ({ ...w, roColor: w.edu ? '#9A9A9A' : '#1A1A1A' }));
+    const ch = this.buildChart(c.chartPts, c.projYear, c.projRo);
+    const r = c.resume;
+    const sy = (st.sync || {})[c.id];
+    const syncing = sy && sy.status === 'pulling';
+    const syncLabel = syncing ? 'Pulling from Workable…' : (sy && sy.status === 'synced') ? 'Stored in Supabase · synced ' + sy.ts : 'Synced from Workable · 2 days ago';
+
+    const rg = (st.regen || {})[c.id];
+    const aAssessTs = rg ? rg.ts : c.assess.ts;
+    let regenNote = '';
+    if (rg) {
+      regenNote = 'Re-read on ' + rg.ts + (rg.n ? ', folding in ' + rg.n + ' activity-log entr' + (rg.n > 1 ? 'ies' : 'y') + '.' : ', no new activity since last pass — verdict unchanged.');
+    }
+
+    const actLabel = { interview: 'logged an interview', note: 'added a note', comment: 'left a comment' };
+    const seedAct = (c.seedActivity || []).map(s => ({ type: s.type, author: s.who, text: s.text, at: Date.now() - s.agoMin * 60000 }));
+    const activityFeed = [...seedAct, ...this.act(c.id)].sort((a, b) => (a.at || 0) - (b.at || 0)).map(it => ({
+      type: it.type, action: actLabel[it.type] || 'logged activity',
+      who: it.author || 'You', reltime: this.rel(it.at || Date.now()), text: it.text || '',
+      avInitials: (it.author || 'You').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase(),
+      tagColor: it.type === 'interview' ? '#2563EB' : it.type === 'comment' ? '#1A1A1A' : '#8A8A8A',
+    }));
+    const activityEmpty = activityFeed.length === 0;
+    const activityCount = activityFeed.length;
+
+    const seedChat = (c.seedChat || []).map(s => ({ role: s.role, text: s.text, at: Date.now() - s.agoMin * 60000 }));
+    const chatFeed = [...seedChat, ...this.chatOf(c.id)].sort((a, b) => (a.at || 0) - (b.at || 0)).map(it => {
+      const isClaude = it.role === 'claude';
+      return {
+        isClaude, isUser: !isClaude, isThinking: !!it.thinking, notThinking: !it.thinking,
+        who: isClaude ? 'Claude' : (it.author || 'You'),
+        reltime: this.rel(it.at || Date.now()), text: it.text || '',
+        avInitials: isClaude ? 'C' : (it.author || 'You').split(' ').map(s => s[0]).join('').slice(0, 2).toUpperCase(),
+        avBg: isClaude ? accent : '#1A1A1A', bubbleBg: isClaude ? '#F0F5FF' : '#F5F5F4',
+        showUpdate: !!it.showUpdate, onUpdate: this.applyUpdate,
+      };
+    });
+    const hasFf = !!(c.fireflies && c.fireflies.trim());
+    const ffPulled = hasFf && st.adraft === c.fireflies;
+    const at = st.atype || 'interview';
+    const atypeTabs = [
+      { label: 'Interview', active: at === 'interview', on: () => this.setAtype('interview') },
+      { label: 'Note', active: at === 'note', on: () => this.setAtype('note') },
+      { label: 'Comment', active: at === 'comment', on: () => this.setAtype('comment') },
+    ].map(t => ({ ...t, bg: t.active ? '#1A1A1A' : 'transparent', color: t.active ? '#fff' : '#595959' }));
+    const atypePlaceholder = at === 'comment' ? 'Share a thought on this candidate for the team…' : at === 'note' ? 'Log a note…' : 'Paste the interview transcript, or type your notes from the conversation…';
+    const isInterviewType = at === 'interview';
+
+    return {
+      isPool: st.view === 'pool', isCandidate: st.view === 'candidate',
+      isWide: !st.isMobile, isMobile: !!st.isMobile,
+      goPool: this.goPool, accent,
+      crumbColor: st.view === 'pool' ? '#1A1A1A' : '#8A8A8A',
+      jobCode: 'RDI-DIR-014',
+      poolCount: all.length, poolStrong, groups, disqRows,
+      hasDisq: disqCount > 0, showDisq: !!st.showDisq, toggleDisq: this.toggleDisq,
+      disqToggleLabel: st.showDisq ? 'Hide disqualified' : ('Show ' + disqCount + ' disqualified'),
+      anySel, notAnySel: !anySel, selCount, disqCount,
+      allCheckBg: allSelected ? '#1A1A1A' : '#fff', allCheckBorder: allSelected ? '#1A1A1A' : '#C9C9C9', allCheckMark: allSelected ? '\u2713' : '',
+      toggleAll: this.toggleAll, clearSel: this.clearSel, bulkDisqualify: this.bulkDisqualify,
+
+      aName: c.name, aInitials: c.initials, aPosition: c.position, aCompany: c.company,
+      aAvBg: '#1A1A1A',
+      aFacts,
+      aBio: (c.bio || []).map(p => ({ t: p.t, lead: p.lead || '', hasLead: !!p.lead })), aTopAccomplishment: c.topAccomplishment, aRoLevel: c.roLevel,
+      aAppLede: c.appLede, aAppRows: c.appRows,
+      aLocation: c.location, aCommuteLine: c.commute.sentence, aCommuteSource: c.commute.source,
+      aWork: work,
+      aChartCaption: c.chartCaption,
+      chartGrid: ch.grid, chartYears: ch.years, chartLine: ch.line, chartNodes: ch.nodes,
+      projX1: ch.projX1, projY1: ch.projY1, projX2: ch.projX2, projY2: ch.projY2,
+      projLabelX: ch.projLabelX, projLabelY: ch.projLabelY, projLabel: c.projLabel,
+
+      aHasResumeDoc: !!r.hasDoc, aNoResumeDoc: !r.hasDoc,
+      aResumeFile: r.file, aResumePages: r.pages || '', aResumeHref: r.href || '#',
+      resync: this.resync, syncLabel, syncing: !!syncing, resyncLabel: syncing ? 'Syncing…' : '↻ Resync',
+      aResumeSubhead: r.subhead || '', aResumeRoles: r.roles || [], aResumeStub: r.stub || '',
+      aWorkableUrl: c.workable,
+
+      aCover: c.cover, aAnswers: c.questions,
+
+      aAssessModel: c.assess.model, aAssessVerdict: c.assess.verdict,
+      aAssessReviewed: c.assess.reviewed.map(t => ({ t })),
+      aAssessNeedsYou: c.assess.needsYou.map(t => ({ t })),
+      aAssessTs, aAssessFile: c.assess.file,
+      downloadMd: this.downloadMd,
+      aRegenerated: !!rg, aRegenNote: regenNote,
+
+      pullFireflies: this.pullFireflies, isInterviewType,
+      ffLabel: hasFf ? (ffPulled ? 'Pulled ✓' : 'Pull from Fireflies') : 'No Fireflies match',
+      ffColor: hasFf ? (ffPulled ? accent : '#1A1A1A') : '#A8A8A8',
+      adraft: st.adraft || '', onAdraft: this.onAdraft, atypeTabs, atypePlaceholder,
+      cauthor: st.cauthor, onCauthor: this.onCauthor,
+      logActivity: this.logActivity,
+      activityFeed, activityEmpty, activityCount,
+      cdraft: st.cdraft || '', onCdraft: this.onCdraft, sendChat: this.sendChat, factorIn: this.factorIn,
+      chatFeed,
+      regenerate: this.regenerate,
+      regenHint: rg ? 'Assessment last updated ' + rg.ts + '.' : 'Regenerate from everything in the file and the activity log.',
+    };
+  }
+}
+</script>
+</body>
+</html>

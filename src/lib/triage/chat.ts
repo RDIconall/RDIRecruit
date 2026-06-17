@@ -7,7 +7,7 @@ const MODEL = "claude-sonnet-4-6";
 
 const SYSTEM_PROMPT = `You are a senior recruiting partner inside RDI Trials' candidate-triage tool, talking live with the hiring team (e.g. Conall or Lara) about ONE specific candidate. You are sharp, candid, and genuinely useful — a thinking partner, not a cheerleader.
 
-Ground every answer in the candidate's working file, the job rubric, the role spec, and any interview transcript provided below. Reason from ACTIONS and evidence, not adjectives. Separate what actually decides a call from what only looks like a red flag. Be willing to disagree with the human — then defer to their judgment.
+Ground every answer in the candidate's source materials (cover letter, application answers, résumé, interview transcripts), the working file, the job rubric, and the role spec provided below. The CANDIDATE MATERIALS block holds the verbatim source text — when asked about the cover letter, résumé, or an answer, read the actual text there before responding. Reason from ACTIONS and evidence, not adjectives. Separate what actually decides a call from what only looks like a red flag. Be willing to disagree with the human — then defer to their judgment.
 
 Hard rules:
 - NEVER produce a numeric score, percentage, points, grade, or tier. When you reference a call, speak only in the decision vocabulary: Interview first, Short screen, Verify first, Hold, Cut, Review blocked.
@@ -18,9 +18,13 @@ Hard rules:
 function buildContextBlock(input: {
   candidateName?: string;
   workingFile: string;
+  materials?: string;
   rubric?: string;
   jobSpec?: string;
 }): string {
+  const materialsBlock = (input.materials || "").trim()
+    ? `\n\nCANDIDATE MATERIALS (verbatim source text — cover letter, application answers, résumé, interview transcripts):\n"""\n${input.materials!.trim().slice(0, 40000)}\n"""`
+    : "";
   const rubricBlock = (input.rubric || "").trim()
     ? `\n\nJOB RUBRIC (the bar this role is graded against):\n"""\n${input.rubric!.trim().slice(0, 7000)}\n"""`
     : "";
@@ -30,7 +34,7 @@ function buildContextBlock(input: {
   return `CANDIDATE WORKING FILE${input.candidateName ? ` — ${input.candidateName}` : ""} (.md — the living case file: decision read, timeline, transcript, rubric fit, corrections):
 """
 ${(input.workingFile || "(empty)").slice(0, 16000)}
-"""${specBlock}${rubricBlock}`;
+"""${materialsBlock}${specBlock}${rubricBlock}`;
 }
 
 /** Ensure the message list the API sees starts on a user turn and alternates cleanly. */
@@ -50,6 +54,8 @@ function normalizeHistory(history: ChatMessage[]): { role: "user" | "assistant";
 export async function chatWithClaude(input: {
   candidateName?: string;
   workingFile: string;
+  /** Verbatim source materials (cover letter, answers, résumé, transcripts). */
+  materials?: string;
   rubric?: string;
   jobSpec?: string;
   /** Full conversation so far, ending with the latest user message. */

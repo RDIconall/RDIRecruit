@@ -1,0 +1,386 @@
+"use client";
+
+import { CSSProperties, useMemo, useState } from "react";
+import {
+  APP,
+  POOL_GROUPS,
+  poolGroupOf,
+  verdictDot,
+  fitWeight,
+} from "@/lib/triage/app-theme";
+import type { Candidate, VerdictRead } from "@/lib/triage/types";
+import type { WorkspaceApi } from "./use-workspace";
+import { useTriageData } from "./context";
+import { useIsNarrow } from "./use-media-query";
+
+const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
+const ellipsis: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+
+const COLS =
+  "26px 34px minmax(140px,1.2fr) minmax(100px,0.9fr) 90px 48px 70px 88px 106px 64px 170px";
+
+interface Props {
+  wsApi: WorkspaceApi;
+  openCandidate: (id: string) => void;
+}
+
+export function PoolBoard({ wsApi, openCandidate }: Props) {
+  const { candidates, meta } = useTriageData();
+  const narrow = useIsNarrow();
+  const dq = wsApi.ws.dq;
+  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [showDisq, setShowDisq] = useState(false);
+
+  const isDq = (c: Candidate) => !!dq[c.id];
+  const active = useMemo(() => candidates.filter((c) => !isDq(c)), [candidates, dq]);
+  const disqRows = useMemo(() => candidates.filter((c) => isDq(c)), [candidates, dq]);
+
+  // Group by status (fixed order); within a group sort by fit = answers + spec.
+  const groups = useMemo(() => {
+    return POOL_GROUPS.map((g) => {
+      const rows = active
+        .filter((c) => poolGroupOf(c.decision) === g.key)
+        .map((c, i) => ({ c, i }))
+        .sort((a, b) => fit(b.c) - fit(a.c) || a.i - b.i)
+        .map((x) => x.c);
+      return { ...g, rows };
+    }).filter((g) => g.rows.length > 0);
+  }, [active]);
+
+  const selIds = Object.keys(sel).filter((k) => sel[k] && active.some((c) => c.id === k));
+  const selCount = selIds.length;
+  const allSelected = active.length > 0 && active.every((c) => sel[c.id]);
+
+  const toggleSel = (id: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    setSel((s) => {
+      const next = { ...s };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      return next;
+    });
+  };
+  const toggleAll = () => {
+    if (allSelected) setSel({});
+    else setSel(Object.fromEntries(active.map((c) => [c.id, true])));
+  };
+  const clearSel = () => setSel({});
+  const bulkDisqualify = () => {
+    wsApi.setDqMany(selIds, true);
+    setSel({});
+  };
+
+  return (
+    <div style={{ maxWidth: 1180, margin: "0 auto", padding: narrow ? "18px 16px 80px" : "24px 28px 90px" }}>
+      {/* selection / count bar */}
+      <div style={{ marginBottom: 6, minHeight: 34, display: "flex", alignItems: "center" }}>
+        {selCount > 0 ? (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 14,
+              width: "100%",
+              background: APP.ink,
+              color: "#fff",
+              borderRadius: 6,
+              padding: "7px 8px 7px 16px",
+            }}
+          >
+            <span style={{ fontSize: 13.5, fontWeight: 600 }}>{selCount} selected</span>
+            <span style={{ width: 1, height: 16, background: "rgba(255,255,255,0.2)" }} />
+            <button
+              onClick={bulkDisqualify}
+              style={{ cursor: "pointer", background: APP.weak, color: "#fff", border: "none", borderRadius: 4, padding: "6px 14px", fontSize: 13, fontWeight: 500 }}
+            >
+              Disqualify {selCount}
+            </button>
+            <span style={{ flex: 1 }} />
+            <button onClick={clearSel} style={{ cursor: "pointer", background: "transparent", color: "rgba(255,255,255,0.7)", border: "none", padding: "6px 12px", fontSize: 13 }}>
+              Clear
+            </button>
+          </div>
+        ) : (
+          <div style={mono({ fontSize: 12, color: APP.muted })}>
+            {active.length} candidates · {disqRows.length} disqualified · tick rows to disqualify in bulk
+          </div>
+        )}
+      </div>
+
+      {!narrow ? (
+        <div style={{ marginTop: 14, overflowX: "auto" }}>
+          <div style={{ minWidth: 1000 }}>
+            {/* header */}
+            <div
+              style={mono({
+                display: "grid",
+                gridTemplateColumns: COLS,
+                alignItems: "end",
+                padding: "0 6px 7px",
+                borderBottom: `1px solid ${APP.ink}`,
+                fontSize: 10.5,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+                color: APP.faint,
+              })}
+            >
+              <div style={{ display: "flex", alignItems: "center" }}>
+                <Check checked={allSelected} onClick={toggleAll} />
+              </div>
+              <div />
+              <div>Candidate</div>
+              <div>Company</div>
+              <div>Location</div>
+              <div style={{ textAlign: "right" }}>Exp.</div>
+              <div style={{ textAlign: "right", paddingRight: 14 }}>Ask</div>
+              <div style={{ paddingLeft: 14 }}>Answers</div>
+              <div>Vs. spec</div>
+              <div style={{ textAlign: "right" }}>RO</div>
+              <div style={{ textAlign: "right" }}>Actions</div>
+            </div>
+
+            {groups.map((g) => (
+              <div key={g.key}>
+                <div
+                  style={mono({
+                    padding: "15px 6px 6px",
+                    fontSize: 10.5,
+                    letterSpacing: "0.06em",
+                    textTransform: "uppercase",
+                    color: APP.faint,
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "baseline",
+                    borderBottom: `1px solid ${APP.hair2}`,
+                  })}
+                >
+                  <span style={{ color: APP.ink, fontWeight: 600 }}>{g.label}</span>
+                  <span>{g.rows.length}</span>
+                </div>
+                {g.rows.map((c) => (
+                  <Row key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} />
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div style={{ marginTop: 8, display: "flex", flexDirection: "column" }}>
+          {groups.map((g) => (
+            <div key={g.key}>
+              <div
+                style={mono({
+                  padding: "16px 2px 6px",
+                  fontSize: 10.5,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: APP.faint,
+                  display: "flex",
+                  gap: 8,
+                  alignItems: "baseline",
+                  borderBottom: `1px solid ${APP.hair2}`,
+                })}
+              >
+                <span style={{ color: APP.ink, fontWeight: 600 }}>{g.label}</span>
+                <span>{g.rows.length}</span>
+              </div>
+              {g.rows.map((c) => (
+                <MobileRow key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} />
+              ))}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {!narrow && (
+        <p style={{ margin: "22px 6px 0", fontSize: 14, lineHeight: 1.5, color: APP.faint, maxWidth: 780 }}>
+          Verdict dots: filled reads strong, hollow reads mixed, red reads weak. Both AI reads are cached at ingest — opening a candidate never re-runs the model.
+        </p>
+      )}
+
+      {disqRows.length > 0 && (
+        <div style={{ marginTop: 18, borderTop: `1px solid ${APP.hair2}`, paddingTop: 12 }}>
+          <button
+            onClick={() => setShowDisq((v) => !v)}
+            style={mono({ cursor: "pointer", background: "transparent", border: "none", padding: "4px 0", fontSize: 12, color: APP.muted })}
+          >
+            {showDisq ? "Hide disqualified ⌃" : `Show ${disqRows.length} disqualified ⌄`}
+          </button>
+          {showDisq && (
+            <div style={{ marginTop: 8, display: "flex", flexDirection: "column" }}>
+              {disqRows.map((c) => (
+                <div
+                  key={c.id}
+                  onClick={() => openCandidate(c.id)}
+                  style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 4px", borderBottom: `1px solid ${APP.line2}`, cursor: "pointer", opacity: 0.55 }}
+                >
+                  <Avatar c={c} size={22} />
+                  <div style={{ minWidth: 0, flex: 1, ...ellipsis }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, textDecoration: "line-through" }}>{c.name}</span>{" "}
+                    <span style={{ fontSize: 12.5, color: APP.muted }}>· {c.company}</span>
+                  </div>
+                  <span style={mono({ fontSize: 12, color: APP.faint, whiteSpace: "nowrap" })}>{c.roLevel}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); wsApi.toggleDq(c.id); }}
+                    style={{ cursor: "pointer", background: "transparent", color: APP.secondary, border: `1px solid #CFCFCF`, borderRadius: 4, padding: "3px 10px", fontSize: 11.5, fontWeight: 500, whiteSpace: "nowrap" }}
+                  >
+                    Reinstate
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fit(c: Candidate): number {
+  return fitWeight(c.answersRead.level) + fitWeight(c.specRead.level);
+}
+
+function Check({ checked, onClick }: { checked: boolean; onClick: (e: React.MouseEvent) => void }) {
+  return (
+    <span
+      onClick={onClick}
+      style={{
+        cursor: "pointer",
+        width: 15,
+        height: 15,
+        borderRadius: 3,
+        border: `1.5px solid ${checked ? APP.accent : "#CFCFCF"}`,
+        background: checked ? APP.accent : "transparent",
+        color: "#fff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: 10,
+        lineHeight: 1,
+        flexShrink: 0,
+      }}
+    >
+      {checked ? "✓" : ""}
+    </span>
+  );
+}
+
+function Avatar({ c, size = 24 }: { c: Candidate; size?: number }) {
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: 9999,
+        background: c.avatarColor,
+        color: "#fff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontSize: size <= 22 ? 9 : 9.5,
+        fontWeight: 600,
+        fontFamily: APP.mono,
+        flexShrink: 0,
+      }}
+    >
+      {c.initials}
+    </div>
+  );
+}
+
+function Dot({ read }: { read: VerdictRead }) {
+  const d = verdictDot(read.level);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <span style={{ width: 8, height: 8, borderRadius: 9999, flexShrink: 0, background: d.fill, border: `1.5px solid ${d.color}` }} />
+      <span style={{ fontSize: 13, color: d.color, ...ellipsis }}>{read.label}</span>
+    </div>
+  );
+}
+
+function DisqButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      style={{ cursor: "pointer", background: "transparent", color: APP.weak, border: `1px solid ${APP.weakBorder}`, borderRadius: 4, padding: "4px 9px", fontSize: 11.5, fontWeight: 500, whiteSpace: "nowrap" }}
+    >
+      Disqualify
+    </button>
+  );
+}
+
+function Row({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void }) {
+  return (
+    <div
+      onClick={onOpen}
+      style={{
+        display: "grid",
+        gridTemplateColumns: COLS,
+        alignItems: "center",
+        padding: "6px 6px",
+        borderBottom: `1px solid ${APP.line}`,
+        cursor: "pointer",
+        background: selected ? APP.accentSoft : "transparent",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center" }}>
+        <Check checked={selected} onClick={onToggle} />
+      </div>
+      <Avatar c={c} />
+      <div style={{ minWidth: 0, paddingRight: 12 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, ...ellipsis }}>{c.name}</div>
+        <div style={{ fontSize: 11.5, color: APP.muted, lineHeight: 1.2, ...ellipsis }}>{c.role}</div>
+      </div>
+      <div style={{ minWidth: 0, paddingRight: 12, fontSize: 13.5, color: APP.ink2, ...ellipsis }}>{c.company}</div>
+      <div style={{ paddingRight: 10, fontSize: 13, color: APP.secondary, ...ellipsis }}>{c.locationShort}</div>
+      <div style={mono({ textAlign: "right", fontSize: 13, color: APP.ink2, fontVariantNumeric: "tabular-nums" })}>{c.experience}</div>
+      <div style={mono({ textAlign: "right", paddingRight: 14, fontSize: 13, color: APP.ink, fontVariantNumeric: "tabular-nums" })}>{c.salary}</div>
+      <div style={{ paddingLeft: 14 }}>
+        <Dot read={c.answersRead} />
+      </div>
+      <div>
+        <Dot read={c.specRead} />
+      </div>
+      <div style={mono({ textAlign: "right", fontSize: 13, color: APP.ink, whiteSpace: "nowrap" })}>{c.roLevel}</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 9 }}>
+        <a
+          href={c.workableUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          style={mono({ fontSize: 11.5, color: APP.muted, textDecoration: "none", whiteSpace: "nowrap" })}
+        >
+          Workable ↗
+        </a>
+        <DisqButton onClick={onDisq} />
+      </div>
+    </div>
+  );
+}
+
+function MobileRow({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void }) {
+  return (
+    <div
+      onClick={onOpen}
+      style={{ display: "flex", flexDirection: "column", gap: 8, padding: "13px 2px", borderBottom: `1px solid ${APP.hair2}`, cursor: "pointer", background: selected ? APP.accentSoft : "transparent" }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <Check checked={selected} onClick={onToggle} />
+        <Avatar c={c} size={30} />
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, ...ellipsis }}>{c.name}</div>
+          <div style={{ fontSize: 12, color: APP.muted, lineHeight: 1.25, ...ellipsis }}>{c.role} · {c.company}</div>
+        </div>
+        <div style={mono({ fontSize: 13, color: APP.ink, flexShrink: 0 })}>{c.roLevel}</div>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", paddingLeft: 42, fontSize: 12.5, color: APP.secondary }}>
+        <span style={mono({ color: APP.ink })}>{c.salary}</span>
+        <span>{c.locationShort}</span>
+        <Dot read={c.answersRead} />
+        <Dot read={c.specRead} />
+        <span style={{ flex: 1 }} />
+        <DisqButton onClick={onDisq} />
+      </div>
+    </div>
+  );
+}

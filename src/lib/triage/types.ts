@@ -58,6 +58,16 @@ export type CommentKind =
 
 export type AskTier = "top" | "high" | "mid" | "value" | "below";
 
+// A cached AI read surfaced as a dot + label on the pool board and dossier
+// (Answers · Vs-spec). Level drives the verdict dot + the within-group fit sort;
+// "none" means no cached read yet (renders muted "—"). Never a numeric score.
+export type VerdictLevel = "strong" | "mixed" | "weak" | "none";
+
+export interface VerdictRead {
+  label: string;
+  level: VerdictLevel;
+}
+
 export type CutGroup = "care" | "evidence" | "pattern" | "mismatch" | "human";
 
 // Career-read prose block surfaced under the deep-analysis compare strip (#6).
@@ -251,6 +261,15 @@ export interface Candidate {
 
   // Real Workable deeplink (from candidates.raw.profile_url, else link helper).
   workableUrl: string;
+
+  // --- v2 app-board fields (HANDOFF-v2 §1.A) — dense row presentation +
+  // the two cached AI reads. All derived from existing cached data, no Claude. ---
+  initials: string;
+  avatarColor: string;
+  locationShort: string;
+  experience: string; // "30+ yr" | "16 yr" | "—"
+  answersRead: VerdictRead; // cached read of the application answers
+  specRead: VerdictRead; // cached read of fit vs. the job spec/rubric
 }
 
 // Persisted human-edit workspace. Hydrated server-side from candidate_overlay
@@ -265,6 +284,18 @@ export interface ChatMessage {
   author?: string;
 }
 
+// One entry in the per-candidate activity log (HANDOFF-v2 §2) — human-authored
+// only; Claude does not auto-reply here. Persisted one row per entry in `activity`.
+export type ActivityType = "interview" | "note" | "comment";
+
+export interface ActivityEntry {
+  id: string;
+  type: ActivityType;
+  author: string;
+  body: string;
+  at: string; // ISO timestamp
+}
+
 export interface Workspace {
   dq: Record<string, boolean>;
   ovr: Record<string, TimelineRow[]>;
@@ -273,6 +304,9 @@ export interface Workspace {
   transcripts: Record<string, string>;
   deep: Record<string, boolean>;
   chat: Record<string, ChatMessage[]>;
+  activity: Record<string, ActivityEntry[]>;
+  /** When the pinned assessment was last regenerated from the war room / activity. */
+  regen: Record<string, string>;
 }
 
 // The per-candidate slice of the workspace, as stored in

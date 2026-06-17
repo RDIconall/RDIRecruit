@@ -1,0 +1,1212 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  @font-face{font-family:'National 2';src:url('./fonts/national-2-regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+  @font-face{font-family:'National 2';src:url('./fonts/national-2-medium.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
+  @font-face{font-family:'National 2';src:url('./fonts/national-2-bold.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}
+  @font-face{font-family:'Söhne Mono';src:url('./fonts/soehne-mono-buch.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}
+  @font-face{font-family:'Söhne Mono';src:url('./fonts/soehne-mono-kraftig.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}
+  @font-face{font-family:'Tiempos Headline';src:url('./fonts/tiempos-headline-regular.woff2') format('woff2');font-weight:400;font-style:italic;font-display:swap}
+  @font-face{font-family:'Tiempos Headline';src:url('./fonts/tiempos-headline-medium.woff2') format('woff2');font-weight:500;font-style:italic;font-display:swap}
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{background:#FAFAF7;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;text-rendering:optimizeLegibility}
+  ::selection{background:#E74424;color:#fff}
+  input,button,select{font-family:inherit}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::-webkit-scrollbar-thumb{background:rgba(22,35,53,0.16)}
+  @media (prefers-reduced-motion: reduce){*{transition:none !important}}
+</style>
+</helmet>
+
+<div style="min-height:100vh; background:#FAFAF7; font-family:'National 2',-apple-system,system-ui,sans-serif; color:#162335; font-size:17px; line-height:1.5; font-feature-settings:'ss01','ss02','cv11';">
+
+  <!-- ============ TOP BAR ============ -->
+  <div style="position:sticky; top:0; z-index:40; height:54px; background:#FFFFFF; border-bottom:1px solid rgba(22,35,53,0.15); display:flex; align-items:center; gap:18px; padding:0 28px;">
+    <div style="display:flex; align-items:center; gap:11px; cursor:pointer; flex-shrink:0;" onClick="{{ openPool }}">
+      <img src="logo-mark.svg" alt="RDI" style="height:22px; width:auto; display:block;">
+      <span style="font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.05em; color:rgba(22,35,53,0.55); white-space:nowrap; text-transform:uppercase;">Candidate triage</span>
+    </div>
+    <div style="width:1px; height:22px; background:rgba(22,35,53,0.15);"></div>
+    <div style="display:flex; align-items:center; gap:9px; font-size:16px; flex-shrink:0; white-space:nowrap;">
+      <span style="cursor:pointer; color:{{ crumbPoolColor }};" onClick="{{ openPool }}">{{ poolTitle }}</span>
+      <sc-if value="{{ isCandidate }}" hint-placeholder-val="{{ false }}">
+        <span style="color:rgba(22,35,53,0.30);">›</span>
+        <span style="color:#162335;">{{ aName }}</span>
+      </sc-if>
+    </div>
+    <div style="flex:1;"></div>
+    <span style="font-family:'Söhne Mono',monospace; font-size:12px; color:rgba(22,35,53,0.45); white-space:nowrap; flex-shrink:0;">Submitted materials only · synced from Workable</span>
+    <div style="width:28px; height:28px; border-radius:9999px; background:#162335; color:#FAFAF7; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:500; flex-shrink:0;">C</div>
+  </div>
+
+  <!-- ===================================================== -->
+  <!-- =================== POOL ============================= -->
+  <!-- ===================================================== -->
+  <sc-if value="{{ isPool }}" hint-placeholder-val="{{ true }}">
+  <div data-screen-label="Pool — cut list then interview priority" style="max-width:1560px; margin:0 auto; padding:34px 28px 96px;">
+
+    <!-- header -->
+    <div style="display:flex; align-items:flex-end; justify-content:space-between; gap:24px; flex-wrap:wrap;">
+      <div>
+        <h1 style="margin:0; font-size:42px; font-weight:500; letter-spacing:-0.035em; line-height:0.98;">Clinical data manager <span style="font-family:'Tiempos Headline',Georgia,serif; font-style:italic; font-weight:400; color:#E74424; letter-spacing:-0.01em;">pool.</span></h1>
+        <div style="margin-top:11px; display:flex; align-items:center; gap:11px; font-family:'Söhne Mono',monospace; font-size:14px; color:rgba(22,35,53,0.62); flex-wrap:wrap;">
+          <span>{{ jobCode }}</span><span style="color:rgba(22,35,53,0.25);">·</span><span>{{ stTotal }} in pool</span><span style="color:rgba(22,35,53,0.25);">·</span><span style="color:#9E3B28;">{{ stCut }} to cut</span><span style="color:rgba(22,35,53,0.25);">·</span><span style="color:#162335;">{{ stWorth }} to screen</span><span style="color:rgba(22,35,53,0.25);">·</span><span>{{ stDq }} disqualified</span>
+        </div>
+      </div>
+      <button onClick="{{ openJobWorkable }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.22); background:transparent; color:#162335; border-radius:9999px; padding:9px 16px; font-size:15px; white-space:nowrap;" style-hover="border-color:#162335;">Open job in Workable ↗</button>
+    </div>
+
+    <!-- pool read + counts -->
+    <div style="margin-top:24px; border-top:1px solid rgba(22,35,53,0.15); padding-top:22px;">
+      <div style="display:grid; grid-template-columns:1.5fr 1fr; gap:0 56px; align-items:start;">
+        <div>
+          <div style="font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.05em; text-transform:uppercase; color:rgba(22,35,53,0.5);">Pool read — <span style="color:#E74424;">{{ healthState }}</span></div>
+          <div style="margin-top:12px; font-size:23px; font-weight:400; line-height:1.4; max-width:640px; text-wrap:pretty;">{{ healthRead }}</div>
+        </div>
+        <div style="border-left:1px solid rgba(22,35,53,0.12); padding-left:40px;">
+          <sc-for list="{{ counts }}" as="ct" hint-placeholder-count="5">
+            <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px; padding:10px 0; border-top:1px solid rgba(22,35,53,0.10);">
+              <span style="font-size:15px; color:rgba(22,35,53,0.78);">{{ ct.label }}</span>
+              <span style="font-family:'Söhne Mono',monospace; font-size:18px; font-weight:500; color:{{ ct.color }}; font-variant-numeric:tabular-nums;">{{ ct.value }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ CUT LIST (first) ============ -->
+    <div style="margin-top:44px;">
+      <div style="display:flex; align-items:baseline; gap:14px; border-bottom:2px solid #9E3B28; padding-bottom:11px; flex-wrap:wrap;">
+        <h2 style="margin:0; font-size:27px; font-weight:500; letter-spacing:-0.02em;">Cut list <span style="font-family:'Tiempos Headline',Georgia,serif; font-style:italic; font-weight:400; color:#9E3B28; font-size:24px;">— clear these first.</span></h2>
+        <span style="flex:1;"></span>
+        <span style="font-family:'Söhne Mono',monospace; font-size:13px; color:rgba(22,35,53,0.55);">{{ stCutRemaining }} open · {{ stDq }} disqualified</span>
+        <button onClick="{{ bulkDq }}" style="cursor:pointer; border:1px solid #9E3B28; background:{{ bulkBg }}; color:{{ bulkColor }}; border-radius:9999px; padding:6px 14px; font-family:'Söhne Mono',monospace; font-size:12.5px; white-space:nowrap;">{{ bulkLabel }}</button>
+      </div>
+
+      <sc-for list="{{ cutGroups }}" as="g" hint-placeholder-count="4">
+        <div style="margin-top:18px;">
+          <div style="font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.04em; text-transform:uppercase; color:#9E3B28; margin-bottom:4px;">{{ g.title }}</div>
+          <sc-for list="{{ g.items }}" as="it" hint-placeholder-count="2">
+            <div style="display:grid; grid-template-columns:minmax(0,1.3fr) minmax(0,2.2fr) auto; gap:20px; align-items:center; padding:13px 4px; border-top:1px solid rgba(22,35,53,0.09); background:{{ it.bg }};">
+              <div onClick="{{ it.open }}" style="cursor:pointer; min-width:0;"><span style="font-size:16.5px; font-weight:500; text-decoration:{{ it.strike }}; color:{{ it.nameColor }};">{{ it.name }}</span> <span style="font-size:13.5px; color:rgba(22,35,53,0.5);">· {{ it.role }}</span></div>
+              <div onClick="{{ it.open }}" style="cursor:pointer; font-size:14.5px; line-height:1.4; color:rgba(22,35,53,0.78); min-width:0;">{{ it.reason }}</div>
+              <div style="display:flex; align-items:center; gap:8px; justify-self:end;">
+                <button onClick="{{ it.toggle }}" title="Disqualify" style="cursor:pointer; width:32px; height:32px; border-radius:9999px; border:1px solid #9E3B28; background:{{ it.xBg }}; color:{{ it.xColor }}; font-size:14px; line-height:1; display:flex; align-items:center; justify-content:center; padding:0;">✕</button>
+                <button onClick="{{ it.openDeep }}" title="Run deep analysis" style="cursor:pointer; width:32px; height:32px; border-radius:9999px; border:1px solid rgba(22,35,53,0.28); background:transparent; color:#162335; font-family:'Söhne Mono',monospace; font-size:15px; line-height:1; display:flex; align-items:center; justify-content:center; padding:0;">?</button>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- ============ INTERVIEW PRIORITY ============ -->
+    <div style="margin-top:52px;">
+      <div style="display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:11px;">
+        <h2 style="margin:0; font-size:27px; font-weight:500; letter-spacing:-0.02em;">Interview priority</h2>
+        <div style="display:flex; align-items:center; gap:18px; flex-wrap:wrap;">
+          <sc-for list="{{ chips }}" as="chip" hint-placeholder-count="5">
+            <button onClick="{{ chip.onClick }}" style="cursor:pointer; border:none; background:transparent; padding:4px 0; font-size:15px; font-weight:500; color:{{ chip.color }}; border-bottom:2px solid {{ chip.underline }}; display:flex; align-items:center; gap:6px;"><span>{{ chip.label }}</span><span style="font-family:'Söhne Mono',monospace; font-size:13px; opacity:0.55;">{{ chip.count }}</span></button>
+          </sc-for>
+        </div>
+      </div>
+
+      <div style="margin-top:6px; overflow-x:auto; padding-bottom:4px;"><div style="min-width:1300px;">
+        <div style="display:grid; grid-template-columns:34px minmax(168px,1fr) 138px 152px minmax(190px,1.3fr) 150px minmax(150px,1fr) 132px; gap:0; align-items:center; padding:11px 8px; border-bottom:1px solid rgba(22,35,53,0.15); font-family:'Söhne Mono',monospace; font-size:11.5px; letter-spacing:0.04em; text-transform:uppercase; color:rgba(22,35,53,0.45);">
+          <div>#</div><div>Candidate</div><div>Decision</div><div>Reviewer signal</div><div>Why</div><div>Ask / RO level</div><div>Main risk</div><div>Next action</div>
+        </div>
+        <sc-for list="{{ visible }}" as="c" hint-placeholder-count="9">
+          <div onClick="{{ c.open }}" style="display:grid; grid-template-columns:34px minmax(168px,1fr) 138px 152px minmax(190px,1.3fr) 150px minmax(150px,1fr) 132px; gap:0; align-items:center; padding:14px 8px; border-bottom:1px solid rgba(22,35,53,0.09); cursor:pointer; background:{{ c.rowBg }};" style-hover="background:#FFFFFF;">
+            <div style="font-family:'Söhne Mono',monospace; font-size:15px; color:rgba(22,35,53,0.4); font-variant-numeric:tabular-nums;">{{ c.rank }}</div>
+            <div style="padding-right:12px; min-width:0;">
+              <div style="font-size:16.5px; font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.name }}</div>
+              <div style="margin-top:1px; font-size:13.5px; color:rgba(22,35,53,0.55); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.role }}</div>
+            </div>
+            <div style="padding-right:10px;"><span style="display:inline-block; font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.01em; color:{{ c.dColor }}; background:{{ c.dBg }}; border:1px solid {{ c.dBorder }}; border-radius:9999px; padding:3px 10px; line-height:1.3; white-space:nowrap;">{{ c.dLabel }}</span></div>
+            <div style="padding-right:10px; display:flex; align-items:center; gap:6px; min-width:0;"><span style="width:7px; height:7px; border-radius:9999px; background:{{ c.revDot }}; flex-shrink:0;"></span><span style="font-size:13.5px; line-height:1.25; color:{{ c.revColor }}; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{{ c.revLabel }}</span></div>
+            <div style="padding-right:16px; font-size:14.5px; line-height:1.38; color:rgba(22,35,53,0.82); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">{{ c.why }}</div>
+            <div style="padding-right:10px;"><div style="font-family:'Söhne Mono',monospace; font-size:14px; color:{{ c.askColor }};">{{ c.salary }} · {{ c.roLevel }}</div><div style="margin-top:1px; font-size:12.5px; line-height:1.25; color:{{ c.askNoteColor }};">{{ c.askTier }}</div></div>
+            <div style="padding-right:14px; font-size:14.5px; line-height:1.38; color:rgba(22,35,53,0.82); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">{{ c.flag }}</div>
+            <div style="padding-right:8px; font-size:14px; line-height:1.35; color:rgba(22,35,53,0.82); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;">{{ c.next }}</div>
+          </div>
+        </sc-for>
+      </div></div>
+    </div>
+
+  </div>
+  </sc-if>
+
+  <!-- ===================================================== -->
+  <!-- ================ CANDIDATE PAGE ===================== -->
+  <!-- ===================================================== -->
+  <sc-if value="{{ isCandidate }}" hint-placeholder-val="{{ false }}">
+  <div data-screen-label="Candidate" style="max-width:1180px; margin:0 auto; padding:26px 28px 120px;">
+
+    <div style="font-family:'Söhne Mono',monospace; font-size:13px; color:rgba(22,35,53,0.5);"><span style="color:#9E3B28; cursor:pointer;" onClick="{{ openPool }}">← Pool</span> · rank {{ aRank }} of {{ stTotal }}</div>
+
+    <!-- RED FLAGS banner -->
+    <sc-if value="{{ aHasFlags }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:16px; border:1px solid rgba(158,59,40,0.28); border-top:3px solid #9E3B28; background:rgba(158,59,40,0.045); padding:18px 22px;">
+        <div style="display:flex; align-items:baseline; gap:12px; flex-wrap:wrap;"><div style="font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.05em; text-transform:uppercase; color:#9E3B28;">Red flags — why this is a cut</div><span style="font-family:'Söhne Mono',monospace; font-size:12px; color:rgba(22,35,53,0.5);">{{ aFlagCount }} found</span></div>
+        <div style="margin-top:12px; display:grid; gap:0;">
+          <sc-for list="{{ aRedFlags }}" as="f" hint-placeholder-count="3">
+            <div style="display:grid; grid-template-columns:200px 1fr 150px; gap:16px; align-items:baseline; padding:9px 0; border-top:1px solid rgba(158,59,40,0.16);">
+              <div style="font-size:15px; font-weight:500; color:#9E3B28;">{{ f.flag }}</div>
+              <div style="font-size:14.5px; line-height:1.45; color:rgba(22,35,53,0.85);">{{ f.detail }}</div>
+              <div style="font-family:'Söhne Mono',monospace; font-size:12px; color:rgba(22,35,53,0.5);">{{ f.source }}</div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </sc-if>
+
+    <!-- identity + decision -->
+    <div style="margin-top:18px; display:flex; align-items:flex-start; justify-content:space-between; gap:24px; flex-wrap:wrap;">
+      <div style="min-width:0;">
+        <h1 style="margin:0; font-size:36px; font-weight:500; letter-spacing:-0.03em; line-height:1.0;">{{ aName }}</h1>
+        <div style="margin-top:7px; font-size:17px; color:rgba(22,35,53,0.72);">{{ aRole }} · <span style="font-family:'Tiempos Headline',Georgia,serif; font-style:italic; font-size:19px;">{{ aCompany }}</span></div>
+      </div>
+      <div style="display:flex; flex-direction:column; gap:11px; align-items:flex-end;">
+        <span style="display:inline-block; font-family:'Söhne Mono',monospace; font-size:15px; color:{{ aDColor }}; background:{{ aDBg }}; border:1px solid {{ aDBorder }}; border-radius:9999px; padding:6px 16px;">{{ aDLabel }}</span>
+        <div style="display:flex; align-items:center; gap:16px;">
+          <a href="{{ aWorkableUrl }}" target="_blank" rel="noopener" style="font-family:'Söhne Mono',monospace; font-size:12.5px; color:#9E3B28; text-decoration:none;" style-hover="text-decoration:underline;">Open in Workable ↗</a>
+          <button onClick="{{ toggleActiveDq }}" style="cursor:pointer; border:none; background:transparent; color:{{ aDqColor }}; font-family:'Söhne Mono',monospace; font-size:12.5px; padding:0; text-decoration:underline; text-underline-offset:3px;">{{ aDqLabel }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- short decision read (default view) -->
+    <div style="margin-top:20px; max-width:860px;">
+      <sc-for list="{{ readRows }}" as="r" hint-placeholder-count="5">
+        <div style="display:grid; grid-template-columns:120px 1fr; gap:18px; align-items:baseline; padding:11px 0; border-top:1px solid rgba(22,35,53,0.10);">
+          <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; letter-spacing:0.04em; text-transform:uppercase; color:{{ r.labelColor }};">{{ r.label }}</div>
+          <div style="font-size:15.5px; line-height:1.5; color:#162335; text-wrap:pretty;">{{ r.value }}</div>
+        </div>
+      </sc-for>
+    </div>
+
+    <!-- reviewer signal -->
+    <div style="margin-top:14px; display:flex; gap:10px; align-items:flex-start; background:{{ aRevBg }}; border-left:2px solid {{ aRevBar }}; padding:10px 13px; max-width:760px;">
+      <span style="width:8px; height:8px; border-radius:9999px; background:{{ aRevDot }}; margin-top:6px; flex-shrink:0;"></span>
+      <div><span style="font-family:'Söhne Mono',monospace; font-size:11.5px; letter-spacing:0.04em; text-transform:uppercase; color:{{ aRevColor }};">Reviewer signal — {{ aRevLabel }}. </span><span style="font-size:14.5px; line-height:1.45; color:rgba(22,35,53,0.82);">{{ aRevNote }}</span></div>
+    </div>
+
+    <sc-if value="{{ aHasCorrections }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:12px; display:flex; align-items:center; gap:10px; background:rgba(231,68,36,0.06); border-left:2px solid #E74424; padding:9px 13px; max-width:760px; flex-wrap:wrap;">
+        <span style="font-family:'Söhne Mono',monospace; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:#E74424;">{{ aCorrCount }} correction(s) applied</span>
+        <span style="font-size:14px; color:rgba(22,35,53,0.78);">Claude updated this record from your notes — see the working file below.</span>
+      </div>
+    </sc-if>
+
+    <!-- re-analysis (human signal) -->
+    <sc-if value="{{ aHasReanalysis }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:14px; border:1px solid rgba(158,59,40,0.25); border-top:2px solid #9E3B28; background:rgba(158,59,40,0.04); padding:16px 20px; max-width:760px;">
+        <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; letter-spacing:0.05em; text-transform:uppercase; color:#9E3B28;">Re-analysis · human signal — {{ aReanReviewer }}</div>
+        <div style="margin-top:9px; display:flex; align-items:center; gap:12px; font-size:17px; font-weight:500;"><span style="color:rgba(22,35,53,0.55); text-decoration:line-through;">{{ aReanBefore }}</span><span style="color:rgba(22,35,53,0.4);">→</span><span style="color:#9E3B28;">{{ aReanAfter }}</span></div>
+        <div style="margin-top:9px; font-size:14.5px; line-height:1.5; color:rgba(22,35,53,0.85);">{{ aReanRec }}</div>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ aHideDeep }}" hint-placeholder-val="{{ false }}">
+      <div style="margin-top:24px;">
+        <button onClick="{{ runDeep }}" style="cursor:pointer; border:1px solid #162335; background:transparent; color:#162335; border-radius:9999px; padding:9px 18px; font-family:'Söhne Mono',monospace; font-size:12.5px; white-space:nowrap;">Run deep analysis anyway →</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ aShowDeep }}" hint-placeholder-val="{{ true }}">
+
+    <!-- ===== COMPARE STRIP: ask + RO level vs pool ===== -->
+    <div style="margin-top:26px; border:1px solid rgba(22,35,53,0.12); background:#fff; display:grid; grid-template-columns:1fr 1fr 1.5fr;">
+      <div style="padding:18px 22px; border-right:1px solid rgba(22,35,53,0.10);">
+        <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; letter-spacing:0.04em; text-transform:uppercase; color:rgba(22,35,53,0.5);">Salary ask</div>
+        <div style="margin-top:7px; font-family:'Söhne Mono',monospace; font-size:30px; font-weight:500; color:#162335;">{{ aSalary }}</div>
+        <div style="margin-top:4px; font-size:14px; line-height:1.4; color:{{ aAskColor }};">{{ aAskTier }} · {{ aAskNote }}</div>
+      </div>
+      <div style="padding:18px 22px; border-right:1px solid rgba(22,35,53,0.10);">
+        <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; letter-spacing:0.04em; text-transform:uppercase; color:rgba(22,35,53,0.5);">RO level</div>
+        <div style="margin-top:7px; font-family:'Söhne Mono',monospace; font-size:30px; font-weight:500; color:#162335;">{{ aRoLevel }}</div>
+        <div style="margin-top:4px; font-size:14px; line-height:1.4; color:rgba(22,35,53,0.7);">{{ aRoVsPool }}</div>
+      </div>
+      <div style="padding:18px 22px; background:{{ aMismatchBg }};">
+        <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; letter-spacing:0.04em; text-transform:uppercase; color:{{ aMismatchLabelColor }};">{{ aMismatchLabel }}</div>
+        <div style="margin-top:7px; font-size:17px; line-height:1.4; font-weight:500; color:#162335; text-wrap:pretty;">{{ aMismatchRead }}</div>
+      </div>
+    </div>
+
+    <!-- ===== RO TIME PROGRESSION ===== -->
+    <div style="margin-top:38px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:9px;">
+        <h2 style="margin:0; font-size:23px; font-weight:500; letter-spacing:-0.02em;">RO-style time progression</h2>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <sc-if value="{{ tlEditing }}" hint-placeholder-val="{{ false }}">
+            <button onClick="{{ addRole }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.22); background:transparent; color:#162335; border-radius:9999px; padding:4px 11px; font-family:'Söhne Mono',monospace; font-size:11.5px;">+ Role</button>
+            <button onClick="{{ addGap }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.22); background:transparent; color:#162335; border-radius:9999px; padding:4px 11px; font-family:'Söhne Mono',monospace; font-size:11.5px;">+ Gap</button>
+            <button onClick="{{ addCert }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.22); background:transparent; color:#162335; border-radius:9999px; padding:4px 11px; font-family:'Söhne Mono',monospace; font-size:11.5px;">+ Cert</button>
+          </sc-if>
+          <button onClick="{{ toggleTlEdit }}" style="cursor:pointer; border:none; background:transparent; color:{{ tlEditColor }}; font-family:'Söhne Mono',monospace; font-size:12px; text-decoration:underline; text-underline-offset:3px; padding:0;">{{ tlEditLabel }}</button>
+        </div>
+      </div>
+      <div style="display:grid; grid-template-columns:104px 1.05fr 1.2fr 64px 1.35fr 150px 124px; gap:0; padding:10px 6px; font-family:'Söhne Mono',monospace; font-size:10.5px; letter-spacing:0.03em; text-transform:uppercase; color:rgba(22,35,53,0.42); border-bottom:1px solid rgba(22,35,53,0.09);">
+        <div>Period</div><div>Org / school</div><div>Role</div><div>Tenure</div><div>Level / scope</div><div>Language level</div><div>Signal</div>
+      </div>
+      <sc-for list="{{ timelineRows }}" as="r" hint-placeholder-count="6">
+        <div style="display:grid; grid-template-columns:104px 1.05fr 1.2fr 64px 1.35fr 150px 124px; gap:0; padding:11px 6px; align-items:baseline; border-bottom:1px solid rgba(22,35,53,0.08); background:{{ r.bg }};">
+          <input value="{{ r.period }}" onChange="{{ r.onPeriod }}" readOnly="{{ r.ro }}" style="width:100%; border:none; border-bottom:1px solid {{ r.bb }}; background:transparent; outline:none; padding:2px 4px 2px 0; font-family:'Söhne Mono',monospace; font-size:13px; color:{{ r.periodColor }};" style-focus="border-bottom-color:#E74424;">
+          <input value="{{ r.org }}" onChange="{{ r.onOrg }}" readOnly="{{ r.ro }}" style="width:100%; border:none; border-bottom:1px solid {{ r.bb }}; background:transparent; outline:none; padding:2px 8px 2px 0; font-size:14.5px; color:{{ r.orgColor }}; font-style:{{ r.orgStyle }}; font-family:{{ r.orgFont }};" style-focus="border-bottom-color:#E74424;">
+          <input value="{{ r.role }}" onChange="{{ r.onRole }}" readOnly="{{ r.ro }}" style="width:100%; border:none; border-bottom:1px solid {{ r.bb }}; background:transparent; outline:none; padding:2px 8px 2px 0; font-size:14.5px; color:#162335; font-family:'National 2',sans-serif;" style-focus="border-bottom-color:#E74424;">
+          <input value="{{ r.tenure }}" onChange="{{ r.onTenure }}" readOnly="{{ r.ro }}" style="width:100%; border:none; border-bottom:1px solid {{ r.bb }}; background:transparent; outline:none; padding:2px 4px 2px 0; font-family:'Söhne Mono',monospace; font-size:13px; color:rgba(22,35,53,0.7);" style-focus="border-bottom-color:#E74424;">
+          <input value="{{ r.scope }}" onChange="{{ r.onScope }}" readOnly="{{ r.ro }}" style="width:100%; border:none; border-bottom:1px solid {{ r.bb }}; background:transparent; outline:none; padding:2px 10px 2px 0; font-size:13.5px; color:rgba(22,35,53,0.78); font-family:'National 2',sans-serif;" style-focus="border-bottom-color:#E74424;">
+          <div style="font-size:13px; color:{{ r.langColor }}; padding-right:10px; line-height:1.4;">{{ r.lang }}</div>
+          <div style="display:flex; align-items:center; gap:7px;"><span style="font-family:'Söhne Mono',monospace; font-size:11.5px; color:{{ r.sigColor }}; background:{{ r.sigBg }}; border-radius:9999px; padding:2px 9px; white-space:nowrap;">{{ r.signal }}</span><sc-if value="{{ tlEditing }}" hint-placeholder-val="{{ false }}"><button onClick="{{ r.remove }}" style="cursor:pointer; border:none; background:transparent; color:#9E3B28; font-size:16px; line-height:1; padding:0;">×</button></sc-if></div>
+        </div>
+      </sc-for>
+    </div>
+
+    </sc-if>
+
+    <!-- ===== COVER LETTER w/ margin comments ===== -->
+    <div style="margin-top:42px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:9px;">
+        <h2 style="margin:0; font-size:23px; font-weight:500; letter-spacing:-0.02em;">Cover letter</h2>
+      </div>
+      <sc-if value="{{ aHasCover }}" hint-placeholder-val="{{ true }}">
+        <div style="margin-top:14px; display:grid; grid-template-columns:1fr 300px; gap:36px; align-items:start;">
+          <div style="background:#fff; border:1px solid rgba(22,35,53,0.10); padding:30px 34px; font-size:16px; line-height:1.75; color:#162335;">
+            <sc-for list="{{ coverLines }}" as="ln" hint-placeholder-count="5">
+              <span style="background:{{ ln.hl }}; padding:1px 0; box-decoration-break:clone; -webkit-box-decoration-break:clone;">{{ ln.t }}</span><span> </span>
+            </sc-for>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:12px;">
+            <sc-for list="{{ coverComments }}" as="cm" hint-placeholder-count="3">
+              <div style="border:1px solid rgba(22,35,53,0.12); border-left:3px solid {{ cm.color }}; background:#fff; padding:11px 13px; box-shadow:0 1px 0 rgba(22,35,53,0.05);">
+                <div style="display:flex; align-items:center; gap:7px;"><span style="width:18px; height:18px; border-radius:9999px; background:{{ cm.color }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Söhne Mono',monospace;">C</span><span style="font-family:'Söhne Mono',monospace; font-size:11px; letter-spacing:0.03em; text-transform:uppercase; color:{{ cm.color }};">{{ cm.label }}</span></div>
+                <div style="margin-top:6px; font-size:13.5px; line-height:1.45; color:rgba(22,35,53,0.85);">{{ cm.note }}</div>
+                <input value="{{ cm.reply }}" onChange="{{ cm.onReply }}" placeholder="↳ Reply to train Claude…" style="margin-top:9px; width:100%; border:none; border-top:1px solid rgba(22,35,53,0.10); background:transparent; outline:none; padding:8px 0 0; font-family:'National 2',sans-serif; font-size:13px; color:#162335;" style-focus="border-top-color:#E74424;">
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ aNoCover }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:14px; border:1px dashed rgba(158,59,40,0.4); background:rgba(158,59,40,0.04); padding:18px 22px; font-size:15px; color:#9E3B28;">No cover letter submitted. <span style="color:rgba(22,35,53,0.7);">For a role built on care and detail, a blank cover letter is itself a signal.</span></div>
+      </sc-if>
+    </div>
+
+    <!-- ===== APPLICATION ANSWERS w/ margin comments ===== -->
+    <div style="margin-top:42px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:9px;">
+        <h2 style="margin:0; font-size:23px; font-weight:500; letter-spacing:-0.02em;">Application answers</h2>
+      </div>
+      <div style="margin-top:14px; display:flex; flex-direction:column; gap:16px;">
+        <sc-for list="{{ answerRows }}" as="qa" hint-placeholder-count="3">
+          <div style="display:grid; grid-template-columns:1fr 300px; gap:36px; align-items:start;">
+            <div style="background:#fff; border:1px solid rgba(22,35,53,0.10); border-left:3px solid {{ qa.bar }}; padding:18px 22px;">
+              <div style="font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.02em; color:rgba(22,35,53,0.5);">{{ qa.q }}</div>
+              <div style="margin-top:8px; font-size:15.5px; line-height:1.6; color:#162335;"><span style="background:{{ qa.hl }}; padding:1px 0;">{{ qa.a }}</span></div>
+            </div>
+            <sc-if value="{{ qa.hasComment }}" hint-placeholder-val="{{ true }}">
+              <div style="border:1px solid rgba(22,35,53,0.12); border-left:3px solid {{ qa.color }}; background:#fff; padding:11px 13px;">
+                <div style="display:flex; align-items:center; gap:7px;"><span style="width:18px; height:18px; border-radius:9999px; background:{{ qa.color }}; color:#fff; display:flex; align-items:center; justify-content:center; font-size:11px; font-family:'Söhne Mono',monospace;">C</span><span style="font-family:'Söhne Mono',monospace; font-size:11px; letter-spacing:0.03em; text-transform:uppercase; color:{{ qa.color }};">{{ qa.label }}</span></div>
+                <div style="margin-top:6px; font-size:13.5px; line-height:1.45; color:rgba(22,35,53,0.85);">{{ qa.note }}</div>
+                <input value="{{ qa.reply }}" onChange="{{ qa.onReply }}" placeholder="↳ Reply to train Claude…" style="margin-top:9px; width:100%; border:none; border-top:1px solid rgba(22,35,53,0.10); background:transparent; outline:none; padding:8px 0 0; font-family:'National 2',sans-serif; font-size:13px; color:#162335;" style-focus="border-top-color:#E74424;">
+              </div>
+            </sc-if>
+          </div>
+        </sc-for>
+      </div>
+    </div>
+
+    <!-- ===== LOGISTICS CHECK ===== -->
+    <div style="margin-top:42px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:9px;">
+        <h2 style="margin:0; font-size:23px; font-weight:500; letter-spacing:-0.02em;">Logistics check</h2>
+        <span style="font-family:'Söhne Mono',monospace; font-size:12px; color:rgba(22,35,53,0.5);">{{ aLogMode }}</span>
+      </div>
+      <div style="margin-top:16px; display:grid; grid-template-columns:280px 1fr; gap:36px; align-items:start;">
+        <div style="border:1px solid rgba(22,35,53,0.12); background:#fff; padding:18px 20px;">
+          <div style="display:flex; align-items:baseline; justify-content:space-between; gap:10px;"><span style="font-family:'Söhne Mono',monospace; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:rgba(22,35,53,0.5);">Likelihood</span><span style="font-family:'Söhne Mono',monospace; font-size:18px; font-weight:500; color:{{ aLogColor }};">{{ aLogLikelihood }}</span></div>
+          <div style="margin-top:14px; display:grid; grid-template-columns:auto 1fr; gap:7px 14px; font-size:14px;">
+            <span style="font-family:'Söhne Mono',monospace; font-size:11.5px; text-transform:uppercase; color:rgba(22,35,53,0.5); padding-top:2px;">Based</span><span style="color:rgba(22,35,53,0.85);">{{ aLogLocation }}</span>
+            <span style="font-family:'Söhne Mono',monospace; font-size:11.5px; text-transform:uppercase; color:rgba(22,35,53,0.5); padding-top:2px;">To VN</span><span style="color:rgba(22,35,53,0.85);">{{ aLogDistance }}</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size:16px; line-height:1.55; color:rgba(22,35,53,0.88); text-wrap:pretty;">{{ aLogRead }}</div>
+          <div style="margin-top:12px;">
+            <sc-for list="{{ aLogSignals }}" as="s" hint-placeholder-count="2">
+              <div style="display:flex; gap:9px; align-items:flex-start; padding:6px 0; border-top:1px solid rgba(22,35,53,0.08); font-size:14px; line-height:1.5;"><span style="color:{{ s.color }}; flex-shrink:0; font-family:'Söhne Mono',monospace;">{{ s.mark }}</span><span style="color:rgba(22,35,53,0.82);">{{ s.t }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== INTERVIEW SUMMARY ===== -->
+    <div style="margin-top:42px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:9px;">
+        <h2 style="margin:0; font-size:23px; font-weight:500; letter-spacing:-0.02em;">Interview summary</h2>
+      </div>
+      <sc-if value="{{ aHasInterview }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:16px; border:1px solid rgba(22,35,53,0.12); border-top:2px solid #162335; background:#fff; padding:20px 22px;">
+          <div style="font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.03em; color:rgba(22,35,53,0.6);">{{ aIntTitle }}</div>
+          <div style="margin-top:10px; font-size:16px; line-height:1.55; color:rgba(22,35,53,0.88); text-wrap:pretty;">{{ aIntFit }}</div>
+          <div style="margin-top:12px;">
+            <sc-for list="{{ aIntPoints }}" as="p" hint-placeholder-count="3">
+              <div style="display:flex; gap:9px; align-items:flex-start; padding:6px 0; border-top:1px solid rgba(22,35,53,0.08); font-size:14.5px; line-height:1.5;"><span style="color:{{ p.color }}; flex-shrink:0; font-family:'Söhne Mono',monospace;">{{ p.mark }}</span><span style="color:rgba(22,35,53,0.82);">{{ p.t }}</span></div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-if>
+      <!-- Fireflies -->
+      <div style="margin-top:18px; border:1px solid rgba(22,35,53,0.12); background:#fff; padding:16px 18px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+          <div style="display:flex; align-items:center; gap:9px;"><span style="width:9px; height:9px; border-radius:9999px; background:#E74424; flex-shrink:0;"></span><span style="font-family:'Söhne Mono',monospace; font-size:12px; letter-spacing:0.03em; text-transform:uppercase; color:#162335;">Fireflies · connected</span></div>
+          <span style="font-family:'Söhne Mono',monospace; font-size:12px; color:rgba(22,35,53,0.5);">{{ aFfStatus }}</span>
+        </div>
+        <sc-if value="{{ aHasFireflies }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top:8px;">
+            <sc-for list="{{ aFireflies }}" as="f" hint-placeholder-count="1">
+              <div style="display:grid; grid-template-columns:1fr auto; gap:14px; align-items:center; padding:11px 0; border-top:1px solid rgba(22,35,53,0.08);">
+                <div style="min-width:0;"><div style="font-size:15px; font-weight:500; color:#162335;">{{ f.title }}</div><div style="margin-top:2px; font-family:'Söhne Mono',monospace; font-size:12px; color:rgba(22,35,53,0.55);">{{ f.date }} · {{ f.dur }}</div></div>
+                <button onClick="{{ f.pull }}" style="cursor:pointer; border:1px solid {{ f.pullColor }}; background:transparent; color:{{ f.pullColor }}; border-radius:9999px; padding:6px 16px; font-family:'Söhne Mono',monospace; font-size:12.5px; white-space:nowrap;">{{ f.pullLabel }}</button>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ aFfEmpty }}" hint-placeholder-val="{{ true }}">
+          <div style="margin-top:10px; font-size:14px; color:rgba(22,35,53,0.55);">No Fireflies recordings matched this candidate yet — new meetings sync here automatically.</div>
+        </sc-if>
+      </div>
+
+      <!-- transcript editor + save -->
+      <div style="margin-top:14px;">
+        <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:rgba(22,35,53,0.5); margin-bottom:6px;">{{ aTranscriptLabel }}</div>
+        <textarea value="{{ aTranscript }}" onChange="{{ onTranscript }}" placeholder="Paste an interview transcript, or pull one from Fireflies above — Claude folds it into this candidate's working file and fit read." style="width:100%; min-height:110px; resize:vertical; border:1px solid rgba(22,35,53,0.15); border-radius:4px; background:#fff; padding:12px 14px; font-family:'National 2',sans-serif; font-size:14px; line-height:1.55; color:#162335; outline:none;" style-focus="border-color:#E74424;"></textarea>
+        <div style="margin-top:10px; display:flex; align-items:center; gap:14px; flex-wrap:wrap;">
+          <button onClick="{{ saveTranscript }}" style="cursor:pointer; border:none; background:#162335; color:#FAFAF7; border-radius:9999px; padding:9px 18px; font-family:'Söhne Mono',monospace; font-size:12.5px;">Save transcript &amp; analyze</button>
+          <sc-if value="{{ aTranscriptSaved }}" hint-placeholder-val="{{ false }}"><span style="font-family:'Söhne Mono',monospace; font-size:12px; color:#E74424;">Saved ✓ · folded into working file</span></sc-if>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== CANDIDATE WORKING FILE ===== -->
+    <div style="margin-top:42px;">
+      <div style="display:flex; align-items:baseline; justify-content:space-between; gap:16px; flex-wrap:wrap; border-bottom:1px solid rgba(22,35,53,0.15); padding-bottom:9px;">
+        <h2 style="margin:0; font-size:23px; font-weight:500; letter-spacing:-0.02em;">Candidate working file <span style="font-family:'Söhne Mono',monospace; font-size:13px; color:rgba(22,35,53,0.45);">{{ aWorkingFileName }}</span></h2>
+        <button onClick="{{ downloadMd }}" style="cursor:pointer; border:1px solid rgba(22,35,53,0.22); background:transparent; color:#162335; border-radius:9999px; padding:7px 14px; font-family:'Söhne Mono',monospace; font-size:12.5px;">Download .md ↓</button>
+      </div>
+      <div style="margin-top:16px; display:grid; grid-template-columns:1fr 1fr; gap:0 40px; align-items:start;">
+        <div>
+          <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:rgba(22,35,53,0.5); margin-bottom:8px;">Corrections &amp; analysis notes</div>
+          <div style="font-size:14px; line-height:1.5; color:rgba(22,35,53,0.7); margin-bottom:10px;">Tell Claude what it got wrong — a mis-parsed résumé, a real tenure, anything. It stays on this candidate and updates the record.</div>
+          <textarea value="{{ corrDraft }}" onChange="{{ onCorrDraft }}" placeholder="e.g. Résumé mis-parsed — this person's Quartz Dx tenure was actually 19 years, not 3." style="width:100%; min-height:70px; resize:vertical; border:1px solid rgba(22,35,53,0.15); border-radius:4px; background:#fff; padding:11px 13px; font-family:'National 2',sans-serif; font-size:14px; line-height:1.5; color:#162335; outline:none;" style-focus="border-color:#E74424;"></textarea>
+          <button onClick="{{ addCorrection }}" style="margin-top:9px; cursor:pointer; border:none; background:#162335; color:#FAFAF7; border-radius:9999px; padding:8px 16px; font-family:'Söhne Mono',monospace; font-size:12.5px;">Save correction &amp; re-analyze</button>
+        </div>
+        <div>
+          <div style="font-family:'Söhne Mono',monospace; font-size:11.5px; text-transform:uppercase; letter-spacing:0.04em; color:rgba(22,35,53,0.5); margin-bottom:8px;">Correction log</div>
+          <sc-if value="{{ aHasCorrections }}" hint-placeholder-val="{{ false }}">
+            <sc-for list="{{ aCorrLog }}" as="e" hint-placeholder-count="2">
+              <div style="border-left:2px solid #E74424; padding:3px 0 3px 12px; margin-bottom:12px;">
+                <div style="font-family:'Söhne Mono',monospace; font-size:11px; color:rgba(22,35,53,0.45);">{{ e.ts }} · applied</div>
+                <div style="margin-top:3px; font-size:14.5px; line-height:1.5; color:#162335;">{{ e.text }}</div>
+              </div>
+            </sc-for>
+          </sc-if>
+          <sc-if value="{{ aNoCorrections }}" hint-placeholder-val="{{ true }}">
+            <div style="font-size:14px; color:rgba(22,35,53,0.5);">No corrections yet. The record reflects Claude's parse of the submitted materials.</div>
+          </sc-if>
+        </div>
+      </div>
+    </div>
+
+  </div>
+  </sc-if>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = { view: 'pool', activeId: 'prashanthi', filter: 'all', dq: {}, tlEditing: false, ovr: {}, replies: {}, corrections: {}, transcripts: {}, corrDraft: '', tdraft: '', deep: {} };
+  WS_KEY = 'rdi-recruit-ws-v1';
+  WSUB = 'rditrials';
+  WJOB = '1284673';
+  componentDidMount() {
+    try {
+      const raw = localStorage.getItem(this.WS_KEY);
+      if (raw) {
+        const d = JSON.parse(raw);
+        this.setState({ dq: d.dq || {}, ovr: d.ovr || {}, replies: d.replies || {}, corrections: d.corrections || {}, transcripts: d.transcripts || {}, deep: d.deep || {}, tdraft: (d.transcripts || {})[this.state.activeId] || '' });
+      }
+    } catch (e) {}
+  }
+  save(patch) {
+    this.setState(patch, () => {
+      try {
+        const s = this.state;
+        localStorage.setItem(this.WS_KEY, JSON.stringify({ dq: s.dq, ovr: s.ovr, replies: s.replies, corrections: s.corrections, transcripts: s.transcripts, deep: s.deep }));
+      } catch (e) {}
+    });
+  }
+  now() {
+    const d = new Date();
+    return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }) + ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  }
+  wcand(id) { let h = 0; for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0; return '50' + String(100000000 + (h % 900000000)); }
+  jobUrl() { return 'https://' + this.WSUB + '.workable.com/backend/jobs/' + this.WJOB; }
+  candUrl(id) { return this.jobUrl() + '/candidates/' + this.wcand(id); }
+
+  DM(d) {
+    const m = {
+      interview: { label: 'Interview first', c: '#E74424', bg: 'rgba(231,68,36,0.10)', b: 'rgba(231,68,36,0.32)' },
+      short:     { label: 'Short screen',    c: '#162335', bg: 'rgba(22,35,53,0.06)', b: 'rgba(22,35,53,0.22)' },
+      verify:    { label: 'Verify first',    c: '#162335', bg: 'transparent',          b: 'rgba(22,35,53,0.30)' },
+      hold:      { label: 'Hold',            c: 'rgba(22,35,53,0.55)', bg: 'transparent', b: 'rgba(22,35,53,0.16)' },
+      cut:       { label: 'Cut',             c: '#9E3B28', bg: 'rgba(158,59,40,0.07)', b: 'rgba(158,59,40,0.24)' },
+      blocked:   { label: 'Review blocked',  c: '#E74424', bg: 'transparent',          b: 'rgba(231,68,36,0.32)' },
+    };
+    return m[d] || m.hold;
+  }
+  REV(r) {
+    const m = {
+      none:         { label: 'Not reviewed',      dot: 'rgba(22,35,53,0.20)', c: 'rgba(22,35,53,0.45)' },
+      conallPos:    { label: 'Conall positive',   dot: '#162335', c: '#162335' },
+      conallConcern:{ label: 'Conall concern',    dot: '#9E3B28', c: '#9E3B28' },
+      laraPos:      { label: 'Lara positive',     dot: '#162335', c: '#162335' },
+      laraConcern:  { label: 'Lara concern',      dot: '#9E3B28', c: '#9E3B28' },
+      laraNo:       { label: 'Lara hard no',      dot: '#9E3B28', c: '#9E3B28' },
+      mixed:        { label: 'Mixed signal',      dot: '#E74424', c: '#E74424' },
+      second:       { label: 'Needs second read', dot: '#E74424', c: '#E74424' },
+    };
+    return m[r] || m.none;
+  }
+  SIG(s) {
+    const m = {
+      Positive:  { c: '#162335', bg: 'rgba(22,35,53,0.06)' },
+      Promotion: { c: '#E74424', bg: 'rgba(231,68,36,0.10)' },
+      Learning:  { c: 'rgba(22,35,53,0.6)', bg: 'rgba(22,35,53,0.05)' },
+      Strong:    { c: '#E74424', bg: 'rgba(231,68,36,0.10)' },
+      Verify:    { c: '#9E3B28', bg: 'rgba(158,59,40,0.08)' },
+      Ask:       { c: '#9E3B28', bg: 'rgba(158,59,40,0.08)' },
+      Gap:       { c: '#9E3B28', bg: 'rgba(158,59,40,0.08)' },
+      Cert:      { c: '#162335', bg: 'rgba(22,35,53,0.06)' },
+      Connected: { c: '#162335', bg: 'rgba(22,35,53,0.06)' },
+      Switched:  { c: '#9E3B28', bg: 'rgba(158,59,40,0.08)' },
+      Inflated:  { c: '#9E3B28', bg: 'rgba(158,59,40,0.08)' },
+    };
+    return m[s] || m.Positive;
+  }
+  // comment kinds for cover letter / answers
+  CM(k) {
+    const m = {
+      ai:      { label: 'AI-written?',   color: '#9E3B28', hl: 'rgba(158,59,40,0.10)' },
+      wrong:   { label: 'Wrong company', color: '#9E3B28', hl: 'rgba(158,59,40,0.14)' },
+      typo:    { label: 'Typo / sloppy', color: '#9E3B28', hl: 'rgba(158,59,40,0.10)' },
+      flag:    { label: 'Red flag',      color: '#9E3B28', hl: 'rgba(158,59,40,0.10)' },
+      thin:    { label: 'Thin / generic',color: '#9E3B28', hl: 'rgba(158,59,40,0.08)' },
+      good:    { label: 'Paid attention',color: '#162335', hl: 'transparent' },
+      ask:     { label: 'Ask this live', color: '#162335', hl: 'transparent' },
+      neutral: { label: 'Note',          color: 'rgba(22,35,53,0.5)', hl: 'transparent' },
+    };
+    return m[k] || m.neutral;
+  }
+  askColor(t) { return { top: '#9E3B28', high: '#9E3B28', mid: '#162335', value: '#E74424', below: '#E74424' }[t] || '#162335'; }
+  logColor(l) { return { High: '#162335', Medium: '#E74424', Low: '#9E3B28' }[l] || '#162335'; }
+
+  data() {
+    return [
+      // =================== PRASHANTHI — survivor ===================
+      {
+        id: 'prashanthi', rank: 1, name: 'Prashanthi P.', role: 'Senior Clinical Data Manager', company: 'Quartz Dx',
+        salary: '$100k', salaryNum: 100, decision: 'interview', rev: 'conallPos',
+        revNote: 'Best data-integrity evidence in the pool; wants the first slot.',
+        why: 'Best data-integrity evidence in the pool — query-resolution and lock cycles with real mechanics.',
+        flag: 'No IVD / diagnostics domain — all experience is pharma EDC.', next: 'Screen', survivor: true,
+        askTier: 'below', askNote: '$8k under pool median', roLevel: 'RO-4', roVsPool: 'Mid-senior IC — in line with the role',
+        mismatch: false, mismatchRead: 'Below-median ask for the strongest file. Ask sits under her demonstrated level — value, not risk.',
+        timeline: [
+          { type: 'edu', period: '2011–2015', org: 'UC Davis', role: 'BS, Molecular Biology', tenure: '4.0 yrs', scope: 'Science degree — connects directly to clinical data', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2015–2017', org: 'Cerulean CRO', role: 'Clinical Data Associate', tenure: '2.0 yrs', scope: 'Entry execution — query handling, CRF tracking', lang: 'Reads RO-1, scope RO-1 — matched', signal: 'Learning' },
+          { type: 'role', period: '2017–2019', org: 'Cerulean CRO', role: 'Clinical Data Coordinator', tenure: '2.0 yrs', scope: 'Owns a study\u2019s query lifecycle', lang: 'Reads RO-2, scope RO-2 — matched', signal: 'Positive' },
+          { type: 'role', period: '2019–2022', org: 'Helix Therapeutics', role: 'Clinical Data Manager', tenure: '3.0 yrs', scope: 'Owns eCRF build + lock for oncology', lang: 'Reads RO-3, scope RO-3 — matched', signal: 'Promotion' },
+          { type: 'cert', period: '2021', org: 'SCDM', role: 'Certified Clinical Data Manager (CCDM)', tenure: '—', scope: 'Domain certification, mid-career', lang: '—', signal: 'Cert' },
+          { type: 'role', period: '2022–now', org: 'Quartz Dx', role: 'Senior Clinical Data Manager', tenure: '3.2 yrs', scope: '4 concurrent studies; portfolio edit-check standards', lang: 'Reads RO-4, scope RO-4 — matched', signal: 'Positive' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'I am applying because I want to own data quality in a setting where the assay result is the endpoint, not a secondary measure.', comment: 'Correct IVD framing — she understands what makes RDI different. Specific, not boilerplate.', kind: 'good' },
+          { t: 'My background is pharmaceutical EDC, but the discipline — clean lock, defensible queries, audit-ready trails — is the same discipline RDI needs.', comment: 'Names her own domain gap honestly and argues the transfer. Worth testing live, but this is candor, not spin.', kind: 'good' },
+          { t: 'I have followed RDI\u2019s Lumos program and the FebriDx clearance, and that is the kind of outcome I want my data work to stand behind.', comment: 'Specific, real reference to RDI\u2019s actual work. She did her homework.', kind: 'good' },
+        ] },
+        answers: [
+          { q: 'Q2 — Walk us through your hardest database lock.', a: 'A late protocol amendment changed two derived endpoints after 60% enrolment. I re-specified edit checks, re-queried 400+ affected records, and held the lock 9 days rather than lock dirty.', comment: 'Held the line on a dirty lock under timeline pressure — names the endpoints, the records, the tradeoff. Exactly the instinct RDI wants.', kind: 'good' },
+          { q: 'Q3 — How do you keep a study audit-ready?', a: 'Every query has an owner, a reason code, and a resolution trail; I reconcile against central lab weekly so nothing piles up before lock.', comment: 'Concrete mechanics, not adjectives.', kind: 'good' },
+        ],
+        logistics: { mode: 'In office — Van Nuys, 5 days', location: 'Pasadena, CA', distance: '~28 mi / 35–50 min', likelihood: 'High', read: 'Already in LA County and commuting distance to Van Nuys. No relocation needed; the 5-day on-site ask is realistic for her.', signals: [
+          { mark: '+', t: 'Pasadena address on file — established in the LA basin, not relocating.' },
+          { mark: '+', t: 'Current role at Quartz Dx is on-site in Glendale; she already commutes a similar corridor.' },
+        ] },
+        fireflies: [
+          { title: 'Screening call — Prashanthi P. / Rob', date: 'Mar 24, 2026', dur: '32 min', transcript: 'Rob: Thanks for making time. Start with the hardest database lock you have run.\nPrashanthi: A Phase III where a late amendment changed two derived endpoints after 60% enrolment. I re-specified the edit checks, re-queried about 400 records, and held the lock nine days rather than lock dirty.\nRob: What would have shipped if you had locked on time?\nPrashanthi: Two endpoints derived on the old logic — it would have been an audit finding.\nRob: We are IVD here. The assay result is the endpoint, samples are keyed to timepoints. Where would a mislabeled aliquot surface in your process?\nPrashanthi: Honestly, not somewhere I have owned directly. I would reconcile on the sample and timepoint key, but I have not run assay-driven data before.\nRob: That is the gap. Otherwise the instincts are exactly right.' },
+        ],
+        interview: {
+          title: 'Summary of interview with Rob — March 24, 2026',
+          fit: 'Strong fit on data-integrity instincts; the IVD-transfer concern narrowed but did not fully close. Rob recommends a short second conversation with the lab before an offer.',
+          points: [
+            { mark: '+', t: 'Walked through the 9-day held lock unprompted, with exact edit-check detail — the ownership is real, not a résumé line.' },
+            { mark: '+', t: 'Asked sharp questions about RDI sample/timepoint keys; engaged with the IVD model rather than treating it as a generic therapeutic area.' },
+            { mark: '–', t: 'Still no hands-on IVD reps; would need a ramp on assay-driven endpoints. Trainable, not yet proven.' },
+          ],
+        },
+        redFlags: [],
+      },
+
+      // =================== MOHAMMED — survivor / career switcher ===================
+      {
+        id: 'mohammed', rank: 2, name: 'Mohammed A.', role: 'Hybrid Lab / Data / AI Operations', company: 'Benchmark Bio',
+        salary: '$95k', salaryNum: 95, decision: 'interview', rev: 'none',
+        revNote: 'No human review yet — Conall should take the first screen before Lara invests time.',
+        why: 'Rare hybrid signal: lab work, data review, AI agent-building, instrument troubleshooting.',
+        flag: 'No clinical-trial or FDA-documentation experience.', next: 'Screen', survivor: true,
+        askTier: 'below', askNote: 'under pool median', roLevel: 'RO-3', roVsPool: 'Mid IC — below the title bar, fair for a switcher',
+        mismatch: false, mismatchRead: 'Below-median ask for a rare hybrid skill set. If the clinical-trial gap is trainable, the ask is upside, not risk.',
+        timeline: [
+          { type: 'edu', period: '2013–2017', org: 'Cal State Northridge', role: 'BS, Biochemistry', tenure: '4.0 yrs', scope: 'Bench science degree — connects to lab, not to trials', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2017–2019', org: 'Aster Genomics', role: 'Research Associate', tenure: '2.0 yrs', scope: 'Wet-lab assay execution + QC', lang: 'Reads RO-2, scope RO-2 — matched', signal: 'Positive' },
+          { type: 'role', period: '2019–2021', org: 'Aster Genomics', role: 'Lab + Data Associate', tenure: '2.0 yrs', scope: 'Added data review to bench work — the switch begins', lang: 'Reads RO-2, scope RO-2 — matched', signal: 'Switched' },
+          { type: 'cert', period: '2022', org: 'DeepLearning.AI', role: 'AI / prompt-engineering certificate', tenure: '—', scope: 'Self-directed; the AI tooling is self-taught', lang: '—', signal: 'Cert' },
+          { type: 'role', period: '2021–now', org: 'Benchmark Bio', role: 'Lab Ops & Data Analyst', tenure: '3.5 yrs', scope: 'Lab ops + data review + AI tooling + instrument QC', lang: 'Reads RO-3, scope RO-3 — matched, no inflation', signal: 'Positive' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'I build tools around the parts of lab work that waste people\u2019s time, instead of treating AI as a buzzword.', comment: 'Builder framing tied to real workflow pain — not "AI-powered synergy" filler. Reads human.', kind: 'good' },
+          { t: 'I have not run a clinical trial, but I have spent four years where the data and the instrument are the same problem, and I want to bring that to a regulated setting.', comment: 'Names the gap up front and frames the switch honestly. The exact thing to pressure-test live.', kind: 'ask' },
+        ] },
+        answers: [
+          { q: 'Q3 — Describe a workflow bottleneck you removed.', a: 'Kit-cost allocation took a full day each week. I structured the inputs, wrote the agent\u2019s instructions, caught two hallucinated allocations in testing, and added a human check before anything posts.', comment: 'Names the failure modes and a human-in-the-loop check — sounds like real ownership, not ChatGPT gloss. Verify the file structure on the call.', kind: 'good' },
+          { q: 'Q1 — Why this role?', a: 'I have not worked on a clinical trial or an FDA submission, but I want to.', comment: 'Self-disclosed gap. Honest — but this is the whole risk. Test whether he respects protocol he has never lived under.', kind: 'ask' },
+        ],
+        logistics: { mode: 'In office — Van Nuys, 5 days', location: 'Van Nuys, CA', distance: '~3 mi / 10 min', likelihood: 'High', read: 'Lives in Van Nuys; current Benchmark Bio role is on-site locally. The 5-day ask is a non-issue for him.', signals: [
+          { mark: '+', t: 'Local Van Nuys address — no relocation, minimal commute.' },
+          { mark: '+', t: 'Current and prior roles were both on-site lab positions — used to in-person, hands-on work.' },
+        ] },
+        redFlags: [],
+      },
+
+      // =================== JOHN — short screen / comp ===================
+      {
+        id: 'john', rank: 3, name: 'John D.', role: 'Clinical Data Lead', company: 'Meridian CRO',
+        salary: '$140k', salaryNum: 140, decision: 'short', rev: 'conallConcern',
+        revNote: 'Strong operator on paper but salary and motivation read like a flight risk; short screen only.',
+        why: 'Strong operator profile, but $140k ask tops the pool and motivation for a smaller shop is unclear.',
+        flag: 'Possible comp flight risk; why leave a larger CRO for RDI is unanswered.', next: 'Short screen', survivor: true,
+        askTier: 'top', askNote: 'tops the pool by $25k+', roLevel: 'RO-5', roVsPool: 'Manager level — highest in the pool',
+        mismatch: false, mismatchRead: 'Top ask matched by a genuine manager-level RO. The question is fit and motivation for a smaller, hands-on role — not whether the level justifies the number.',
+        timeline: [
+          { type: 'edu', period: '2006–2010', org: 'Rutgers', role: 'BS, Biology', tenure: '4.0 yrs', scope: 'Science degree — connects to path', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2012–2015', org: 'Apex Pharma', role: 'Clinical Data Coordinator', tenure: '3.0 yrs', scope: 'Study-level query ownership', lang: 'Reads RO-2, scope RO-2 — matched', signal: 'Positive' },
+          { type: 'role', period: '2015–2018', org: 'Meridian CRO', role: 'Clinical Data Manager', tenure: '3.0 yrs', scope: 'Owns study DM', lang: 'Reads RO-3, scope RO-3 — matched', signal: 'Promotion' },
+          { type: 'role', period: '2018–now', org: 'Meridian CRO', role: 'Clinical Data Lead', tenure: '7.0 yrs', scope: 'Leads 6 DMs across a 20-study portfolio', lang: 'Reads RO-5, scope RO-5 — matched', signal: 'Positive' },
+        ],
+        cover: { hasLetter: false, lines: [] },
+        answers: [
+          { q: 'Q1 — Why this role?', a: 'Looking for a new challenge and growth.', comment: 'Generic. Does not explain leaving a larger CRO for a smaller, more hands-on shop — and there\u2019s no cover letter to fill the gap. This is the whole question.', kind: 'thin' },
+        ],
+        logistics: { mode: 'Remote / relocation unclear', location: 'Princeton, NJ', distance: '~2,800 mi — would relocate', likelihood: 'Low', read: 'East-coast based with no LA history on file and no stated relocation plan. A 5-day Van Nuys role is a hard ask; confirm relocation intent before any full interview.', signals: [
+          { mark: '–', t: 'No prior LA-area roles or addresses — relocation would be a cold move.' },
+          { mark: '–', t: 'No relocation statement in the application; combined with the top-of-pool ask, raises the flight-risk read.' },
+        ] },
+        redFlags: [],
+      },
+
+      // =================== WEI — verify ===================
+      {
+        id: 'wei', rank: 4, name: 'Wei C.', role: 'Clinical Data Manager', company: 'Northstar Labs',
+        salary: '$108k', salaryNum: 108, decision: 'verify', rev: 'second',
+        revNote: 'Promising file, but salary field is blank and one claim has no résumé support.',
+        why: 'Promising EDC file, but salary field is blank and a key ownership claim has no résumé support.',
+        flag: 'Missing salary + one unsupported claim. One follow-up before any interview slot.', next: 'Verify', survivor: false,
+        askTier: 'mid', askNote: 'salary field left blank', roLevel: 'RO-3', roVsPool: 'Mid IC — in range for the role',
+        mismatch: true, mismatchRead: 'Cannot place value: the salary field is blank. Resolve comp before ranking — a promising file with an unknown price.',
+        timeline: [
+          { type: 'edu', period: '2012–2016', org: 'University of Washington', role: 'BS, Bioengineering', tenure: '4.0 yrs', scope: 'Technical degree — connects to EDC', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2016–2020', org: 'Cardia Trials', role: 'Data Coordinator', tenure: '4.0 yrs', scope: 'Query handling, CRF tracking', lang: 'Reads RO-2, scope RO-2 — matched', signal: 'Positive' },
+          { type: 'role', period: '2020–now', org: 'Northstar Labs', role: 'Clinical Data Manager', tenure: '5.0 yrs', scope: 'eCRF build + query mgmt, cardiology studies', lang: 'Reads RO-3, scope RO-3 — matched', signal: 'Positive' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'I have spent five years making cardiology study data clean and lockable, and I want to do the same where the diagnostic itself is the question.', comment: 'Solid, specific framing. No red flags in the letter.', kind: 'good' },
+        ] },
+        answers: [
+          { q: 'Q2 — Biggest data-quality win.', a: 'Rebuilt lab reconciliation that caught a systematic unit-conversion error across a study.', comment: 'Strong if true — but nothing in the résumé mentions reconciliation ownership. Get the specifics in a written follow-up before a slot.', kind: 'ask' },
+        ],
+        logistics: { mode: 'Hybrid / relocation likely', location: 'Seattle, WA', distance: '~1,100 mi — would relocate', likelihood: 'Medium', read: 'Seattle-based with no LA history. Says open to relocation in the logistics field, but no prior LA ties to confirm it would stick. Verify alongside the salary follow-up.', signals: [
+          { mark: '+', t: 'Stated open to relocation for the right role.' },
+          { mark: '–', t: 'No prior LA-area address or employer to anchor the relocation claim.' },
+        ] },
+        redFlags: [],
+      },
+
+      // =================== SOFIA — short ===================
+      {
+        id: 'sofia', rank: 5, name: 'Sofia M.', role: 'Data Manager II', company: 'Veris Health',
+        salary: '$92k', salaryNum: 92, decision: 'short', rev: 'none', revNote: 'No human review yet.',
+        why: 'Adjacent pharmacovigilance + EDC depth; could grow into the role but not a direct CDM match yet.',
+        flag: 'Breadth over depth — has not owned a full lock cycle solo.', next: 'Short screen', survivor: false,
+        askTier: 'below', askNote: 'lowest ask in the screen group', roLevel: 'RO-3', roVsPool: 'Mid IC — slightly under the role bar',
+        mismatch: false, mismatchRead: 'Below-median ask for a develop-hire. Fair if RDI wants to grow someone into the lock role.',
+        timeline: [
+          { type: 'edu', period: '2014–2018', org: 'Boston University', role: 'BS, Public Health', tenure: '4.0 yrs', scope: 'Adjacent degree — pharmacovigilance, not data', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2018–2021', org: 'SafetyFirst PV', role: 'Pharmacovigilance Associate', tenure: '3.0 yrs', scope: 'Safety reconciliation, case intake', lang: 'Reads RO-2, scope RO-2 — matched', signal: 'Positive' },
+          { type: 'role', period: '2021–now', org: 'Veris Health', role: 'Data Manager II', tenure: '4.0 yrs', scope: 'Supported eCRF build + safety reconciliation (vaccine)', lang: 'Reads RO-3, supported not owned', signal: 'Ask' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'My strength is the seam between safety data and clinical data, and I want to own more of the clinical side.', comment: 'Honest about wanting to grow into the role. Reasonable.', kind: 'neutral' },
+        ] },
+        answers: [
+          { q: 'Q2 — Have you owned a database lock end to end?', a: 'I have supported several locks and led reconciliation, and I am ready to own one fully.', comment: '"Supported", not "owned" — the exact distinction to test. Honest framing, but she\u2019d be a develop-hire.', kind: 'ask' },
+        ],
+        logistics: { mode: 'In office — Van Nuys, 5 days', location: 'Long Beach, CA', distance: '~35 mi / 45–70 min', likelihood: 'Medium', read: 'In LA County but a long Van Nuys commute from Long Beach. Feasible but ask whether the 5-day drive is sustainable for her.', signals: [
+          { mark: '+', t: 'Already LA-based — no relocation.' },
+          { mark: '–', t: 'Long Beach → Van Nuys is a heavy daily commute; confirm willingness.' },
+        ] },
+        redFlags: [],
+      },
+
+      // =================== DANIEL — hold / mismatch ===================
+      {
+        id: 'daniel', rank: 14, name: 'Daniel O.', role: 'Clinical Data Manager', company: 'Atlas Trials',
+        salary: '$120k', salaryNum: 120, decision: 'hold', rev: 'none', revNote: 'No human review yet.',
+        why: 'Clean, professional file but weak relevance — does not beat the current top of the pool.',
+        flag: 'Removes little of the burden the role exists to remove.', next: 'Hold', survivor: false,
+        askTier: 'high', askNote: '$12k over median', roLevel: 'RO-3', roVsPool: 'Mid IC — below his ask',
+        mismatch: true, mismatchRead: 'High-tier ask, mid-tier RO level. Competent but not differentiating — paying near top-of-pool comp for RO-3 scope.',
+        timeline: [
+          { type: 'edu', period: '2010–2014', org: 'Ohio State', role: 'BS, Biology', tenure: '4.0 yrs', scope: 'Science degree — connects', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2015–2019', org: 'Crossway CRO', role: 'Data Coordinator', tenure: '4.0 yrs', scope: 'Query mgmt', lang: 'Reads RO-2, scope RO-2', signal: 'Positive' },
+          { type: 'role', period: '2019–now', org: 'Atlas Trials', role: 'Clinical Data Manager', tenure: '6.0 yrs', scope: 'Standard eCRF + query mgmt, mid-size studies', lang: 'Reads RO-4, scope RO-3 — slightly inflated', signal: 'Inflated' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'I am a seasoned clinical data manager looking for my next opportunity to make an impact.', comment: 'Generic opener — "seasoned", "make an impact". Competent but says nothing specific about RDI.', kind: 'thin' },
+        ] },
+        answers: [
+          { q: 'Q2 — Hardest lock?', a: 'I have managed many locks across mid-size studies and pride myself on clean delivery.', comment: 'No specifics — "many locks", "pride myself". Reads as competent-generic; nothing differentiating to test.', kind: 'thin' },
+        ],
+        logistics: { mode: 'In office — Van Nuys, 5 days', location: 'Sherman Oaks, CA', distance: '~6 mi / 15 min', likelihood: 'High', read: 'Local to the Valley — short Van Nuys commute. Logistics are clean; the hold is about relevance, not feasibility.', signals: [
+          { mark: '+', t: 'Sherman Oaks address — minutes from the lab.' },
+        ] },
+        redFlags: [],
+      },
+
+      // =================== PRIYA — hold / mismatch ===================
+      {
+        id: 'priya', rank: 15, name: 'Priya N.', role: 'Senior Data Coordinator', company: 'Cobalt CRO',
+        salary: '$115k', salaryNum: 115, decision: 'hold', rev: 'none', revNote: 'No human review yet.',
+        why: 'Coordinator-level depth at a manager-level ask; capable but not yet a lock owner.',
+        flag: 'Title/scope below the role; would need backstopping on lock decisions.', next: 'Hold', survivor: false,
+        askTier: 'high', askNote: 'manager-level ask', roLevel: 'RO-2', roVsPool: 'Coordinator — below the role bar',
+        mismatch: true, mismatchRead: 'Top-tier ask, relatively low RO level. Coordinator scope priced like a manager — the clearest ask/level mismatch in the pool.',
+        timeline: [
+          { type: 'edu', period: '2013–2017', org: 'UC Irvine', role: 'BS, Biological Sciences', tenure: '4.0 yrs', scope: 'Science degree — connects', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2017–2021', org: 'Cobalt CRO', role: 'Data Coordinator', tenure: '4.0 yrs', scope: 'Query handling, CRF tracking', lang: 'Reads RO-2, scope RO-2', signal: 'Positive' },
+          { type: 'role', period: '2021–now', org: 'Cobalt CRO', role: 'Senior Data Coordinator', tenure: '4.0 yrs', scope: 'Coordinator scope, no independent lock ownership', lang: 'Reads RO-4, scope RO-2 — inflated', signal: 'Inflated' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'I have owned the data coordination for some of Cobalt\u2019s largest studies and am ready to step up.', comment: '"Owned coordination" of large studies — but the scope shown is coordinator, not manager. Language runs ahead of the role.', kind: 'flag' },
+        ] },
+        answers: [
+          { q: 'Q2 — Describe a lock you owned.', a: 'I coordinated the data flow and worked with the DM to get studies to lock on time.', comment: 'Tells on itself — "worked with the DM", i.e. did not own the lock. Confirms coordinator level despite the senior title.', kind: 'flag' },
+        ],
+        logistics: { mode: 'In office — Van Nuys, 5 days', location: 'Irvine, CA', distance: '~55 mi / 60–90 min', likelihood: 'Low', read: 'Orange County base — a brutal daily Van Nuys commute. Would likely need to relocate; no Valley ties on file.', signals: [
+          { mark: '–', t: 'Irvine → Van Nuys is 60–90 min each way; 5-day on-site is a stretch.' },
+        ] },
+        redFlags: [],
+      },
+
+      // =================== GRACE — hold / Lara re-analysis ===================
+      {
+        id: 'grace', rank: 16, name: 'Grace O.', role: 'Senior Clinical Data Manager', company: 'Pinnacle Dx',
+        salary: '$112k', salaryNum: 112, decision: 'hold', rev: 'laraConcern',
+        revNote: 'Rude / dismissive in Lara\u2019s interview; management-burden risk if reporting to Lara. Was Interview first on materials alone.',
+        why: 'Strong EDC-migration file, but moved Interview → Hold after a direct Lara interview signal.',
+        flag: 'Management-burden risk from Lara\u2019s direct observation; would likely report to Lara.', next: 'Hold / reroute', survivor: false,
+        askTier: 'mid', askNote: 'in-range for the file', roLevel: 'RO-4', roVsPool: 'Senior IC — strong on materials',
+        mismatch: false, mismatchRead: 'Ask and RO level line up well. The block is not comp or level — it is the human signal from Lara\u2019s interview.',
+        reanalysis: { reviewer: 'Lara interview note', before: 'Interview first', after: 'Hold', rec: 'Do not advance for a Lara-managed role unless Conall believes the concern was situational and runs a focused follow-up on humility and response to feedback.' },
+        timeline: [
+          { type: 'edu', period: '2009–2013', org: 'NYU', role: 'BS, Chemistry', tenure: '4.0 yrs', scope: 'Science degree — connects', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2014–2020', org: 'Helix Therapeutics', role: 'Clinical Data Manager', tenure: '6.0 yrs', scope: 'Owns study DM', lang: 'Reads RO-3, scope RO-3 — matched', signal: 'Positive' },
+          { type: 'role', period: '2020–now', org: 'Pinnacle Dx', role: 'Senior Clinical Data Manager', tenure: '5.0 yrs', scope: 'Led EDC migration across 12 active studies, zero data loss', lang: 'Reads RO-4, scope RO-4 — matched', signal: 'Positive' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'I led an EDC platform migration across twelve active studies with zero data loss, and I want that scale of ownership at RDI.', comment: 'Genuinely strong claim — migration without loss is hard. The materials earned an interview.', kind: 'good' },
+        ] },
+        answers: [
+          { q: 'Q2 — Hardest cross-team project.', a: 'I drove the migration over objections from study teams who wanted to keep the old system.', comment: '"Over objections" — strong delivery, but worth probing how she handles disagreement. Lara\u2019s interview later flagged exactly this.', kind: 'ask' },
+        ],
+        logistics: { mode: 'In office — Van Nuys, 5 days', location: 'Burbank, CA', distance: '~7 mi / 15 min', likelihood: 'High', read: 'Local — short commute. Logistics are not the issue; the human-signal concern is.', signals: [
+          { mark: '+', t: 'Burbank address — minutes from Van Nuys.' },
+        ] },
+        fireflies: [
+          { title: 'Interview — Grace O. / Lara', date: 'Apr 2, 2026', dur: '41 min', transcript: 'Lara: Walk me through the EDC migration and where it got hard.\nGrace: Twelve studies, zero data loss. The study teams pushed back constantly — I just drove it over their objections.\nLara: How did you handle the disagreement?\nGrace: They were wrong. I do not have time to relitigate every decision with people who cannot see the whole board.\nLara (note): Came across as dismissive — talked over me twice and bristled when I pushed. Strong delivery, but real management-burden risk if she reports to me.' },
+        ],
+        redFlags: [],
+      },
+
+      // =================== TOMÁS — blocked ===================
+      {
+        id: 'tomas', rank: 17, name: 'Tomás R.', role: 'Clinical Data Manager', company: 'Helios Bio',
+        salary: '$104k', salaryNum: 104, decision: 'blocked', rev: 'none',
+        revNote: 'AI review not complete — no recommendation allowed.',
+        why: 'Résumé failed to parse and application answers are missing; AI review is incomplete.',
+        flag: 'No recommendation allowed until required review completes.', next: 'Re-sync', survivor: false,
+        askTier: 'mid', askNote: 'within range', roLevel: '—', roVsPool: 'Cannot place — materials incomplete',
+        mismatch: true, mismatchLabel: 'Review blocked', mismatchRead: 'Résumé failed to parse from Workable and answers did not sync. Re-sync before placing — no read is possible yet.',
+        timeline: [
+          { type: 'role', period: '—', org: 'Helios Bio', role: 'Clinical Data Manager', tenure: '—', scope: 'Résumé failed to parse — timeline unavailable', lang: '—', signal: 'Ask' },
+        ],
+        cover: { hasLetter: false, lines: [] },
+        answers: [],
+        logistics: { mode: 'Unknown — not synced', location: 'Not parsed', distance: 'Unknown', likelihood: 'Medium', read: 'Logistics cannot be assessed until materials re-sync from Workable.', signals: [] },
+        redFlags: [],
+      },
+
+      // =================== CUTS ===================
+      {
+        id: 'gregory', rank: 31, name: 'Gregory V.', role: 'Controller', company: 'Hartwell Industries',
+        salary: '$90k', salaryNum: 90, decision: 'cut', rev: 'none', revNote: 'No human review needed — application-quality failure cuts before any human time.',
+        why: 'Wrong-company cover letter and a Controller background — no relevance to the CDM role.',
+        flag: 'Application-care failure; wrong role entirely.', next: 'Reject', survivor: false,
+        cutGroup: 'care', cutReason: 'Cover letter addresses a different company; applying as a Controller, not a data manager.', cite: 'Cover ¶1', cutMatters: 'For a role built on care and detail, a wrong-company letter is a direct application-quality failure.',
+        askTier: 'mid', askNote: 'irrelevant — wrong role', roLevel: 'RO-4', roVsPool: 'Finance level — not comparable to CDM',
+        mismatch: true, mismatchLabel: 'Wrong role', mismatchRead: 'A corporate Controller applying to a clinical data role. RO level is real but in the wrong discipline entirely.',
+        timeline: [
+          { type: 'edu', period: '2004–2008', org: 'Arizona State', role: 'BS, Accounting', tenure: '4.0 yrs', scope: 'Finance degree — no science, no clinical', lang: '—', signal: 'Switched' },
+          { type: 'role', period: '2008–2016', org: 'Multiple', role: 'Staff → Senior Accountant', tenure: '8.0 yrs', scope: 'GAAP close, audit support', lang: 'Reads RO-3, scope RO-3', signal: 'Positive' },
+          { type: 'role', period: '2016–now', org: 'Hartwell Industries', role: 'Controller', tenure: '9.0 yrs', scope: 'Corporate accounting — no clinical, no data mgmt', lang: 'Reads RO-4, wrong field', signal: 'Switched' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'Dear Brightpath Logistics hiring team, I am excited to apply for your Controller opening.', comment: 'Wrong company AND wrong role — addresses "Brightpath Logistics" and applies as a Controller. He didn\u2019t even change the template.', kind: 'wrong' },
+          { t: 'I bring fifteen years of GAAP close and audit experience to your finance organization.', comment: 'Confirms it: this is a finance cover letter pasted into a clinical data application. Zero relevance.', kind: 'flag' },
+        ] },
+        answers: [
+          { q: 'Q1 — Why this role?', a: 'I am seeking a senior finance leadership position where I can own the close process.', comment: 'Answer is about a finance job. Nothing here engages with clinical data at all.', kind: 'flag' },
+        ],
+        logistics: { mode: 'Not assessed — cut on materials', location: 'Phoenix, AZ', distance: 'N/A', likelihood: 'Low', read: 'Not worth a logistics check — the application is for a different role at a different company.', signals: [] },
+        redFlags: [
+          { flag: 'Wrong company', detail: 'Cover letter opens "Dear Brightpath Logistics hiring team" — a different company entirely.', source: 'Cover ¶1' },
+          { flag: 'Wrong role', detail: 'Applying as a Controller; résumé is corporate accounting with no clinical or data-management work.', source: 'Résumé' },
+          { flag: 'No template care', detail: 'Reused a finance cover letter without editing the company or role — a direct application-quality failure.', source: 'Cover ¶1–2' },
+        ],
+      },
+      {
+        id: 'brad', rank: 32, name: 'Brad M.', role: 'Data Analyst', company: 'Onyx Data',
+        salary: '$98k', salaryNum: 98, decision: 'cut', rev: 'none', revNote: 'No human review needed.',
+        why: 'Generic AI-looking answers with no concrete examples.', flag: 'Low care; no specific evidence anywhere.', next: 'Reject', survivor: false,
+        cutGroup: 'care', cutReason: 'Every application answer is generic and templated; no concrete example in the whole file.', cite: 'Q1–Q3', cutMatters: 'No concrete evidence anywhere — nothing to interview against, and low care signals low care on the job.',
+        askTier: 'mid', askNote: 'irrelevant — no evidence', roLevel: 'RO-2', roVsPool: 'Junior — and unverifiable',
+        mismatch: true, mismatchLabel: 'No evidence', mismatchRead: 'Answers read as AI-generated boilerplate — nothing concrete to verify a level against.',
+        timeline: [
+          { type: 'edu', period: '2015–2019', org: 'Generic State U', role: 'BS, Business Analytics', tenure: '4.0 yrs', scope: 'Adjacent degree — no clinical', lang: '—', signal: 'Switched' },
+          { type: 'role', period: '2019–now', org: 'Onyx Data', role: 'Data Analyst', tenure: '6.0 yrs', scope: 'Dashboards and reporting — no clinical, no EDC', lang: 'Reads RO-2, scope RO-2', signal: 'Positive' },
+        ],
+        cover: { hasLetter: false, lines: [] },
+        answers: [
+          { q: 'Q1 — Why this role?', a: 'I am a detail-oriented team player passionate about data quality and driving impact in a fast-paced environment.', comment: 'Textbook AI / template language — "detail-oriented team player", "driving impact", "fast-paced". No specific example anywhere.', kind: 'ai' },
+          { q: 'Q2 — Biggest win?', a: 'I leveraged data to deliver actionable insights that moved the needle for stakeholders.', comment: 'Pure buzzword filler — "leveraged", "actionable insights", "moved the needle". Nothing real to test.', kind: 'ai' },
+        ],
+        logistics: { mode: 'Not assessed — cut on materials', location: 'Austin, TX', distance: 'N/A', likelihood: 'Low', read: 'Not worth a logistics check — no concrete evidence to interview against.', signals: [] },
+        redFlags: [
+          { flag: 'AI-written answers', detail: 'All three answers are generic, buzzword-dense, and example-free — reads as AI-generated boilerplate.', source: 'Q1–Q3' },
+          { flag: 'No concrete evidence', detail: 'Not one specific project, metric, or mechanic in the entire application.', source: 'Application' },
+          { flag: 'No cover letter', detail: 'No letter submitted to offset the thin answers.', source: 'Cover' },
+        ],
+      },
+      {
+        id: 'lindsay', rank: 33, name: 'Lindsay C.', role: 'Clinical Data Manager', company: 'Vantage CRO',
+        salary: '$110k', salaryNum: 110, decision: 'cut', rev: 'none', revNote: 'No human review needed.',
+        why: 'Résumé and application contradict each other on dates and scope.', flag: 'Resume/application contradiction undermines trust.', next: 'Reject', survivor: false,
+        cutGroup: 'evidence', cutReason: 'Résumé shows 2021–2023 at Vantage; application says 2019–2024 with a different title.', cite: 'Résumé vs Q1', cutMatters: 'For a data-integrity role, an unexplained factual contradiction is disqualifying.',
+        askTier: 'mid', askNote: 'irrelevant — contradicted file', roLevel: 'RO-3?', roVsPool: 'Unclear — the file contradicts itself',
+        mismatch: true, mismatchLabel: 'Contradiction', mismatchRead: 'Résumé and application disagree on dates and title at the same company. For a data-integrity role, an unexplained factual contradiction is disqualifying.',
+        timeline: [
+          { type: 'edu', period: '2013–2017', org: 'Penn State', role: 'BS, Biology', tenure: '4.0 yrs', scope: 'Science degree — connects', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2021–2023', org: 'Vantage CRO', role: 'CDM (per résumé)', tenure: '2.0 yrs', scope: 'Résumé dates', lang: 'Reads RO-3', signal: 'Positive' },
+          { type: 'gap', period: '2019–2024?', org: 'Vantage CRO', role: 'Senior CDM (per application)', tenure: 'conflict', scope: 'Application claims different dates and a higher title — unexplained conflict', lang: '—', signal: 'Gap' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'In my five years as Senior Clinical Data Manager at Vantage, I built the data function from the ground up.', comment: 'Letter says five years as Senior CDM; the résumé says two years as CDM. The story doesn\u2019t reconcile.', kind: 'flag' },
+        ] },
+        answers: [
+          { q: 'Q1 — Current role and tenure?', a: 'Senior Clinical Data Manager at Vantage CRO, 2019–2024.', comment: 'Directly contradicts the résumé (CDM, 2021–2023). Different dates, different title, same employer — unexplained.', kind: 'flag' },
+        ],
+        logistics: { mode: 'Not assessed — cut on materials', location: 'Philadelphia, PA', distance: 'N/A', likelihood: 'Low', read: 'Not worth a logistics check — the contradiction is disqualifying first.', signals: [] },
+        redFlags: [
+          { flag: 'Résumé / app contradiction', detail: 'Résumé: CDM 2021–2023. Application: Senior CDM 2019–2024. Same company, conflicting dates and title.', source: 'Résumé vs Q1' },
+          { flag: 'Inflated title in letter', detail: 'Cover letter claims five years as Senior CDM — unsupported by the résumé.', source: 'Cover ¶1' },
+        ],
+      },
+      {
+        id: 'nadia', rank: 34, name: 'Nadia P.', role: 'Data Manager', company: '(various)',
+        salary: '$102k', salaryNum: 102, decision: 'cut', rev: 'none', revNote: 'No human review needed.',
+        why: 'Five roles in four years, none over 11 months, no explanation.', flag: 'Repeated short tenures with no narrative.', next: 'Reject', survivor: false,
+        cutGroup: 'pattern', cutReason: 'Five positions in four years, longest 11 months, no explanation in cover or answers.', cite: 'Timeline', cutMatters: 'CDM continuity through a lock cycle is the job; unexplained churn is the core risk.',
+        askTier: 'mid', askNote: 'irrelevant — pattern risk', roLevel: 'RO-3', roVsPool: 'Mid — but no continuity through a lock',
+        mismatch: true, mismatchLabel: 'Pattern risk', mismatchRead: 'Five roles in four years, longest 11 months, none explained. CDM continuity through lock is the job — the pattern is the disqualifier.',
+        timeline: [
+          { type: 'edu', period: '2011–2015', org: 'Michigan State', role: 'BS, Biology', tenure: '4.0 yrs', scope: 'Science degree — connects', lang: '—', signal: 'Connected' },
+          { type: 'role', period: '2021', org: 'Firm A', role: 'Data Manager', tenure: '0.8 yr', scope: 'Left before a full lock cycle', lang: '—', signal: 'Gap' },
+          { type: 'gap', period: '2021–2022', org: '—', role: 'Gap', tenure: '4 mos', scope: 'Unexplained break between roles', lang: '—', signal: 'Gap' },
+          { type: 'role', period: '2022', org: 'Firm B', role: 'Data Manager', tenure: '0.9 yr', scope: 'Short tenure, no narrative', lang: '—', signal: 'Gap' },
+          { type: 'role', period: '2023–now', org: 'Firms C–E', role: 'Data Manager (×3)', tenure: '<1 yr each', scope: 'Three more sub-year stints, no explanation offered', lang: '—', signal: 'Gap' },
+        ],
+        cover: { hasLetter: false, lines: [] },
+        answers: [
+          { q: 'Q1 — Walk us through your recent moves.', a: 'I have worked across several organizations to broaden my experience.', comment: '"Broaden my experience" does not explain five sub-year roles and a gap. The pattern is unaddressed.', kind: 'flag' },
+        ],
+        logistics: { mode: 'Not assessed — cut on materials', location: 'Chicago, IL', distance: 'N/A', likelihood: 'Low', read: 'Not worth a logistics check — the tenure pattern is the disqualifier.', signals: [] },
+        redFlags: [
+          { flag: 'Repeated short tenures', detail: 'Five roles in four years, longest 11 months — no continuity through a lock cycle.', source: 'Timeline' },
+          { flag: 'Unexplained gap', detail: 'A 4-month break between roles with no narrative in the application.', source: 'Timeline' },
+          { flag: 'No explanation offered', detail: 'Cover letter absent; the one answer that touches it is a non-answer.', source: 'Q1' },
+        ],
+      },
+      {
+        id: 'owen', rank: 35, name: 'Owen P.', role: 'Business Analyst', company: 'Delta Systems',
+        salary: '$95k', salaryNum: 95, decision: 'cut', rev: 'none', revNote: 'No human review needed.',
+        why: 'General BA background; does not remove the role\u2019s core data-integrity burden.', flag: 'Would need too much backstopping to be useful.', next: 'Reject', survivor: false,
+        cutGroup: 'mismatch', cutReason: 'General business-analyst path; no EDC, no clinical, no lock experience.', cite: 'Résumé', cutMatters: 'Would need backstopping in exactly the area the role exists to cover.',
+        askTier: 'mid', askNote: 'irrelevant — wrong burden', roLevel: 'RO-3', roVsPool: 'Mid — but not in clinical data',
+        mismatch: true, mismatchLabel: 'Role mismatch', mismatchRead: 'A general business analyst with no EDC, clinical, or lock experience. Would need to be built from zero in the one area the role is about.',
+        timeline: [
+          { type: 'edu', period: '2012–2016', org: 'University of Texas', role: 'BS, Information Systems', tenure: '4.0 yrs', scope: 'IT degree — no science, no clinical', lang: '—', signal: 'Switched' },
+          { type: 'role', period: '2016–now', org: 'Delta Systems', role: 'Business Analyst', tenure: '9.0 yrs', scope: 'Dashboards, requirements gathering — no clinical data', lang: 'Reads RO-3, wrong field', signal: 'Switched' },
+        ],
+        cover: { hasLetter: true, lines: [
+          { t: 'My analytical background makes me a strong fit for any data-focused role.', comment: '"Any data-focused role" — generic and tells on itself. No EDC, no clinical, no lock; this is not that kind of data role.', kind: 'thin' },
+        ] },
+        answers: [
+          { q: 'Q2 — Clinical data / EDC experience?', a: 'While I have not worked in clinical trials directly, my analytics skills transfer.', comment: 'Concedes no clinical or EDC experience. The transfer claim is thin — RDI would backstop the entire core of the role.', kind: 'flag' },
+        ],
+        logistics: { mode: 'Not assessed — cut on materials', location: 'Dallas, TX', distance: 'N/A', likelihood: 'Low', read: 'Not worth a logistics check — does not remove the role\u2019s core burden.', signals: [] },
+        redFlags: [
+          { flag: 'Does not remove core burden', detail: 'General BA work; no EDC, clinical, or lock experience — backstopping required in exactly the area the role exists for.', source: 'Résumé' },
+          { flag: 'Generic fit claim', detail: '"Strong fit for any data-focused role" — no engagement with what clinical data management actually is.', source: 'Cover ¶1' },
+        ],
+      },
+    ];
+  }
+
+  all() { return this.data(); }
+  find(id) { return this.all().find(c => c.id === id) || this.all()[0]; }
+
+  openPool = () => this.setState({ view: 'pool' });
+  openCandidate = (id) => this.setState({ view: 'candidate', activeId: id, tdraft: this.state.transcripts[id] || '' });
+  toggleDq = (id) => this.save({ dq: { ...this.state.dq, [id]: !this.state.dq[id] } });
+  runDeep = (id) => this.save({ deep: { ...this.state.deep, [id]: true } });
+  openDeep = (id) => this.save({ view: 'candidate', activeId: id, tdraft: this.state.transcripts[id] || '', deep: { ...this.state.deep, [id]: true } });
+  openJobWorkable = () => { try { window.open(this.jobUrl(), '_blank', 'noopener'); } catch (e) {} };
+  bulkDq = () => {
+    const cuts = this.all().filter(c => c.decision === 'cut');
+    const anyOpen = cuts.some(c => !this.state.dq[c.id]);
+    const dq = { ...this.state.dq };
+    cuts.forEach(c => { dq[c.id] = anyOpen; });
+    this.save({ dq });
+  };
+  toggleTlEdit = () => this.setState(s => ({ tlEditing: !s.tlEditing }));
+  effTl(id) { return (this.state.ovr[id] || this.find(id).timeline || []).map(r => ({ ...r })); }
+  editCell(id, idx, field, val) { const cur = this.effTl(id); if (cur[idx]) cur[idx][field] = val; this.save({ ovr: { ...this.state.ovr, [id]: cur } }); }
+  addRow(id, type) {
+    const cur = this.effTl(id);
+    const blank = type === 'gap'
+      ? { type: 'gap', period: '', org: '—', role: 'Gap', tenure: '', scope: 'New gap — describe', lang: '—', signal: 'Gap' }
+      : type === 'cert'
+      ? { type: 'cert', period: '', org: '', role: 'New certificate', tenure: '—', scope: '', lang: '—', signal: 'Cert' }
+      : { type: 'role', period: '', org: '', role: 'New role', tenure: '', scope: '', lang: 'Reads —, scope —', signal: 'Positive' };
+    cur.push(blank);
+    this.save({ ovr: { ...this.state.ovr, [id]: cur }, tlEditing: true });
+  }
+  removeRow(id, idx) { const cur = this.effTl(id); cur.splice(idx, 1); this.save({ ovr: { ...this.state.ovr, [id]: cur } }); }
+  setReply(id, key, val) { const r = { ...(this.state.replies[id] || {}) }; r[key] = val; this.save({ replies: { ...this.state.replies, [id]: r } }); }
+  setTranscript(id, val) { this.save({ transcripts: { ...this.state.transcripts, [id]: val } }); }
+  onTdraft = (e) => this.setState({ tdraft: e.target.value });
+  saveTranscript = () => { const id = this.state.activeId; this.save({ transcripts: { ...this.state.transcripts, [id]: this.state.tdraft } }); };
+  pullFireflies = (rec) => () => { const id = this.state.activeId; this.save({ transcripts: { ...this.state.transcripts, [id]: rec.transcript }, tdraft: rec.transcript }); };
+  onCorrDraft = (e) => this.setState({ corrDraft: e.target.value });
+  addCorrection = () => {
+    const id = this.state.activeId; const v = (this.state.corrDraft || '').trim(); if (!v) return;
+    const log = [...(this.state.corrections[id] || []), { ts: this.now(), text: v }];
+    this.save({ corrections: { ...this.state.corrections, [id]: log }, corrDraft: '' });
+  };
+  downloadMd = () => {
+    const c = this.find(this.state.activeId);
+    try {
+      const blob = new Blob([this.buildMd(c)], { type: 'text/markdown' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = c.id + '.md'; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {}
+  };
+  buildMd(c) {
+    const id = c.id; const tl = this.effTl(id); const corr = this.state.corrections[id] || []; const reps = this.state.replies[id] || {}; const tr = this.state.transcripts[id] || '';
+    let s = '# Candidate: ' + c.name + '\n\n';
+    s += '- Role applied: ' + c.role + '\n- Current company: ' + c.company + '\n- Salary ask: ' + c.salary + '\n- RO level: ' + c.roLevel + '\n- Decision: ' + this.DM(c.decision).label + (this.state.dq[id] ? ' (DISQUALIFIED)' : '') + '\n- Workable: ' + this.candUrl(id) + '\n- Last updated: ' + this.now() + '\n\n';
+    s += '## RO time progression\n\n| Period | Org/School | Role | Tenure | Scope | Signal |\n|---|---|---|---|---|---|\n';
+    tl.forEach(r => { s += '| ' + (r.period || '') + ' | ' + (r.org || '') + ' | ' + (r.role || '') + ' | ' + (r.tenure || '') + ' | ' + (r.scope || '') + ' | ' + (r.signal || '') + ' |\n'; });
+    s += '\n## Corrections (human, persisted)\n\n';
+    if (corr.length) corr.forEach(e => { s += '- [' + e.ts + '] ' + e.text + '\n'; }); else s += '- none\n';
+    s += '\n## Notes to Claude (replies on its comments)\n\n';
+    const rk = Object.keys(reps).filter(k => reps[k]); if (rk.length) rk.forEach(k => { s += '- (' + k + ') ' + reps[k] + '\n'; }); else s += '- none\n';
+    if (c.interview) { s += '\n## Interview summary\n\n' + c.interview.title + '\n\n' + c.interview.fit + '\n'; }
+    if (tr) s += '\n## Pasted transcript\n\n' + tr + '\n';
+    return s;
+  }
+
+  renderVals() {
+    const st = this.state;
+    const all = this.all();
+    const active = this.find(st.activeId);
+    const dq = st.dq || {};
+
+    const byDec = (d) => all.filter(c => c.decision === d);
+    const nInterview = byDec('interview').length, nShort = byDec('short').length, nVerify = byDec('verify').length;
+    const nHold = byDec('hold').length, nBlocked = byDec('blocked').length, nCut = byDec('cut').length;
+    const nWorth = nInterview + nShort + nVerify;
+    const total = all.length;
+    const cuts = all.filter(c => c.decision === 'cut');
+    const nDq = Object.keys(dq).filter(k => dq[k]).length;
+
+    // counts panel
+    const counts = [
+      { label: 'To cut now', value: nCut, color: '#9E3B28' },
+      { label: 'Strong interview', value: nInterview, color: '#E74424' },
+      { label: 'Worth screening', value: nShort + nVerify, color: '#162335' },
+      { label: 'Hold', value: nHold, color: 'rgba(22,35,53,0.6)' },
+      { label: 'Review blocked', value: nBlocked, color: '#E74424' },
+    ];
+
+    // cut list grouped
+    const cutDefs = [
+      { key: 'care', title: 'Application-care failures' },
+      { key: 'evidence', title: 'Evidence failures' },
+      { key: 'pattern', title: 'Career-pattern failures' },
+      { key: 'mismatch', title: 'Role mismatch' },
+    ];
+    const cutGroups = cutDefs.map(g => ({
+      title: g.title,
+      items: cuts.filter(c => c.cutGroup === g.key).map(c => {
+        const isDq = !!dq[c.id];
+        return {
+          name: c.name, role: c.role, reason: c.cutReason, cite: c.cite, matters: c.cutMatters || c.flag, next: c.next,
+          open: () => this.openCandidate(c.id), toggle: () => this.toggleDq(c.id), openDeep: () => this.openDeep(c.id),
+          bg: isDq ? 'rgba(22,35,53,0.035)' : 'transparent',
+          strike: isDq ? 'line-through' : 'none', nameColor: isDq ? 'rgba(22,35,53,0.4)' : '#162335',
+          xBg: isDq ? '#9E3B28' : 'transparent', xColor: isDq ? '#fff' : '#9E3B28',
+        };
+      }),
+    })).filter(g => g.items.length);
+
+    // priority table (non-cut), filterable
+    let rows = all.filter(c => c.decision !== 'cut');
+    if (st.filter !== 'all') rows = all.filter(c => c.decision === st.filter);
+    rows.sort((a, b) => a.rank - b.rank);
+    const visible = rows.map(c => {
+      const dm = this.DM(c.decision), rev = this.REV(c.rev);
+      return {
+        rank: c.rank, name: c.name, role: c.role,
+        dLabel: dm.label, dColor: dm.c, dBg: dm.bg, dBorder: dm.b,
+        revLabel: rev.label, revColor: rev.c, revDot: rev.dot,
+        why: c.why, salary: c.salary, roLevel: c.roLevel,
+        askColor: this.askColor(c.askTier), askTier: this.askTierLabel(c.askTier),
+        askNoteColor: c.mismatch ? '#9E3B28' : 'rgba(22,35,53,0.6)',
+        flag: c.flag, next: c.next,
+        rowBg: c.id === st.activeId ? 'rgba(231,68,36,0.03)' : 'transparent',
+        open: () => this.openCandidate(c.id),
+      };
+    });
+
+    const chipDefs = [
+      { key: 'all', label: 'All', count: all.filter(c => c.decision !== 'cut').length },
+      { key: 'interview', label: 'Interview', count: nInterview },
+      { key: 'short', label: 'Short screen', count: nShort },
+      { key: 'verify', label: 'Verify', count: nVerify },
+      { key: 'hold', label: 'Hold', count: nHold + nBlocked },
+    ];
+    const chips = chipDefs.map(c => ({
+      label: c.label, count: c.count, onClick: () => this.setState({ filter: c.key }),
+      color: st.filter === c.key ? '#162335' : 'rgba(22,35,53,0.5)',
+      underline: st.filter === c.key ? '#E74424' : 'transparent',
+    }));
+
+    // ===== CANDIDATE PAGE =====
+    const dmA = this.DM(active.decision), revA = this.REV(active.rev);
+    const aShowDeep = ['interview', 'short', 'verify'].includes(active.decision) || !!st.deep[active.id];
+    const srcParts = ['Résumé'];
+    if (active.cover && active.cover.hasLetter) srcParts.push('Cover letter');
+    if (active.answers && active.answers.length) srcParts.push('Application answers');
+    srcParts.push('Salary / logistics');
+    if (active.fireflies && active.fireflies.length) srcParts.push('Fireflies');
+    const aSources = srcParts.join(' · ');
+    const readRows = [
+      { label: 'Decision', value: dmA.label, labelColor: dmA.c },
+      { label: 'Why', value: active.why, labelColor: 'rgba(22,35,53,0.45)' },
+      { label: 'Main risk', value: active.flag, labelColor: '#9E3B28' },
+      { label: 'Next action', value: active.next, labelColor: 'rgba(22,35,53,0.45)' },
+      { label: 'Sources', value: aSources, labelColor: 'rgba(22,35,53,0.45)' },
+    ];
+    const revBrick = ['conallConcern', 'laraConcern', 'laraNo'].includes(active.rev);
+    const revOrange = ['mixed', 'second'].includes(active.rev);
+
+    // timeline rows
+    const tlEditing = st.tlEditing;
+    const effTimeline = st.ovr[active.id] || active.timeline || [];
+    const timelineRows = effTimeline.map((r, idx) => {
+      const sc = this.SIG(r.signal);
+      const isEdu = r.type === 'edu', isGap = r.type === 'gap', isCert = r.type === 'cert';
+      return {
+        idx,
+        period: r.period || '', org: r.org || '', role: r.role || '', tenure: r.tenure || '', scope: r.scope || '', lang: r.lang || '—',
+        signal: r.signal, sigColor: sc.c, sigBg: sc.bg,
+        bg: (isGap || r.signal === 'Gap' || r.signal === 'Switched' || r.signal === 'Inflated') ? 'rgba(158,59,40,0.03)' : (isEdu || isCert ? 'rgba(22,35,53,0.02)' : 'transparent'),
+        periodColor: isGap ? '#9E3B28' : 'rgba(22,35,53,0.7)',
+        orgColor: isEdu || isCert ? 'rgba(22,35,53,0.65)' : '#162335',
+        orgStyle: isEdu || isCert ? 'italic' : 'normal',
+        orgFont: isEdu || isCert ? "'Tiempos Headline',Georgia,serif" : "'National 2',sans-serif",
+        langColor: (r.lang && r.lang.indexOf('inflated') >= 0) ? '#9E3B28' : 'rgba(22,35,53,0.7)',
+        ro: !tlEditing, bb: tlEditing ? 'rgba(22,35,53,0.20)' : 'transparent',
+        onPeriod: (e) => this.editCell(active.id, idx, 'period', e.target.value),
+        onOrg: (e) => this.editCell(active.id, idx, 'org', e.target.value),
+        onRole: (e) => this.editCell(active.id, idx, 'role', e.target.value),
+        onTenure: (e) => this.editCell(active.id, idx, 'tenure', e.target.value),
+        onScope: (e) => this.editCell(active.id, idx, 'scope', e.target.value),
+        remove: () => this.removeRow(active.id, idx),
+      };
+    });
+    const tlOverridden = !!st.ovr[active.id];
+
+    // cover letter
+    const cover = active.cover || { hasLetter: false, lines: [] };
+    const reps = st.replies[active.id] || {};
+    const coverLines = (cover.lines || []).map(l => ({ t: l.t, hl: this.CM(l.kind).hl }));
+    let _ci = 0;
+    const coverComments = (cover.lines || []).filter(l => l.comment).map(l => {
+      const m = this.CM(l.kind); const key = 'cover-' + (_ci++);
+      return { label: m.label, color: m.color, note: l.comment, reply: reps[key] || '', onReply: (e) => this.setReply(active.id, key, e.target.value) };
+    });
+
+    // answers
+    const answerRows = (active.answers || []).map((qa, i) => {
+      const m = this.CM(qa.kind); const key = 'ans-' + i;
+      return { q: qa.q, a: qa.a, hl: m.hl, bar: m.color, hasComment: !!qa.comment, color: m.color, label: m.label, note: qa.comment || '', reply: reps[key] || '', onReply: (e) => this.setReply(active.id, key, e.target.value) };
+    });
+
+    // logistics
+    const log = active.logistics || {};
+    const logSignals = (log.signals || []).map(s => ({ mark: s.mark, t: s.t, color: s.mark === '+' ? '#162335' : '#9E3B28' }));
+
+    // red flags
+    const redFlags = active.redFlags || [];
+    const hasFlags = redFlags.length > 0;
+
+    const rean = active.reanalysis;
+    const activeDq = !!dq[active.id];
+
+    return {
+      isPool: st.view === 'pool', isCandidate: st.view === 'candidate',
+      openPool: this.openPool, openWorkable: this.openWorkable,
+      crumbPoolColor: st.view === 'pool' ? '#162335' : 'rgba(22,35,53,0.55)',
+      poolTitle: 'CDM pool', jobCode: 'RDI-CDM-021',
+
+      stTotal: total, stCut: nCut, stWorth: nWorth, stDq: nDq, stCutRemaining: nCut - nDq,
+      healthState: 'Usable, not strong',
+      healthRead: 'Usable but not strong. One standout data file, one strong hybrid, no perfect IVD fit — clear the cut list first, then screen the top group and keep recruiting.',
+      counts, cutGroups, chips, visible,
+
+      // candidate identity
+      aName: active.name, aRole: active.role, aCompany: active.company, aRank: active.rank,
+      aDLabel: dmA.label, aDColor: dmA.c, aDBg: dmA.bg, aDBorder: dmA.b,
+      aRevLabel: revA.label, aRevColor: revA.c, aRevDot: revA.dot, aRevNote: active.revNote || '',
+      aRevBar: revBrick ? '#9E3B28' : (revOrange ? '#E74424' : 'rgba(22,35,53,0.3)'),
+      aRevBg: revBrick ? 'rgba(158,59,40,0.05)' : (revOrange ? 'rgba(231,68,36,0.05)' : 'rgba(22,35,53,0.03)'),
+
+      // disqualify text action (candidate page)
+      toggleActiveDq: () => this.toggleDq(active.id),
+      aDqLabel: activeDq ? 'Disqualified ✓' : 'Disqualify',
+      aDqColor: activeDq ? '#9E3B28' : 'rgba(22,35,53,0.55)',
+
+      // re-analysis
+      aHasReanalysis: !!rean, aReanReviewer: rean ? rean.reviewer : '', aReanBefore: rean ? rean.before : '',
+      aReanAfter: rean ? rean.after : '', aReanRec: rean ? rean.rec : '',
+
+      // compare strip
+      aSalary: active.salary, aAskTier: this.askTierLabel(active.askTier), aAskNote: active.askNote || '',
+      aAskColor: this.askColor(active.askTier),
+      aRoLevel: active.roLevel, aRoVsPool: active.roVsPool || '',
+      aMismatchLabel: active.mismatchLabel || (active.mismatch ? 'Ask / level mismatch' : 'Ask / level fit'),
+      aMismatchLabelColor: active.mismatch ? '#9E3B28' : '#162335',
+      aMismatchBg: active.mismatch ? 'rgba(158,59,40,0.05)' : 'rgba(22,35,53,0.02)',
+      aMismatchRead: active.mismatchRead || '',
+
+      timelineRows,
+
+      // cover
+      aHasCover: cover.hasLetter, aNoCover: !cover.hasLetter, coverLines, coverComments,
+      // answers
+      answerRows,
+      // logistics
+      aLogMode: log.mode || '', aLogLikelihood: log.likelihood || '—', aLogColor: this.logColor(log.likelihood),
+      aLogLocation: log.location || '—', aLogDistance: log.distance || '—', aLogRead: log.read || '', aLogSignals: logSignals,
+      // red flags
+      aHasFlags: hasFlags, aFlagCount: redFlags.length, aRedFlags: redFlags,
+
+      // short decision read + deep gating
+      readRows, aSources,
+      aShowDeep, aHideDeep: !aShowDeep, runDeep: () => this.runDeep(active.id), aDLabelLower: dmA.label.toLowerCase(),
+
+      // workable deeplinks
+      openJobWorkable: this.openJobWorkable, jobUrl: this.jobUrl(), aWorkableUrl: this.candUrl(active.id),
+
+      // bulk disqualify
+      bulkDq: this.bulkDq, bulkLabel: (nCut - nDq) > 0 ? 'Disqualify all open' : 'Undo — restore all',
+      bulkBg: (nCut - nDq) > 0 ? 'transparent' : '#9E3B28', bulkColor: (nCut - nDq) > 0 ? '#9E3B28' : '#fff',
+
+      // editable timeline
+      tlEditing: st.tlEditing, toggleTlEdit: this.toggleTlEdit,
+      tlEditLabel: st.tlEditing ? 'Done editing' : (tlOverridden ? 'Edit timeline · edited' : 'Edit timeline'),
+      tlEditColor: st.tlEditing ? '#E74424' : (tlOverridden ? '#E74424' : 'rgba(22,35,53,0.5)'),
+      addRole: () => this.addRow(active.id, 'role'), addGap: () => this.addRow(active.id, 'gap'), addCert: () => this.addRow(active.id, 'cert'),
+
+      // interview summary
+      aHasInterview: !!active.interview, aIntTitle: active.interview ? active.interview.title : '',
+      aIntFit: active.interview ? active.interview.fit : '',
+      aIntPoints: active.interview ? active.interview.points.map(p => ({ mark: p.mark, t: p.t, color: p.mark === '+' ? '#162335' : '#9E3B28' })) : [],
+      aTranscript: st.tdraft, onTranscript: this.onTdraft, saveTranscript: this.saveTranscript,
+      aTranscriptSaved: !!st.transcripts[active.id] && st.transcripts[active.id] === st.tdraft && (st.tdraft || '').length > 0,
+      aTranscriptLabel: st.transcripts[active.id] ? 'Transcript on file — edit or append' : 'No transcript yet — paste or pull from Fireflies',
+      aFireflies: (active.fireflies || []).map(f => ({ title: f.title, date: f.date, dur: f.dur, pull: this.pullFireflies(f), pullLabel: (st.transcripts[active.id] === f.transcript ? 'Pulled ✓' : 'Pull in'), pullColor: (st.transcripts[active.id] === f.transcript ? '#E74424' : '#162335') })),
+      aHasFireflies: (active.fireflies || []).length > 0, aFfEmpty: (active.fireflies || []).length === 0,
+      aFfStatus: (active.fireflies || []).length > 0 ? ((active.fireflies.length) + ' recording' + (active.fireflies.length > 1 ? 's' : '') + ' matched') : 'Watching for new meetings',
+
+      // working file
+      aWorkingFileName: active.id + '.md',
+      aCorrLog: (st.corrections[active.id] || []).slice().reverse(),
+      aHasCorrections: (st.corrections[active.id] || []).length > 0,
+      aNoCorrections: (st.corrections[active.id] || []).length === 0,
+      aCorrCount: (st.corrections[active.id] || []).length,
+      corrDraft: st.corrDraft, onCorrDraft: this.onCorrDraft, addCorrection: this.addCorrection, downloadMd: this.downloadMd,
+    };
+  }
+
+  askTierLabel(t) {
+    return { top: 'Top-tier ask', high: 'High ask', mid: 'Mid-range ask', value: 'Value ask', below: 'Below-median ask' }[t] || 'Mid-range ask';
+  }
+}
+</script>
+</body>
+</html>
