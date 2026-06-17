@@ -17,8 +17,9 @@ import type {
   VerificationPayload,
 } from "../types";
 import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
-import { mapCandidate, type ApplicationLite, type CandidateEvaluations } from "./from-supabase";
+import { mapCandidate, type ApplicationLite, type CandidateEvaluations, type ParsedExperienceEntry } from "./from-supabase";
 import { getWorkingFiles } from "./store";
+import type { Decision } from "./types";
 
 export const DEFAULT_JOB_SHORTCODE = "379AA16E8F"; // Clinical Data Manager — Data Integrity & Investigation
 
@@ -206,6 +207,90 @@ export async function loadOneCandidate(candidateId: string): Promise<OneCandidat
     workableUrl: candidateView.workableUrl,
     jobShortcode,
   };
+}
+
+/** A compact, decision-vocabulary-safe summary of one pool candidate. */
+export interface RosterEntry {
+  id: string;
+  name: string;
+  role: string;
+  company: string;
+  decision: Decision;
+  experience: string;
+  roLevel: string;
+  why: string;
+}
+
+/**
+ * Load a lightweight roster of EVERY candidate in a job's pool so the war-room
+ * chat can be aware of the rest of the pool (and Claude can then pull a fuller
+ * record on demand). Reuses the board + mapCandidate so each entry's decision is
+ * exactly what the board shows, but fetches only what the compact view needs
+ * (no résumé text / cover letters / transcripts) and skips the Workable
+ * job-metadata round-trips that loadTriagePool does. Returns [] when Supabase is
+ * not configured or the pool is empty. Optionally excludes one candidate id.
+ */
+export async function loadPoolRoster(jobShortcode: string, excludeId?: string): Promise<RosterEntry[]> {
+  if (!hasSupabase()) return [];
+  const board = await getBoardFromSupabase(jobShortcode);
+  if (!board?.length) return [];
+
+  const ids = board.map((b) => b.candidate.workable_id);
+  const supabase = getServiceSupabase();
+
+  const [appsRes, evalRes, workingFiles] = await Promise.all([
+    supabase.from("applications").select("candidate_id, parsed_experience").in("candidate_id", ids),
+    supabase.from("evaluations").select("candidate_id, kind, payload, created_at").in("candidate_id", ids),
+    getWorkingFiles(ids),
+  ]);
+
+  const appsByCandidate = new Map<string, ApplicationLite>();
+  for (const a of (appsRes.data ?? []) as Array<{ candidate_id: string; parsed_experience?: ParsedExperienceEntry[] | null }>) {
+    if (!appsByCandidate.has(a.candidate_id))
+      appsByCandidate.set(a.candidate_id, {
+        answers: null,
+        cover_letter: null,
+        parsed_experience: a.parsed_experience ?? null,
+      });
+  }
+
+  const evalsByCandidate = groupEvaluations((evalRes.data ?? []) as EvalRow[]);
+
+  const roster: RosterEntry[] = [];
+  for (const item of board) {
+    const id = item.candidate.workable_id;
+    if (excludeId && id === excludeId) continue;
+    const wf = workingFiles.get(id);
+    const read = (wf?.read as DecisionRead | null) ?? null;
+
+    const candidate = mapCandidate({
+      candidate: item.candidate,
+      score: item.score ?? null,
+      ro: item.ro ?? null,
+      overlay: item.overlay ?? null,
+      application: appsByCandidate.get(id) ?? null,
+      narrative: [],
+      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [] },
+      interviewEvidence: [],
+      read,
+      corrections: wf?.workspace?.corrections ?? [],
+      rank: 0,
+      jobLocation: "Van Nuys, CA",
+      jobShortcode,
+    });
+
+    roster.push({
+      id: candidate.id,
+      name: candidate.name,
+      role: candidate.role,
+      company: candidate.company,
+      decision: candidate.decision,
+      experience: candidate.experience,
+      roLevel: candidate.roLevel,
+      why: candidate.why,
+    });
+  }
+  return roster;
 }
 
 export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> {

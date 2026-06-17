@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
-import { loadOneCandidate } from "@/lib/triage/load";
+import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
@@ -502,12 +502,56 @@ export async function sendCandidateChat(input: {
   const materials = [baseMaterials, activityBlock].filter(Boolean).join("\n\n");
   const rubric = one ? await getJobRubric(one.jobShortcode) : { rubricMd: "", specMd: "" };
 
+  // Cross-candidate awareness: load a compact roster of every OTHER candidate in
+  // this job's pool, and give Claude a tool to pull any of their full records on
+  // demand (RAG-like, scoped to this pool). The same job pool is already fully
+  // visible to any authenticated user via the pool screen, so this adds no new
+  // exposure; the tool is hard-scoped to ids present in this roster.
+  const roster = one ? await loadPoolRoster(one.jobShortcode, one.candidate.id) : [];
+  const rosterText = roster
+    .map((r) => {
+      const head =
+        `- ${r.name} [id:${r.id}] — ${r.role}` +
+        (r.company && r.company !== "—" ? ` @ ${r.company}` : "") +
+        ` · ${DM(r.decision).label}` +
+        (r.experience && r.experience !== "—" ? ` · ${r.experience} exp` : "") +
+        (r.roLevel && r.roLevel !== "—" ? ` · RO ${r.roLevel}` : "");
+      return r.why ? `${head}\n  why: ${r.why}` : head;
+    })
+    .join("\n");
+
+  const rosterById = new Map(roster.map((r) => [r.id, r]));
+  const rosterByName = new Map(roster.map((r) => [r.name.toLowerCase(), r]));
+  const fetchOtherCandidate = async (
+    query: string,
+  ): Promise<{ name: string; content: string } | null> => {
+    const q = query.trim();
+    if (!q) return null;
+    const ql = q.toLowerCase();
+    const entry =
+      rosterById.get(q) ??
+      rosterByName.get(ql) ??
+      roster.find((r) => r.name.toLowerCase().includes(ql) || ql.includes(r.name.toLowerCase()));
+    if (!entry) return null;
+    const other = await loadOneCandidate(entry.id);
+    if (!other) return null;
+    const otherFile = renderWorkingFile(other.candidate, other.slice, {
+      workableUrl: other.workableUrl,
+      disqualified: other.disqualified,
+    });
+    const otherMaterials = renderCandidateMaterials(other.candidate);
+    const content = [otherFile, otherMaterials].filter(Boolean).join("\n\n");
+    return { name: other.candidate.name, content };
+  };
+
   const reply = await chatWithClaude({
     candidateName: one?.candidate.name,
     workingFile,
     materials,
     rubric: rubric.rubricMd,
     jobSpec: rubric.specMd,
+    roster: rosterText,
+    fetchOtherCandidate: roster.length ? fetchOtherCandidate : undefined,
     // Cap the turns we replay so a long thread can't blow the context window.
     history: withUser.slice(-24),
   });
