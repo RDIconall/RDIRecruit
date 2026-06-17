@@ -1,13 +1,12 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { APP, DECISION_LABEL, decisionColor, verdictDot } from "@/lib/triage/app-theme";
 import type { ActivityType, Candidate, TimelineRow, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
-import { getWorkingFileContent, saveJobRubric } from "@/app/actions/triage";
+import { getWorkingFileContent } from "@/app/actions/triage";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
@@ -46,8 +45,7 @@ function reviewedList(c: Candidate, activityCount: number): string[] {
 // ---------------------------------- component ----------------------------------
 
 export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
-  const { findCandidate, meta, rubricMd, specMd } = useTriageData();
-  const router = useRouter();
+  const { findCandidate } = useTriageData();
   const ws = wsApi.ws;
   const id = activeId;
   const narrow = useIsNarrow();
@@ -56,10 +54,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   const [chatDraft, setChatDraft] = useState("");
   const [actType, setActType] = useState<ActivityType>("note");
   const [actDraft, setActDraft] = useState("");
-  const [open, setOpen] = useState<Record<string, boolean>>({ rubric: false });
-  const [rubricDraft, setRubricDraft] = useState(rubricMd);
-  const [specDraft, setSpecDraft] = useState(specMd);
-  const [rubricSaving, setRubricSaving] = useState(false);
 
   useEffect(() => {
     setChatDraft("");
@@ -67,11 +61,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
     setActType("note");
     window.scrollTo(0, 0);
   }, [id]);
-
-  useEffect(() => {
-    setRubricDraft(rubricMd);
-    setSpecDraft(specMd);
-  }, [rubricMd, specMd]);
 
   if (!candidate) return null;
   const c = candidate;
@@ -129,19 +118,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
     if (t) {
       setActType("interview");
       setActDraft(t.transcript.trim());
-    }
-  };
-
-  const saveRubric = async (which: "rubric" | "spec") => {
-    setRubricSaving(true);
-    try {
-      await saveJobRubric({
-        jobShortcode: meta.jobShortcode,
-        ...(which === "rubric" ? { rubricMd: rubricDraft } : { specMd: specDraft }),
-      });
-      router.refresh();
-    } finally {
-      setRubricSaving(false);
     }
   };
 
@@ -545,42 +521,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         </button>
       </Section>
 
-      {/* rubric / spec editor */}
-      <Section
-        title="Job rubric & spec"
-        right={
-          <button onClick={() => setOpen((o) => ({ ...o, rubric: !o.rubric }))} style={mono({ cursor: "pointer", background: "transparent", border: "none", fontSize: 12, color: APP.muted })}>
-            {open.rubric ? "Hide ⌃" : "Edit ⌄"}
-          </button>
-        }
-      >
-        {open.rubric ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-            <div>
-              <div style={mono({ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: APP.faint, marginBottom: 6 })}>Grading rubric (markdown)</div>
-              <textarea value={rubricDraft} onChange={(e) => setRubricDraft(e.target.value)} rows={8} style={{ ...textareaStyle, fontFamily: APP.mono, fontSize: 12.5 }} />
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                <button onClick={() => saveRubric("rubric")} disabled={rubricSaving} style={primaryBtn(rubricSaving)}>
-                  {rubricSaving ? "Saving…" : "Save rubric"}
-                </button>
-              </div>
-            </div>
-            <div>
-              <div style={mono({ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.04em", color: APP.faint, marginBottom: 6 })}>Role spec (markdown)</div>
-              <textarea value={specDraft} onChange={(e) => setSpecDraft(e.target.value)} rows={8} style={{ ...textareaStyle, fontFamily: APP.mono, fontSize: 12.5 }} />
-              <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-                <button onClick={() => saveRubric("spec")} disabled={rubricSaving} style={primaryBtn(rubricSaving)}>
-                  {rubricSaving ? "Saving…" : "Save spec"}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          <p style={{ margin: 0, fontSize: 13.5, color: APP.muted }}>
-            {rubricMd || specMd ? "Rubric and spec on file — Claude grades each candidate against these. Click Edit to change." : "No rubric or spec on file yet. Click Edit to add the grading rubric and role spec Claude should use."}
-          </p>
-        )}
-      </Section>
     </div>
   );
 }
