@@ -17,9 +17,33 @@ import { saveJobRubric } from "@/app/actions/triage";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 const ellipsis: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
+// every grid cell needs min-width:0 so nowrap text truncates instead of
+// overflowing into the next column (CSS grid items default to min-width:auto).
+const cell: CSSProperties = { minWidth: 0, overflow: "hidden" };
 
 const COLS =
-  "26px 34px minmax(140px,1.2fr) minmax(100px,0.9fr) 90px 48px 70px 88px 106px 64px 170px";
+  "26px 34px minmax(150px,1.6fr) minmax(110px,1.1fr) minmax(82px,0.9fr) 46px 92px minmax(98px,0.9fr) minmax(98px,0.9fr) 78px 158px";
+
+/**
+ * Compacts a raw salary ask into a tight column-friendly form:
+ * "$145,000-$160,000" → "$145–160k", "$130K" → "$130k", "$70,000" → "$70k".
+ * Falls back to the raw string (truncated by the cell) when it can't parse.
+ */
+function compactAsk(raw: string | null | undefined): string {
+  if (!raw) return "—";
+  if (/[mb]/i.test(raw)) return raw; // leave millions/billions untouched
+  const nums = raw.match(/\d[\d,]*/g);
+  if (!nums) return raw;
+  const toK = (s: string): number | null => {
+    const n = parseInt(s.replace(/,/g, ""), 10);
+    if (!Number.isFinite(n)) return null;
+    return n >= 1000 ? Math.round(n / 1000) : n;
+  };
+  const vals = nums.map(toK).filter((n): n is number => n != null);
+  if (vals.length === 0) return raw;
+  if (vals.length >= 2) return `$${vals[0]}–${vals[1]}k`;
+  return `$${vals[0]}k`;
+}
 
 interface Props {
   wsApi: WorkspaceApi;
@@ -114,13 +138,14 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
 
       {!narrow ? (
         <div style={{ marginTop: 14, overflowX: "auto" }}>
-          <div style={{ minWidth: 1000 }}>
+          <div style={{ minWidth: 980 }}>
             {/* header */}
             <div
               style={mono({
                 display: "grid",
                 gridTemplateColumns: COLS,
                 alignItems: "end",
+                columnGap: 10,
                 padding: "0 6px 7px",
                 borderBottom: `1px solid ${APP.ink}`,
                 fontSize: 10.5,
@@ -133,13 +158,13 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
                 <Check checked={allSelected} onClick={toggleAll} />
               </div>
               <div />
-              <div>Candidate</div>
-              <div>Company</div>
-              <div>Location</div>
+              <div style={ellipsis}>Candidate</div>
+              <div style={ellipsis}>Company</div>
+              <div style={ellipsis}>Location</div>
               <div style={{ textAlign: "right" }}>Exp.</div>
-              <div style={{ textAlign: "right", paddingRight: 14 }}>Ask</div>
-              <div style={{ paddingLeft: 14 }}>Answers</div>
-              <div>Vs. spec</div>
+              <div style={{ textAlign: "right" }}>Ask</div>
+              <div style={ellipsis}>Answers</div>
+              <div style={ellipsis}>Vs. spec</div>
               <div style={{ textAlign: "right" }}>RO</div>
               <div style={{ textAlign: "right" }}>Actions</div>
             </div>
@@ -496,6 +521,7 @@ function Row({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected
         display: "grid",
         gridTemplateColumns: COLS,
         alignItems: "center",
+        columnGap: 10,
         padding: "6px 6px",
         borderBottom: `1px solid ${APP.line}`,
         cursor: "pointer",
@@ -506,21 +532,21 @@ function Row({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected
         <Check checked={selected} onClick={onToggle} />
       </div>
       <Avatar c={c} />
-      <div style={{ minWidth: 0, paddingRight: 12 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, ...ellipsis }}>{c.name}</div>
-        <div style={{ fontSize: 11.5, color: APP.muted, lineHeight: 1.2, ...ellipsis }}>{c.role}</div>
+      <div style={cell}>
+        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, ...ellipsis }} title={c.name}>{c.name}</div>
+        <div style={{ fontSize: 11.5, color: APP.muted, lineHeight: 1.2, ...ellipsis }} title={c.role}>{c.role}</div>
       </div>
-      <div style={{ minWidth: 0, paddingRight: 12, fontSize: 13.5, color: APP.ink2, ...ellipsis }}>{c.company}</div>
-      <div style={{ paddingRight: 10, fontSize: 13, color: APP.secondary, ...ellipsis }}>{c.locationShort}</div>
-      <div style={mono({ textAlign: "right", fontSize: 13, color: APP.ink2, fontVariantNumeric: "tabular-nums" })}>{c.experience}</div>
-      <div style={mono({ textAlign: "right", paddingRight: 14, fontSize: 13, color: APP.ink, fontVariantNumeric: "tabular-nums" })}>{c.salary}</div>
-      <div style={{ paddingLeft: 14 }}>
+      <div style={{ ...cell, fontSize: 13.5, color: APP.ink2, ...ellipsis }} title={c.company}>{c.company}</div>
+      <div style={{ ...cell, fontSize: 13, color: APP.secondary, ...ellipsis }} title={c.locationShort}>{c.locationShort}</div>
+      <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink2, fontVariantNumeric: "tabular-nums", ...ellipsis })}>{c.experience}</div>
+      <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink, fontVariantNumeric: "tabular-nums", ...ellipsis })} title={c.salary}>{compactAsk(c.salary)}</div>
+      <div style={cell}>
         <Dot read={c.answersRead} />
       </div>
-      <div>
+      <div style={cell}>
         <Dot read={c.specRead} />
       </div>
-      <div style={mono({ textAlign: "right", fontSize: 13, color: APP.ink, whiteSpace: "nowrap" })}>{c.roLevel}</div>
+      <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink, ...ellipsis })} title={c.roLevel}>{c.roLevel}</div>
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 9 }}>
         <a
           href={c.workableUrl}
@@ -553,7 +579,7 @@ function MobileRow({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; se
         <div style={mono({ fontSize: 13, color: APP.ink, flexShrink: 0 })}>{c.roLevel}</div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", paddingLeft: 42, fontSize: 12.5, color: APP.secondary }}>
-        <span style={mono({ color: APP.ink })}>{c.salary}</span>
+        <span style={mono({ color: APP.ink })} title={c.salary}>{compactAsk(c.salary)}</span>
         <span>{c.locationShort}</span>
         <Dot read={c.answersRead} />
         <Dot read={c.specRead} />

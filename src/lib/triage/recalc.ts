@@ -1,9 +1,14 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { env, hasAnthropic } from "../env";
-import type { CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit } from "./types";
+import { computeCommute } from "./commute";
+import type { AssessmentNarrative, CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit } from "./types";
 
 const MODEL = "claude-sonnet-4-6";
+
+// The RDI office candidates commute to (configurable via env, single source).
+// Used to ground Claude's fallback commute estimate.
+const OFFICE = `RDI's office in ${env.RDI_OFFICE_ADDRESS}`;
 
 const VALID_DECISIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
 
@@ -39,9 +44,15 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
     "summary": "2-3 sentences on how this candidate maps to the rubric's categories and gates, and the decisive reason they are (or are not) a good fit for THIS role",
     "strengths": ["specific rubric-aligned strengths, grounded in the materials"],
     "gaps": ["specific rubric gaps, missing evidence, or hard-gate concerns"]
+  },
+  "assessment": {
+    "bio": "A COMPLETE written biography in flowing prose (2-4 short paragraphs, separated by a blank line). Tell their story end to end: where they went to school and what they studied (include GPA only if it is actually stated in the materials), early roles, any graduate study, then the progression of roles with the organizations and how long at each, what kind of career track this is typical of, and finally — based on their most recent/most senior position — their single biggest accomplishment and the capability level (RO stratum) that accomplishment indicates. Write it the way a sharp recruiter briefs a hiring partner: specific, grounded in the résumé, no filler, no numeric scores. Never invent facts that are not in the materials; if something (like GPA or a degree) is not stated, simply omit it rather than guessing.",
+    "application": "A summary of the application reviewed AGAINST THE SPEC, in 1-2 short paragraphs. Cover: the candidate's stated/target salary and whether it fits; the quality of their answers to the application questions (well thought out and detailed vs thin), how strongly the answers are backed by the experience and education on their résumé, and your read on how likely the answers are AI-generated (low/medium/high signs of AI use, with the tell); whether the cover letter is well written and shows genuine research into the role; and whether the writing STYLE is consistent across the résumé, cover letter, and application answers (consistency is a positive authenticity signal; a sharp mismatch is a flag).",
+    "commute": "One or two sentences: state where the candidate currently lives, then estimate the typical driving commute time (in minutes) from there to ${OFFICE}. Use your geographic knowledge to give a realistic door-to-door drive-time estimate (e.g. 'about 25-35 minutes in normal traffic'). If the location is far (another state/country) say so plainly and note relocation would be required. If no location is on file, say it is not stated and must be confirmed."
   }
 }
 The "careerRead" object is optional context — include it when you have enough to say something real, otherwise omit it entirely.
+The "assessment" object MUST ALWAYS be included — it is the written candidate brief the recruiter reads. Ground every claim in the supplied materials (résumé, cover letter, answers, transcript). Prose only, never a numeric score.
 The "rubricFit" object MUST be included ONLY when a JOB RUBRIC is provided below; judge the candidate strictly against that rubric's categories, hard gates, and pattern-recognition guidance. Translate the rubric's point bands into the words-only verdict — NEVER output the numeric score itself. If no rubric is provided, omit "rubricFit" entirely.`;
 
 function buildUserPrompt(input: RecalcInput): string {
@@ -80,6 +91,10 @@ function buildUserPrompt(input: RecalcInput): string {
     ? `\n\nROLE SPEC (what this job actually is):\n"""\n${input.jobSpec!.trim().slice(0, 3000)}\n"""`
     : "";
 
+  const materialsBlock = (input.materials || "").trim()
+    ? `\n\nVERBATIM SOURCE MATERIALS (the candidate's own words — quote/ground the bio, AI-use read, and writing-consistency read in these):\n"""\n${input.materials!.trim().slice(0, 18000)}\n"""`
+    : "";
+
   return `${reviewerLine}STORED WORKING FILE (.md — this candidate's living case file):
 """
 ${(workingFile || "(empty)").slice(0, 8000)}
@@ -89,6 +104,7 @@ CANDIDATE: ${candidate.name}
 Current role on file: ${candidate.role} at ${candidate.company}
 Salary ask: ${candidate.salary}
 RO capability (level label, NOT a score): ${candidate.roLevel}
+Lives in: ${candidate.logistics.location || "not stated"} (office to commute to: ${OFFICE})
 Logistics: ${candidate.logistics.location} — likelihood ${candidate.logistics.likelihood}
 
 PRIOR READ (to revise):
@@ -113,7 +129,7 @@ REVIEWER REPLIES TO PRIOR AI COMMENTS:
 ${repsText}
 
 INTERVIEW / SCREEN TRANSCRIPT (post-application — weight heavily when present):
-${(transcript || "none yet").slice(0, 24000)}${specBlock}${rubricBlock}
+${(transcript || "none yet").slice(0, 24000)}${materialsBlock}${specBlock}${rubricBlock}
 
 Re-derive the decision read now. If the human corrections or the transcript change the picture, change the decision accordingly. Remember: decision vocabulary only, never a number.`;
 }
@@ -131,6 +147,9 @@ export interface RecalcInput {
   rubric?: string;
   /** The role spec / job description (markdown), for additional grounding. */
   jobSpec?: string;
+  /** Verbatim source materials (cover letter, answers, résumé, transcripts) so
+   * Claude can ground the written bio, AI-use read, and writing-consistency read. */
+  materials?: string;
 }
 
 function parseCareerRead(value: unknown): CareerRead | undefined {
@@ -143,6 +162,17 @@ function parseCareerRead(value: unknown): CareerRead | undefined {
   const implication = str("implication");
   if (!path && !positive && !risk && !implication) return undefined;
   return { path, positive, risk, implication };
+}
+
+function parseAssessment(value: unknown): AssessmentNarrative | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string).trim() : "");
+  const bio = str("bio");
+  const application = str("application");
+  const commute = str("commute");
+  if (!bio && !application && !commute) return undefined;
+  return { bio, application, commute };
 }
 
 function parseRubricFit(value: unknown): RubricFit | undefined {
@@ -173,11 +203,11 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({
       model: MODEL,
-      // Headroom: the read now also carries careerRead + rubricFit (verdict,
-      // summary, strengths[], gaps[]). 1200 truncated the JSON mid-stream for
-      // rubric-graded candidates, which broke the parse and silently dropped
-      // the re-analysis. 3000 comfortably fits the full object.
-      max_tokens: 3000,
+      // Headroom: the read carries careerRead + rubricFit + the long-form written
+      // assessment (multi-paragraph bio, application summary, commute). The bio
+      // alone can run several hundred words, so give the JSON room to complete —
+      // a truncated response breaks the parse and silently drops the re-analysis.
+      max_tokens: 4500,
       system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: buildUserPrompt(input) }],
     });
@@ -193,6 +223,16 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       ? (parsed.decision as Decision)
       : input.candidate.decision;
 
+    const assessment = parseAssessment((parsed as Record<string, unknown>).assessment);
+
+    // Augment Claude's geographic commute estimate with a real door-to-door
+    // driving time when Geoapify is configured. Best-effort: on any failure we
+    // keep Claude's estimate. Only overrides when we actually have an assessment.
+    if (assessment) {
+      const measured = await computeCommute(input.candidate.logistics.location);
+      if (measured) assessment.commute = measured.text;
+    }
+
     return {
       decision,
       why: (parsed.why || input.candidate.why || "").trim(),
@@ -200,6 +240,7 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       next: (parsed.next || "").trim(),
       timelineNote: (parsed.timelineNote || "").trim() || undefined,
       careerRead: parseCareerRead((parsed as Record<string, unknown>).careerRead),
+      assessment,
       rubricFit: parseRubricFit((parsed as Record<string, unknown>).rubricFit),
       recalculatedAt: new Date().toISOString(),
       model: MODEL,

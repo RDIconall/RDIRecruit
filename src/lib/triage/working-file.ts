@@ -12,6 +12,18 @@ function nowStamp(): string {
   );
 }
 
+// Format an ISO timestamp the same en-US way as nowStamp(); falls back to the
+// raw string when it isn't a parseable date.
+function nowStampFrom(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return (
+    d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) +
+    " " +
+    d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  );
+}
+
 function effectiveTimeline(c: Candidate, slice: WorkspaceSlice): TimelineRow[] {
   return (slice.ovr ?? c.timeline ?? []).map((r) => ({ ...r }));
 }
@@ -44,6 +56,15 @@ export function renderWorkingFile(
     `- Decision: ${DM(c.decision).label}${opts.disqualified ? " (DISQUALIFIED)" : ""}\n` +
     `- Workable: ${opts.workableUrl}\n` +
     `- Last updated: ${nowStamp()}\n\n`;
+
+  if (c.assessment && (c.assessment.bio || c.assessment.application || c.assessment.commute)) {
+    s += "## AI assessment";
+    if (c.assessedAt) s += ` (generated ${nowStampFrom(c.assessedAt)})`;
+    s += "\n\n";
+    if (c.assessment.bio) s += `### Who they are\n\n${c.assessment.bio}\n\n`;
+    if (c.assessment.application) s += `### What the application says\n\n${c.assessment.application}\n\n`;
+    if (c.assessment.commute) s += `### Commute\n\n${c.assessment.commute}\n\n`;
+  }
 
   s += "## RO time progression\n\n| Period | Org/School | Role | Tenure | Scope | Signal |\n|---|---|---|---|---|---|\n";
   tl.forEach((r) => {

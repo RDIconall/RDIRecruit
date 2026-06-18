@@ -752,6 +752,8 @@ export function mapCandidate(input: MapInput): Candidate {
     resume: resumeFrom(input.application),
     careerProgression: careerProgressionFrom(ro),
     careerRead: careerReadFrom(input),
+    assessment: input.read?.assessment,
+    assessedAt: input.read?.assessment ? input.read?.recalculatedAt : undefined,
     rubricFit: input.read?.rubricFit,
     workableUrl: workableUrlFor(input.candidate, input.jobShortcode),
 

@@ -16,6 +16,13 @@ const envSchema = z.object({
   VIDEOASK_WEBHOOK_SECRET: z.string().optional(),
   CALENDLY_TOKEN: z.string().optional(),
   FIREFLIES_API_KEY: z.string().optional(),
+  // Geoapify (free tier: 3,000 credits/day, no card) — geocoding + driving-time
+  // for the candidate commute read. Optional: when unset we fall back to the
+  // Claude geographic estimate. https://www.geoapify.com/
+  GEOAPIFY_API_KEY: z.string().optional(),
+  // The office candidates commute to. Configurable so the address lives in one
+  // place; defaults to the RDI Van Nuys office.
+  RDI_OFFICE_ADDRESS: z.string().default("Van Nuys, CA, USA"),
 });
 
 export const env = envSchema.parse(process.env);
@@ -38,4 +45,8 @@ export function hasSupabase(): boolean {
 
 export function hasAnthropic(): boolean {
   return Boolean(env.ANTHROPIC_API_KEY);
+}
+
+export function hasGeoapify(): boolean {
+  return Boolean(env.GEOAPIFY_API_KEY);
 }

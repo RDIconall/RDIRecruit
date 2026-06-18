@@ -2,7 +2,7 @@
 
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { APP, DECISION_LABEL, decisionColor, verdictDot } from "@/lib/triage/app-theme";
-import type { ActivityType, Candidate, TimelineRow, VerdictRead } from "@/lib/triage/types";
+import type { ActivityType, Candidate, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -42,6 +42,113 @@ function reviewedList(c: Candidate, activityCount: number): string[] {
   return out;
 }
 
+/** Split a prose block into paragraphs on blank lines (Claude separates with \n\n). */
+function paras(text: string | undefined | null): string[] {
+  if (!text) return [];
+  return text
+    .split(/\n{2,}/)
+    .map((p) => p.replace(/[ \t]+\n/g, "\n").trim())
+    .filter(Boolean);
+}
+
+/** Format an ISO timestamp as a readable date + time; passes through non-dates. */
+function formatStamp(iso: string | undefined | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return (
+    d.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) +
+    " · " +
+    d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
+  );
+}
+
+interface RecordRow {
+  years: string;
+  org: string;
+  role: string;
+  tenure: string;
+  accomplishment: string;
+  ro: string;
+}
+
+interface ChartPoint {
+  label: string;
+  sub: string;
+  y: number;
+  kind: "edu" | "role";
+}
+
+/**
+ * Build the "record" table the spec asks for — year range, organization, role,
+ * tenure, biggest accomplishment, RO level — by merging the RO-derived career
+ * steps (tenure + stratum) with the parsed résumé roles (period + the standout
+ * accomplishment bullet). Degrades to résumé roles, then the narrative timeline.
+ */
+function buildRecord(c: Candidate): RecordRow[] {
+  const steps = c.careerProgression?.steps ?? [];
+  const roles = c.resume?.roles ?? [];
+
+  const matchRole = (company: string, role: string) => {
+    const cl = (company || "").toLowerCase();
+    const rl = (role || "").toLowerCase();
+    return (
+      roles.find(
+        (r) =>
+          r.company &&
+          cl &&
+          (r.company.toLowerCase().includes(cl.slice(0, 6)) || cl.includes(r.company.toLowerCase().slice(0, 6))),
+      ) ?? roles.find((r) => r.title && rl && r.title.toLowerCase().includes(rl.slice(0, 6)))
+    );
+  };
+  // Pick the most quantified / longest bullet as the "biggest accomplishment".
+  const topBullet = (bullets: string[]): string => {
+    if (!bullets.length) return "";
+    const scored = [...bullets].sort((a, b) => {
+      const num = (s: string) => (/[\d$%]/.test(s) ? 1 : 0);
+      return num(b) - num(a) || b.length - a.length;
+    });
+    return scored[0] ?? "";
+  };
+
+  if (steps.length) {
+    return steps.map((s) => {
+      const rr = matchRole(s.company, s.role);
+      const accomplishment = topBullet(rr?.bullets ?? []) || (s.verbs.length ? s.verbs.join(", ") : "—");
+      return {
+        years: rr?.period || "—",
+        org: s.company || "—",
+        role: s.role || rr?.title || "—",
+        tenure: s.tenure || "—",
+        accomplishment: accomplishment || "—",
+        ro: s.stratumRange || s.stratum || "—",
+      };
+    });
+  }
+
+  if (roles.length) {
+    return roles.map((r) => ({
+      years: r.period || "—",
+      org: r.company || "—",
+      role: r.title || "—",
+      tenure: "—",
+      accomplishment: topBullet(r.bullets) || "—",
+      ro: "—",
+    }));
+  }
+
+  return (c.timeline ?? [])
+    .filter((r) => r.type === "role" || r.type === "edu")
+    .map((r) => ({
+      years: r.period || "—",
+      org: r.org || "—",
+      role: r.role || "—",
+      tenure: r.tenure || "—",
+      accomplishment: r.scope || "—",
+      ro: "—",
+    }));
+}
+
 // ---------------------------------- component ----------------------------------
 
 export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
@@ -54,12 +161,35 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   const [chatDraft, setChatDraft] = useState("");
   const [actType, setActType] = useState<ActivityType>("note");
   const [actDraft, setActDraft] = useState("");
+  // Signed résumé file (Supabase storage) for the embedded PDF viewer.
+  const [resumeDoc, setResumeDoc] = useState<{ url: string; mime: string } | null>(null);
+  const [resumeState, setResumeState] = useState<"loading" | "ready" | "none">("loading");
 
   useEffect(() => {
     setChatDraft("");
     setActDraft("");
     setActType("note");
     window.scrollTo(0, 0);
+  }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setResumeDoc(null);
+    setResumeState("loading");
+    fetch(`/api/candidates/${id}/resume`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("no résumé"))))
+      .then((d: { url: string; mime: string }) => {
+        if (!cancelled) {
+          setResumeDoc(d);
+          setResumeState("ready");
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setResumeState("none");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   if (!candidate) return null;
@@ -74,15 +204,26 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   const busy = !!wsApi.busy[id];
   const regenAt = ws.regen[id];
 
-  const tl = wsApi.effTimeline(id).filter((r) => r.type === "role" || r.type === "edu");
   const steps = c.careerProgression?.steps ?? [];
+  const record = useMemo(() => buildRecord(c), [c]);
 
-  const chartPts = useMemo(() => {
-    if (!c.careerProgression?.hasData) return [] as { label: string; y: number }[];
-    return steps
-      .map((s) => ({ label: s.company || s.role || "", y: stratumToNum(s.stratum) }))
-      .filter((p): p is { label: string; y: number } => p.y != null);
-  }, [c.careerProgression?.hasData, steps]);
+  const chartPts = useMemo<ChartPoint[]>(() => {
+    if (!c.careerProgression?.hasData) return [];
+    const rolePts: ChartPoint[] = steps
+      .map((s): ChartPoint | null => {
+        const y = stratumToNum(s.stratum);
+        return y == null ? null : { label: s.company || s.role || "Role", sub: s.stratum, y, kind: "role" };
+      })
+      .filter((p): p is ChartPoint => p !== null);
+    if (!rolePts.length) return [];
+    // Prepend an education annotation so the line reads "school → first role → …".
+    const edu = (wsApi.effTimeline(id) ?? []).find((r) => r.type === "edu" && r.org && r.org !== "—");
+    if (edu) {
+      const baseY = Math.min(...rolePts.map((p) => p.y));
+      rolePts.unshift({ label: edu.org, sub: "Education", y: baseY, kind: "edu" });
+    }
+    return rolePts;
+  }, [c.careerProgression?.hasData, steps, id, wsApi]);
 
   const downloadMd = async () => {
     try {
@@ -128,7 +269,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
     { k: "Position", v: c.role },
     { k: "Company", v: c.company },
     { k: "Location", v: c.locationShort || c.logistics.location || "—" },
-    { k: "Commute", v: c.logistics.read || c.logistics.likelihood || "—" },
+    { k: "On-site likelihood", v: c.logistics.likelihood && c.logistics.likelihood !== "—" ? c.logistics.likelihood : "—" },
     { k: "Experience", v: c.experience },
     { k: "Salary ask", v: c.salary },
     { k: "RO level", v: c.roLevel },
@@ -138,16 +279,24 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   ];
 
   const reviewed = reviewedList(c, activity.length);
+  const hasAssessment = !!(c.assessment && (c.assessment.bio || c.assessment.application || c.assessment.commute));
 
-  // bio paragraphs
-  const bio: string[] = [];
-  if (c.careerRead?.path) bio.push(c.careerRead.path);
-  else if (c.why) bio.push(c.why);
-  if (c.careerRead?.positive) bio.push(c.careerRead.positive);
-  tl.filter((r) => r.scope && r.scope !== "—")
-    .slice(0, 5)
-    .forEach((r) => bio.push(`${r.org}${r.period ? ` · ${r.period}` : ""}. ${r.scope}`));
-  if (c.careerRead?.implication) bio.push(c.careerRead.implication);
+  // bio paragraphs — prefer Claude's full written biography; fall back to the
+  // composed career-read fragments only until the assessment has been generated.
+  const bio: string[] = c.assessment?.bio
+    ? paras(c.assessment.bio)
+    : (() => {
+        const out: string[] = [];
+        if (c.careerRead?.path) out.push(c.careerRead.path);
+        else if (c.why) out.push(c.why);
+        if (c.careerRead?.positive) out.push(c.careerRead.positive);
+        if (c.careerRead?.implication) out.push(c.careerRead.implication);
+        return out;
+      })();
+  const appParas = paras(c.assessment?.application);
+  const commuteText = c.assessment?.commute || c.logistics.read || c.logistics.likelihood || "";
+
+  const regenerate = () => wsApi.updateAssessment(id);
 
   return (
     <div style={wrap}>
@@ -238,9 +387,17 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
           <span style={mono({ fontSize: 11, color: "rgba(255,255,255,0.45)" })}>
-            Cached at ingest · saved to {id}.md{regenAt ? ` · updated ${regenAt}` : ""}
+            {c.assessedAt ? `Reviewed ${formatStamp(c.assessedAt)}` : "Cached at ingest"} · saved to {id}.md
+            {regenAt ? ` · updated ${regenAt}` : ""}
           </span>
           <span style={{ flex: 1 }} />
+          <button
+            onClick={regenerate}
+            disabled={busy}
+            style={mono({ cursor: busy ? "default" : "pointer", background: busy ? "rgba(255,255,255,0.12)" : "#fff", color: busy ? "rgba(255,255,255,0.6)" : APP.ink, border: "1px solid #fff", borderRadius: 5, padding: "5px 12px", fontSize: 12, fontWeight: 600 })}
+          >
+            {busy ? "Regenerating…" : hasAssessment ? "Regenerate assessment" : "Generate full assessment"}
+          </button>
           <button onClick={downloadMd} style={mono({ cursor: "pointer", background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 5, padding: "5px 12px", fontSize: 12 })}>
             Download .md
           </button>
@@ -260,27 +417,58 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
       {/* what the application says */}
       <Section title="What the application says">
-        {(c.careerRead?.positive || c.why) && (
-          <p style={{ margin: "0 0 14px", fontSize: 16, lineHeight: 1.6, color: APP.ink2 }}>{c.careerRead?.positive || c.why}</p>
+        {appParas.length > 0 ? (
+          appParas.map((p, i) => (
+            <p key={i} style={{ margin: "0 0 12px", fontSize: 16, lineHeight: 1.6, color: APP.ink2 }}>
+              {p}
+            </p>
+          ))
+        ) : (
+          (c.careerRead?.positive || c.why) && (
+            <p style={{ margin: "0 0 14px", fontSize: 16, lineHeight: 1.6, color: APP.ink2 }}>{c.careerRead?.positive || c.why}</p>
+          )
         )}
-        <FactLine k="Target salary" v={`${c.salary}${c.askNote ? ` — ${c.askNote}` : ""}`} />
-        <FactLine k="Answers" v={`${c.answersRead.label}${c.answers.length ? ` · graded from ${c.answers.length} ${c.answers.length === 1 ? "answer" : "answers"}` : ""}`} />
-        <FactLine k="Cover letter" v={c.cover.hasLetter ? `On file — ${c.cover.lines.length} ${c.cover.lines.length === 1 ? "paragraph" : "paragraphs"}` : "None submitted"} />
-        <FactLine k="Against the spec" v={c.specRead.label} />
-        {c.rubricFit?.summary && (
+        <div style={{ marginTop: 6 }}>
+          <FactLine k="Target salary" v={`${c.salary}${c.askNote ? ` — ${c.askNote}` : ""}`} />
+          <FactLine k="Answers" v={`${c.answersRead.label}${c.answers.length ? ` · graded from ${c.answers.length} ${c.answers.length === 1 ? "answer" : "answers"}` : ""}`} />
+          <FactLine k="Cover letter" v={c.cover.hasLetter ? `On file — ${c.cover.lines.length} ${c.cover.lines.length === 1 ? "paragraph" : "paragraphs"}` : "None submitted"} />
+          <FactLine k="Against the spec" v={c.specRead.label} />
+        </div>
+        {!appParas.length && c.rubricFit?.summary && (
           <p style={{ margin: "10px 0 0", fontSize: 14.5, lineHeight: 1.55, color: APP.secondary }}>{c.rubricFit.summary}</p>
         )}
-        <FactLine k="Commute" v={`${c.logistics.location || "—"}${c.logistics.likelihood && c.logistics.likelihood !== "—" ? ` · likelihood ${c.logistics.likelihood}` : ""}`} />
       </Section>
 
+      {/* commute */}
+      {commuteText && (
+        <Section title="Commute">
+          <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: APP.ink2 }}>{commuteText}</p>
+          <div style={{ marginTop: 10 }}>
+            <FactLine k="Lives in" v={c.logistics.location || c.locationShort || "—"} />
+            <FactLine k="Office" v="Van Nuys, CA" />
+            {c.logistics.likelihood && c.logistics.likelihood !== "—" && (
+              <FactLine k="On-site likelihood" v={c.logistics.likelihood} />
+            )}
+          </div>
+        </Section>
+      )}
+
       {/* the record */}
-      {tl.length > 0 && (
+      {record.length > 0 && (
         <Section title="The record">
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 560 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640, tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: "13%" }} />
+                <col style={{ width: "19%" }} />
+                <col style={{ width: "18%" }} />
+                <col style={{ width: "9%" }} />
+                <col style={{ width: "33%" }} />
+                <col style={{ width: "8%" }} />
+              </colgroup>
               <thead>
                 <tr style={mono({ fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", color: APP.faint })}>
-                  {["Years", "Org", "Role", "Tenure", "Biggest accomplishment", "RO"].map((h) => (
+                  {["Years", "Organization", "Role", "Tenure", "Biggest accomplishment", "RO"].map((h) => (
                     <th key={h} style={{ textAlign: "left", padding: "0 10px 7px 0", borderBottom: `1px solid ${APP.ink}`, fontWeight: 500 }}>
                       {h}
                     </th>
@@ -288,14 +476,14 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
                 </tr>
               </thead>
               <tbody>
-                {tl.map((r: TimelineRow, i) => (
-                  <tr key={i} style={{ borderBottom: `1px solid ${APP.line}` }}>
-                    <td style={cellMono}>{r.period || "—"}</td>
-                    <td style={cell}>{r.org || "—"}</td>
-                    <td style={cell}>{r.role || "—"}</td>
-                    <td style={cellMono}>{r.tenure || "—"}</td>
-                    <td style={{ ...cell, color: APP.secondary }}>{r.scope || "—"}</td>
-                    <td style={cellMono}>{steps[i]?.stratum || "—"}</td>
+                {record.map((r, i) => (
+                  <tr key={i} style={{ borderBottom: `1px solid ${APP.line}`, verticalAlign: "top" }}>
+                    <td style={{ ...cellMono, whiteSpace: "normal" }}>{r.years}</td>
+                    <td style={cell}>{r.org}</td>
+                    <td style={cell}>{r.role}</td>
+                    <td style={{ ...cellMono, whiteSpace: "normal" }}>{r.tenure}</td>
+                    <td style={{ ...cell, color: APP.secondary }}>{r.accomplishment}</td>
+                    <td style={cellMono}>{r.ro}</td>
                   </tr>
                 ))}
               </tbody>
@@ -314,14 +502,14 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         </Section>
       )}
 
-      {/* résumé + resync */}
+      {/* résumé — embedded as the candidate sent it, with parsed highlights below */}
       <Section
         title="Résumé"
         right={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {c.resume.fileUrl && (
-              <a href={c.resume.fileUrl} target="_blank" rel="noopener noreferrer" style={mono({ fontSize: 12, color: APP.accent, textDecoration: "none" })}>
-                Download ↗
+            {(resumeDoc?.url || c.resume.fileUrl) && (
+              <a href={resumeDoc?.url || c.resume.fileUrl} target="_blank" rel="noopener noreferrer" style={mono({ fontSize: 12, color: APP.accent, textDecoration: "none" })}>
+                Open ↗
               </a>
             )}
             <button
@@ -334,29 +522,57 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           </div>
         }
       >
-        {c.resume.hasResume && c.resume.roles.length > 0 ? (
-          c.resume.roles.map((role, i) => (
-            <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${APP.line}` }}>
-              <div style={{ fontSize: 14.5, fontWeight: 600 }}>
-                {role.title} <span style={{ color: APP.muted, fontWeight: 400 }}>— {role.company}</span>
-              </div>
-              <div style={mono({ fontSize: 12, color: APP.faint, margin: "2px 0 6px" })}>
-                {role.period}
-                {role.current ? " · current" : ""}
-              </div>
-              {role.bullets.slice(0, 6).map((b, j) => (
-                <div key={j} style={{ fontSize: 14, color: APP.ink2, lineHeight: 1.5, paddingLeft: 14, position: "relative" }}>
-                  <span style={{ position: "absolute", left: 0, color: APP.muted }}>·</span>
-                  {b}
-                </div>
-              ))}
-            </div>
-          ))
-        ) : c.resume.hasResume && c.resume.fullText ? (
-          <pre style={{ whiteSpace: "pre-wrap", fontFamily: APP.sans, fontSize: 14, lineHeight: 1.55, color: APP.ink2, margin: 0 }}>{c.resume.fullText.slice(0, 4000)}</pre>
-        ) : (
-          <p style={{ margin: 0, fontSize: 14, color: APP.muted }}>No résumé captured yet. Resync from Workable to pull it in.</p>
+        {/* the actual file, embedded */}
+        {resumeState === "loading" && (
+          <p style={mono({ margin: "0 0 14px", fontSize: 12.5, color: APP.muted })}>Loading résumé file…</p>
         )}
+        {resumeState === "ready" && resumeDoc && (
+          (resumeDoc.mime || "").includes("pdf") ? (
+            <iframe
+              src={`${resumeDoc.url}#view=FitH`}
+              title={`${c.name} résumé`}
+              style={{ width: "100%", height: narrow ? 460 : 720, border: `1px solid ${APP.hair}`, borderRadius: 8, background: "#fff", marginBottom: 16 }}
+            />
+          ) : (
+            <p style={{ margin: "0 0 14px", fontSize: 14, color: APP.ink2 }}>
+              Résumé on file as a non-PDF document —{" "}
+              <a href={resumeDoc.url} target="_blank" rel="noopener noreferrer" style={{ color: APP.accent }}>
+                open it in a new tab
+              </a>
+              .
+            </p>
+          )
+        )}
+
+        {/* parsed highlights (text) */}
+        {c.resume.hasResume && c.resume.roles.length > 0 ? (
+          <>
+            <div style={mono({ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: APP.faint, margin: "4px 0 8px" })}>
+              Parsed highlights
+            </div>
+            {c.resume.roles.map((role, i) => (
+              <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${APP.line}` }}>
+                <div style={{ fontSize: 14.5, fontWeight: 600 }}>
+                  {role.title} <span style={{ color: APP.muted, fontWeight: 400 }}>— {role.company}</span>
+                </div>
+                <div style={mono({ fontSize: 12, color: APP.faint, margin: "2px 0 6px" })}>
+                  {role.period}
+                  {role.current ? " · current" : ""}
+                </div>
+                {role.bullets.slice(0, 6).map((b, j) => (
+                  <div key={j} style={{ fontSize: 14, color: APP.ink2, lineHeight: 1.5, paddingLeft: 14, position: "relative" }}>
+                    <span style={{ position: "absolute", left: 0, color: APP.muted }}>·</span>
+                    {b}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </>
+        ) : resumeState === "none" && !c.resume.hasResume ? (
+          <p style={{ margin: 0, fontSize: 14, color: APP.muted }}>No résumé captured yet. Resync from Workable to pull it in.</p>
+        ) : !resumeDoc && c.resume.hasResume && c.resume.fullText ? (
+          <pre style={{ whiteSpace: "pre-wrap", fontFamily: APP.sans, fontSize: 14, lineHeight: 1.55, color: APP.ink2, margin: 0 }}>{c.resume.fullText.slice(0, 4000)}</pre>
+        ) : null}
       </Section>
 
       {/* cover letter */}
@@ -370,25 +586,61 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         </Section>
       )}
 
-      {/* application answers */}
+      {/* application answers — original order, Claude's comments alongside */}
       {c.answers.length > 0 && (
         <Section title="Application answers">
+          <p style={mono({ margin: "0 0 14px", fontSize: 12, color: APP.faint })}>
+            Shown in the order answered · Claude&apos;s notes in the margin
+          </p>
           {c.answers.map((a, i) => (
-            <div key={i} style={{ padding: "12px 0", borderBottom: `1px solid ${APP.line}` }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>{a.q || "Application question"}</div>
-              <p style={{ margin: "5px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2 }}>{a.a}</p>
-              {a.comment && (
-                <div style={mono({ marginTop: 7, fontSize: 12.5, color: APP.secondary, borderLeft: `2px solid ${APP.accentBorder}`, paddingLeft: 10 })}>
-                  Claude: {a.comment}
+            <div
+              key={i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: narrow ? "1fr" : "1fr 260px",
+                gap: narrow ? 8 : 22,
+                padding: "14px 0",
+                borderBottom: `1px solid ${APP.line}`,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>
+                  <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
+                  {a.q || "Application question"}
                 </div>
-              )}
+                <p style={{ margin: "6px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2, whiteSpace: "pre-wrap" }}>{a.a}</p>
+              </div>
+              <div style={{ minWidth: 0 }}>
+                {a.comment ? (
+                  <div
+                    style={mono({
+                      fontSize: 12.5,
+                      lineHeight: 1.5,
+                      color: APP.secondary,
+                      background: APP.accentSoft,
+                      border: `1px solid ${APP.accentBorder}`,
+                      borderRadius: 8,
+                      padding: "9px 11px",
+                    })}
+                  >
+                    <span style={{ color: APP.accent, fontWeight: 600 }}>Claude</span>
+                    <span style={{ display: "block", marginTop: 3 }}>{a.comment}</span>
+                  </div>
+                ) : (
+                  !narrow && <span style={mono({ fontSize: 11.5, color: APP.faint })}>No comment</span>
+                )}
+              </div>
             </div>
           ))}
         </Section>
       )}
 
-      {/* activity log */}
-      <Section title={`Activity log${activity.length ? ` · ${activity.length}` : ""}`}>
+      {/* add information — transcripts, Fireflies pulls, and comments (shared) */}
+      <Section title={`Add information & comments${activity.length ? ` · ${activity.length}` : ""}`}>
+        <p style={{ margin: "0 0 14px", fontSize: 13.5, lineHeight: 1.5, color: APP.muted }}>
+          Add an interview transcript (paste, or pull from Fireflies), or leave a comment. Everything here is stored on the
+          candidate and visible to the team — then regenerate to fold it into Claude&apos;s assessment.
+        </p>
         {activity.length > 0 ? (
           <div style={{ marginBottom: 16 }}>
             {activity.map((e) => (
@@ -441,7 +693,29 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         />
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
           <button onClick={addActivity} disabled={!actDraft.trim()} style={primaryBtn(!actDraft.trim())}>
-            Log {actType}
+            {actType === "interview" ? "Add transcript" : actType === "comment" ? "Add comment" : "Add note"}
+          </button>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${APP.line}`, flexWrap: "wrap" }}>
+          <span style={mono({ fontSize: 12, color: APP.muted })}>
+            Added new info? Regenerate Claude&apos;s assessment to fold it in.
+          </span>
+          <span style={{ flex: 1 }} />
+          <button
+            onClick={regenerate}
+            disabled={busy}
+            style={{
+              cursor: busy ? "default" : "pointer",
+              background: busy ? APP.hair : APP.ink,
+              color: busy ? APP.muted : "#fff",
+              border: "none",
+              borderRadius: 6,
+              padding: "8px 16px",
+              fontSize: 13.5,
+              fontWeight: 500,
+            }}
+          >
+            {busy ? "Regenerating…" : "Regenerate assessment"}
           </button>
         </div>
       </Section>
@@ -597,31 +871,67 @@ function FactLine({ k, v }: { k: string; v: string }) {
   );
 }
 
-function LevelChart({ pts }: { pts: { label: string; y: number }[] }) {
-  const W = 640;
-  const H = 150;
-  const padX = 30;
-  const padY = 22;
+function LevelChart({ pts }: { pts: ChartPoint[] }) {
+  const padX = 56;
+  const padTop = 26;
+  const plotH = 150;
+  // Width scales with the number of points so labels never crowd / clip.
+  const stepX = 132;
+  const W = Math.max(640, padX * 2 + (pts.length - 1) * stepX);
+  const labelH = 78; // room for rotated org/school labels
+  const H = padTop + plotH + labelH;
+
   const ys = pts.map((p) => p.y);
   const minY = Math.min(...ys);
   const maxY = Math.max(...ys, minY + 1);
-  const stepX = pts.length > 1 ? (W - padX * 2) / (pts.length - 1) : 0;
-  const xy = (i: number, y: number) => {
-    const x = padX + i * stepX;
-    const yy = H - padY - ((y - minY) / (maxY - minY)) * (H - padY * 2);
-    return { x, y: yy };
-  };
-  const path = pts.map((p, i) => { const { x, y } = xy(i, p.y); return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`; }).join(" ");
+  const step = pts.length > 1 ? (W - padX * 2) / (pts.length - 1) : 0;
+  const xy = (i: number, y: number) => ({
+    x: padX + i * step,
+    y: padTop + plotH - ((y - minY) / (maxY - minY)) * plotH,
+  });
+  const path = pts
+    .map((p, i) => {
+      const { x, y } = xy(i, p.y);
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+
+  const baselineY = padTop + plotH;
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto" }} role="img" aria-label="RO capability over time">
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", height: "auto", maxWidth: W }} role="img" aria-label="RO capability over time">
+      {/* baseline */}
+      <line x1={padX} y1={baselineY} x2={W - padX + 20} y2={baselineY} stroke={APP.line} strokeWidth={1} />
       <path d={path} fill="none" stroke={APP.accent} strokeWidth={2} />
       {pts.map((p, i) => {
         const { x, y } = xy(i, p.y);
+        const isEdu = p.kind === "edu";
         return (
           <g key={i}>
-            <circle cx={x} cy={y} r={3.5} fill={APP.accent} />
-            <text x={x} y={H - 5} textAnchor="middle" fontSize={9} fontFamily={APP.mono} fill={APP.faint}>
-              {p.label.length > 10 ? p.label.slice(0, 9) + "…" : p.label}
+            <line x1={x} y1={y} x2={x} y2={baselineY} stroke={APP.line2} strokeWidth={1} strokeDasharray="2 3" />
+            <circle
+              cx={x}
+              cy={y}
+              r={4}
+              fill={isEdu ? "#fff" : APP.accent}
+              stroke={APP.accent}
+              strokeWidth={isEdu ? 1.5 : 0}
+            />
+            {/* stratum label above the node */}
+            <text x={x} y={y - 9} textAnchor="middle" fontSize={10} fontWeight={600} fontFamily={APP.mono} fill={isEdu ? APP.faint : APP.ink}>
+              {p.sub}
+            </text>
+            {/* org / school label, rotated so long names are never clipped */}
+            <text
+              x={x}
+              y={baselineY + 12}
+              transform={`rotate(-28 ${x} ${baselineY + 12})`}
+              textAnchor="end"
+              fontSize={10}
+              fontFamily={APP.mono}
+              fill={isEdu ? APP.accent : APP.secondary}
+            >
+              {p.label.length > 24 ? p.label.slice(0, 23) + "…" : p.label}
             </text>
           </g>
         );

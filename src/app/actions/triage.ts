@@ -71,6 +71,8 @@ function applyRead(candidate: Candidate, read: DecisionRead): Candidate {
     redFlags: read.flags ?? candidate.redFlags,
     reanalysis: read.reanalysis ?? candidate.reanalysis,
     careerRead: read.careerRead ?? candidate.careerRead,
+    assessment: read.assessment ?? candidate.assessment,
+    assessedAt: read.assessment ? read.recalculatedAt ?? candidate.assessedAt : candidate.assessedAt,
     rubricFit: read.rubricFit ?? candidate.rubricFit,
   };
 }
@@ -118,6 +120,7 @@ async function persistAndMaybeRecalc(
     read = await recalculateRead({
       candidate,
       workingFile: baseContent,
+      materials: renderCandidateMaterials(candidate),
       corrections: one.slice.corrections ?? [],
       transcript: one.slice.transcript ?? "",
       replies: one.slice.replies ?? {},
@@ -420,6 +423,7 @@ export async function updateAssessment(input: {
   let read = await recalculateRead({
     candidate: one.candidate,
     workingFile: baseContent,
+    materials: renderCandidateMaterials(one.candidate),
     corrections,
     transcript: combinedTranscript,
     replies: one.slice.replies ?? {},

@@ -79,6 +79,22 @@ export interface CareerRead {
   implication: string; // decision implication
 }
 
+// The long-form written assessment Claude composes for the candidate page — the
+// narrative the dossier renders verbatim (no truncation). All prose, never a
+// score. Persisted on the read + rendered into the .md working file so it is the
+// candidate's saved AI assessment.
+export interface AssessmentNarrative {
+  // Complete written bio: schooling (+ GPA if listed), early roles, graduate
+  // study, progressive roles, what the track is typical of, and the standout
+  // accomplishment + the level it implies. Multiple paragraphs (split on blank lines).
+  bio: string;
+  // Application summary vs the spec: target salary, answer quality + AI-use read,
+  // cover-letter quality, and writing-style consistency across the materials.
+  application: string;
+  // Commute read: where they live and the estimated drive time to the RDI office.
+  commute: string;
+}
+
 // Claude's read of the candidate against the job's grading rubric. Words only —
 // never a numeric score (the rubric's points are summarized as a verdict label).
 export interface RubricFit {
@@ -242,6 +258,12 @@ export interface Candidate {
   // Career-read prose (deep analysis). Present only when dig_in data supports it.
   careerRead?: CareerRead;
 
+  // Long-form written assessment (bio / application summary / commute) — present
+  // once Claude has generated it (Update assessment). Renders verbatim on the page.
+  assessment?: AssessmentNarrative;
+  // When the pinned assessment was last generated/refreshed by Claude (ISO).
+  assessedAt?: string;
+
   // Claude's read of this candidate against the job rubric (#rubric-fit).
   rubricFit?: RubricFit;
 
@@ -338,6 +360,8 @@ export interface DecisionRead {
   revNote?: string;
   // Career-read prose, optionally filled/refined by Claude (#6).
   careerRead?: CareerRead;
+  // Long-form written assessment (bio / application summary / commute).
+  assessment?: AssessmentNarrative;
   // Rubric-fit read, filled by Claude when a job rubric is available.
   rubricFit?: RubricFit;
   recalculatedAt?: string;
