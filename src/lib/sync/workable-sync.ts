@@ -46,6 +46,10 @@ export interface UpsertCandidateResult {
   isNew: boolean;
   /** True when first-time résumé ingest runs — does not imply rescore on later Workable updates. */
   applicationIngested: boolean;
+  /** True when a résumé ingest was attempted (file present + first-ingest conditions met). */
+  resumeIngestAttempted: boolean;
+  /** Populated when an attempted résumé ingest threw — surfaced instead of silently swallowed. */
+  resumeError: string | null;
   metadataUpdated: boolean;
   commentsSynced: number;
   skipped: boolean;
@@ -95,6 +99,8 @@ export async function upsertCandidateFromWorkable(
     candidateId: candidate.id,
     isNew: false,
     applicationIngested: false,
+    resumeIngestAttempted: false,
+    resumeError: null,
     metadataUpdated: false,
     commentsSynced: 0,
     skipped: false,
@@ -183,7 +189,8 @@ export async function upsertCandidateFromWorkable(
   const shouldIngestResume =
     options?.analyze !== false && needsFirstIngest;
 
-  if (shouldIngestResume) {
+  if (shouldIngestResume && candidate.resume_url) {
+    result.resumeIngestAttempted = true;
     try {
       const { ingestResumeForCandidate } = await import("../resume/ingest");
       await ingestResumeForCandidate({
@@ -197,6 +204,9 @@ export async function upsertCandidateFromWorkable(
       });
       result.applicationIngested = true;
     } catch (error) {
+      // Do NOT silently swallow: record the reason so callers (resync, backfill,
+      // readiness repair) can surface a real failure instead of a false success.
+      result.resumeError = error instanceof Error ? error.message : String(error);
       console.error(`Resume ingest failed for ${candidate.id}`, error);
     }
   }

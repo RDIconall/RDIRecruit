@@ -8,9 +8,24 @@ export async function extractTextFromResume(
   const ext = extension.toLowerCase();
 
   if (mime.includes("pdf") || ext === "pdf") {
-    const pdfParse = (await import("pdf-parse")).default;
-    const result = await pdfParse(buffer);
-    return normalizeText(result.text ?? "");
+    // pdf-parse v2 removed the v1 default-export function in favour of a
+    // PDFParse class. The constructor accepts binary data (we pass a Uint8Array)
+    // and getText() returns the concatenated document text. A minimal local type
+    // keeps this resilient to the package's re-export typing chain.
+    type PdfParseModule = {
+      PDFParse: new (opts: { data: Uint8Array }) => {
+        getText(): Promise<{ text?: string }>;
+        destroy(): Promise<void>;
+      };
+    };
+    const { PDFParse } = (await import("pdf-parse")) as unknown as PdfParseModule;
+    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    try {
+      const result = await parser.getText();
+      return normalizeText(result.text ?? "");
+    } finally {
+      await parser.destroy();
+    }
   }
 
   if (
