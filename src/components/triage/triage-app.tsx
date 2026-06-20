@@ -119,6 +119,14 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             RDIRecruit
           </div>
           <div style={{ width: 1, height: 18, background: APP.hair }} />
+          <a
+            href="/radar"
+            style={{ fontSize: 13, color: APP.secondary, textDecoration: "none", flexShrink: 0 }}
+            title="Talent Radar — sourcing, enrichment, scoring & outreach"
+          >
+            Talent Radar
+          </a>
+          <div style={{ width: 1, height: 18, background: APP.hair }} />
 
           {/* Job switcher (the job context / breadcrumb) */}
           <select
