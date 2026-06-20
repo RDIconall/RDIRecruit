@@ -11,6 +11,9 @@ import { evaluateCandidate } from "./evaluator";
 import { getActiveRubric } from "../rubric/service";
 import { getCalibrationForJob } from "../calibration/service";
 import { getMethodDoc } from "../evaluation/method";
+import { getJobRubric } from "../rubric/store";
+import { computeReadiness, type GradingInputs } from "../triage/readiness";
+import { gradeLog } from "../triage/grade-log";
 import type { ParsedResumeReview } from "../resume/types";
 import type { CategoryKey } from "../types";
 
@@ -150,13 +153,37 @@ export async function scoreCandidate(
 
   // The two documents the grader reads for this seat: the global "How We
   // Evaluate" method + this job's rubric (weights + prose). Plus learned calibration.
-  const [method, rubric, calibration] = await Promise.all([
+  // jobRubric is the single editable job spec/rubric source of truth (job_rubrics);
+  // we read it here too so the scorer's readiness gate agrees with the triage view.
+  const [method, rubric, calibration, jobRubric] = await Promise.all([
     getMethodDoc(),
     getActiveRubric(candidate.job_shortcode),
     candidate.job_shortcode
       ? getCalibrationForJob(candidate.job_shortcode)
       : Promise.resolve({ global: "", role: "" }),
+    getJobRubric(candidate.job_shortcode ?? ""),
   ]);
+
+  // Readiness gate — never grade on partial data. All four inputs must be present:
+  // screening answers, a parsed résumé, the job spec, and the methodology doc. When
+  // incomplete we SKIP scoring (we never clobber an existing read); the candidate
+  // stays "Review blocked" until the résumé backfill / re-sync fills the gap.
+  const readinessInputs: GradingInputs = {
+    candidateId,
+    jobShortcode: candidate.job_shortcode ?? "",
+    answers,
+    resumeText: (application?.resume_text as string | null) ?? null,
+    resumeStoragePath: (application?.resume_storage_path as string | null) ?? null,
+    resumeUrl: (application?.resume_url as string | null) ?? null,
+    jobSpec: jobRubric.specMd,
+    rubric: jobRubric.rubricMd,
+    methodology: method,
+  };
+  const readiness = computeReadiness(readinessInputs);
+  if (!readiness.ready) {
+    gradeLog("score.blocked", { candidateId, missing: readiness.missing });
+    return { skipped: true as const, reason: "not_ready" as const, missing: readiness.missing };
+  }
 
   // Seat context from the job (frames the §2 evaluation).
   const { data: jobRow } = candidate.job_shortcode

@@ -9,7 +9,9 @@ import {
   poolGroupOf,
   verdictDot,
   fitWeight,
+  describeMissingInputs,
 } from "@/lib/triage/app-theme";
+import { standingLabel } from "@/lib/triage/ranking";
 import type { Candidate, Decision, VerdictRead } from "@/lib/triage/types";
 
 const DECISION_OPTIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
@@ -274,6 +276,31 @@ function fit(c: Candidate): number {
 }
 
 /**
+ * Sub-line under a candidate's name: when the read is blocked, says exactly what
+ * grading is waiting on; otherwise shows the ordinal pool standing ("3rd of 12
+ * interview-ready"). Ordinal only — never a numeric score.
+ */
+function StandingLine({ c }: { c: Candidate }) {
+  if (c.decision === "blocked" && c.readiness && !c.readiness.ready) {
+    return (
+      <div
+        style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
+        title={`Review blocked — waiting on ${describeMissingInputs(c.readiness.missing)}`}
+      >
+        Blocked · waiting on {describeMissingInputs(c.readiness.missing)}
+      </div>
+    );
+  }
+  const label = standingLabel(c.standing);
+  if (!label) return null;
+  return (
+    <div style={mono({ fontSize: 11, color: APP.faint, lineHeight: 1.3, ...ellipsis })} title={`Pool standing: ${label}`}>
+      {label}
+    </div>
+  );
+}
+
+/**
  * Job-level grading rubric + role spec (stored in job_rubrics, keyed by job
  * shortcode — one per job, NOT per candidate). Claude reads both to derive the
  * per-candidate "Vs. spec" read. Upload a .md/.txt file or paste/edit inline.
@@ -332,17 +359,17 @@ function JobSpecPanel({
   return (
     <div style={{ marginBottom: 16, border: `1px solid ${APP.hair}`, borderRadius: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 14px" }}>
-        <span style={mono({ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: APP.faint })}>Job spec &amp; rubric</span>
+        <span style={mono({ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: APP.faint })}>Job spec</span>
         <span style={{ fontSize: 13, color: APP.ink, fontWeight: 600, ...ellipsis, minWidth: 0 }}>{jobTitle}</span>
-        <span style={mono({ fontSize: 11.5, color: hasSpec ? APP.secondary : APP.muted })}>
-          spec {hasSpec ? "on file" : "missing"} · rubric {hasRubric ? "on file" : "missing"}
+        <span style={mono({ fontSize: 11.5, color: hasSpec ? APP.secondary : APP.weak })}>
+          role spec {hasSpec ? "on file" : "needed"} · grading rubric {hasRubric ? "on file" : "optional"}
         </span>
         <span style={{ flex: 1 }} />
         <button
           onClick={() => setOpen((v) => !v)}
           style={mono({ cursor: "pointer", background: open ? APP.ink : "transparent", color: open ? "#fff" : APP.accent, border: `1px solid ${open ? APP.ink : APP.accentBorder}`, borderRadius: 5, padding: "4px 12px", fontSize: 12 })}
         >
-          {open ? "Done" : hasSpec || hasRubric ? "Edit" : "Upload"}
+          {open ? "Done" : hasSpec ? "Edit" : "Add role spec"}
         </button>
       </div>
 
@@ -359,7 +386,7 @@ function JobSpecPanel({
             saving={saving === "spec"}
           />
           <SpecField
-            label="Grading rubric (.md) — the bar Claude grades against"
+            label="Grading rubric (.md) — optional · the role spec is the grading basis when this is empty"
             value={rubricDraft}
             onChange={setRubricDraft}
             onPick={() => rubricFileRef.current?.click()}
@@ -369,7 +396,7 @@ function JobSpecPanel({
             saving={saving === "rubric"}
           />
           <p style={mono({ margin: 0, fontSize: 11, color: APP.faint })}>
-            Saved once per job. Re-run a candidate&apos;s assessment (war room → Update assessment) to grade them against the new spec.
+            Only the role spec is required — Claude grades against it directly. The grading rubric is optional and only sharpens the fit read when present. Saved once per job; re-run a candidate&apos;s assessment (war room → Update assessment) to grade against the new spec.
           </p>
         </div>
       )}
@@ -555,6 +582,7 @@ function Row({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Cand
       <div style={cell}>
         <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, ...ellipsis }} title={c.name}>{c.name}</div>
         <div style={{ fontSize: 11.5, color: APP.muted, lineHeight: 1.2, ...ellipsis }} title={c.role}>{c.role}</div>
+        <StandingLine c={c} />
       </div>
       <div style={{ ...cell, fontSize: 13.5, color: APP.ink2, ...ellipsis }} title={c.company}>{c.company}</div>
       <div style={{ ...cell, fontSize: 13, color: APP.secondary, ...ellipsis }} title={c.locationShort}>{c.locationShort}</div>
@@ -596,6 +624,7 @@ function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, ...ellipsis }}>{c.name}</div>
           <div style={{ fontSize: 12, color: APP.muted, lineHeight: 1.25, ...ellipsis }}>{c.role} · {c.company}</div>
+          <StandingLine c={c} />
         </div>
         <div style={mono({ fontSize: 13, color: APP.ink, flexShrink: 0 })}>{c.roLevel}</div>
       </div>

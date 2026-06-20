@@ -111,6 +111,33 @@ export interface JobRubric {
   specMd: string;
 }
 
+// --- Grading readiness gate ---------------------------------------------------
+// The grader only calls the AI once ALL four required inputs are present. When
+// one is missing (after an attempted repair), the candidate's decision is forced
+// to "blocked" and the missing inputs are surfaced so the UI can say exactly what
+// it is waiting on instead of grading on partial data.
+export type ReadinessInput = "answers" | "resume" | "jobSpec" | "methodology";
+
+export interface CandidateReadiness {
+  ready: boolean;
+  missing: ReadinessInput[];
+  // Per-input presence, for granular UI / logging.
+  detail: Record<ReadinessInput, boolean>;
+}
+
+// Pool-relative standing — ordinal only, NEVER a numeric score or tier. Derived
+// across the active pool at load time and surfaced as "Nth of M".
+export interface PoolStanding {
+  // 1-based rank among all active candidates in the pool (1 = strongest).
+  overallRank: number;
+  activeTotal: number;
+  // 1-based rank within the candidate's own decision group.
+  groupRank: number;
+  groupTotal: number;
+  // Human label of the decision group (e.g. "interview-ready", "to verify").
+  groupLabel: string;
+}
+
 export type TimelineRowType = "edu" | "role" | "cert" | "gap";
 
 export interface TimelineRow {
@@ -292,6 +319,12 @@ export interface Candidate {
   experience: string; // "30+ yr" | "16 yr" | "—"
   answersRead: VerdictRead; // cached read of the application answers
   specRead: VerdictRead; // cached read of fit vs. the job spec/rubric
+
+  // Grading readiness — present when the decision is "blocked" because a required
+  // grading input is missing. Drives the "Review blocked — waiting on X" UI.
+  readiness?: CandidateReadiness;
+  // Pool-relative standing (ordinal only), derived across the active pool at load.
+  standing?: PoolStanding;
 }
 
 // Persisted human-edit workspace. Hydrated server-side from candidate_overlay
@@ -370,6 +403,9 @@ export interface DecisionRead {
   assessment?: AssessmentNarrative;
   // Rubric-fit read, filled by Claude when a job rubric is available.
   rubricFit?: RubricFit;
+  // When the grader blocked on missing inputs, the inputs it was waiting on.
+  // Present only on a "blocked" read produced by the readiness gate.
+  missingInputs?: ReadinessInput[];
   recalculatedAt?: string;
   model?: string;
 }

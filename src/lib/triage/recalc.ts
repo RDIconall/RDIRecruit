@@ -2,6 +2,8 @@ import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
 import { env, hasAnthropic } from "../env";
 import { computeCommute } from "./commute";
+import { gradeLog } from "./grade-log";
+import type { RosterEntry } from "./load";
 import type { AssessmentNarrative, CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit } from "./types";
 
 const MODEL = "claude-sonnet-4-6";
@@ -25,6 +27,10 @@ OUTPUT IS A DECISION, NOT A SCORE. You must NEVER produce, mention, or imply a n
 Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. Integrity problems and clear contradictions are gates: they push to cut regardless of fit.
 
 When a named human reviewer (e.g. Conall or Lara) leaves a correction, treat their signal as authoritative human judgment and weight it accordingly — name them as the source of the change.
+
+GROUND YOUR REASONING IN THE SUPPLIED METHOD. When a "HOW WE HIRE" methodology doc is provided below, that is the org's evaluation philosophy — reason the way it says to (read choices and omissions, weigh the gap not the person, run the reads in its order). When a ROLE SPEC and JOB RUBRIC are provided, judge fit strictly against them.
+
+RANK AGAINST THE POOL. When a POOL ROSTER is provided, it lists every OTHER candidate in this job's pool with their current decision. Your call is RELATIVE, not absolute: "interview" is reserved for files that beat the top of the current pool; "hold" means competent but does NOT beat the candidates already worth screening. Position this candidate against that roster and say, in "why", roughly where they stand relative to the pool (e.g. "among the strongest", "mid-pack", "below the top group") — but NEVER as a number, percentile, or tier.
 
 Return JSON only, no prose outside the JSON, in exactly this shape:
 {
@@ -53,7 +59,7 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
 }
 The "careerRead" object is optional context — include it when you have enough to say something real, otherwise omit it entirely.
 The "assessment" object MUST ALWAYS be included — it is the written candidate brief the recruiter reads. Ground every claim in the supplied materials (résumé, cover letter, answers, transcript). Prose only, never a numeric score.
-The "rubricFit" object MUST be included ONLY when a JOB RUBRIC is provided below; judge the candidate strictly against that rubric's categories, hard gates, and pattern-recognition guidance. Translate the rubric's point bands into the words-only verdict — NEVER output the numeric score itself. If no rubric is provided, omit "rubricFit" entirely.`;
+The "rubricFit" object MUST be included whenever a JOB RUBRIC and/or a ROLE SPEC is provided below. Grade strictly against the JOB RUBRIC's categories, hard gates, and pattern-recognition guidance when one is provided; when there is NO separate rubric, the ROLE SPEC is the grading basis — judge fit against the spec's responsibilities and requirements instead. Translate any point bands into the words-only verdict — NEVER output a numeric score. Omit "rubricFit" only when NEITHER a rubric nor a role spec is provided.`;
 
 function buildUserPrompt(input: RecalcInput): string {
   const { candidate, corrections, transcript, replies, workingFile } = input;
@@ -95,6 +101,21 @@ function buildUserPrompt(input: RecalcInput): string {
     ? `\n\nVERBATIM SOURCE MATERIALS (the candidate's own words — quote/ground the bio, AI-use read, and writing-consistency read in these):\n"""\n${input.materials!.trim().slice(0, 18000)}\n"""`
     : "";
 
+  const methodBlock = (input.methodology || "").trim()
+    ? `\n\nHOW WE HIRE (the org's evaluation methodology — reason exactly the way this says to):\n"""\n${input.methodology!.trim().slice(0, 9000)}\n"""`
+    : "";
+
+  const roster = input.poolRoster ?? [];
+  const rosterBlock = roster.length
+    ? `\n\nPOOL ROSTER (every OTHER active candidate in this job — your call is RELATIVE to these):\n${roster
+        .map(
+          (r) =>
+            `- ${r.name} — ${r.role || "—"}${r.company ? ` @ ${r.company}` : ""} · ${r.experience || "—"} · RO ${r.roLevel || "—"} · current call: ${r.decision}${r.why ? ` — ${r.why.slice(0, 160)}` : ""}`,
+        )
+        .join("\n")
+        .slice(0, 9000)}`
+    : "";
+
   return `${reviewerLine}STORED WORKING FILE (.md — this candidate's living case file):
 """
 ${(workingFile || "(empty)").slice(0, 8000)}
@@ -129,9 +150,9 @@ REVIEWER REPLIES TO PRIOR AI COMMENTS:
 ${repsText}
 
 INTERVIEW / SCREEN TRANSCRIPT (post-application — weight heavily when present):
-${(transcript || "none yet").slice(0, 24000)}${materialsBlock}${specBlock}${rubricBlock}
+${(transcript || "none yet").slice(0, 24000)}${materialsBlock}${methodBlock}${specBlock}${rubricBlock}${rosterBlock}
 
-Re-derive the decision read now. If the human corrections or the transcript change the picture, change the decision accordingly. Remember: decision vocabulary only, never a number.`;
+Re-derive the decision read now. If the human corrections or the transcript change the picture, change the decision accordingly. Position the call relative to the pool roster. Remember: decision vocabulary only, never a number.`;
 }
 
 export interface RecalcInput {
@@ -150,6 +171,10 @@ export interface RecalcInput {
   /** Verbatim source materials (cover letter, answers, résumé, transcripts) so
    * Claude can ground the written bio, AI-use read, and writing-consistency read. */
   materials?: string;
+  /** The global "how we hire" evaluation methodology — reasons the grade. */
+  methodology?: string;
+  /** Compact roster of the rest of the pool so the call is ranked relative to peers. */
+  poolRoster?: RosterEntry[];
 }
 
 function parseCareerRead(value: unknown): CareerRead | undefined {
@@ -197,7 +222,10 @@ function parseRubricFit(value: unknown): RubricFit | undefined {
  * existing read and never crash the page.
  */
 export async function recalculateRead(input: RecalcInput): Promise<DecisionRead | null> {
-  if (!hasAnthropic()) return null;
+  if (!hasAnthropic()) {
+    gradeLog("recalc.skipped", { candidateId: input.candidate.id, reason: "no_anthropic" });
+    return null;
+  }
 
   try {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
@@ -233,6 +261,14 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       if (measured) assessment.commute = measured.text;
     }
 
+    gradeLog("recalc.ok", {
+      candidateId: input.candidate.id,
+      decision,
+      pool: (input.poolRoster ?? []).length,
+      hasMethod: Boolean((input.methodology || "").trim()),
+      hasRubric: Boolean((input.rubric || "").trim()),
+    });
+
     return {
       decision,
       why: (parsed.why || input.candidate.why || "").trim(),
@@ -246,6 +282,11 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       model: MODEL,
     };
   } catch (error) {
+    // Fail open on transient Claude errors: keep the prior read, never crash.
+    gradeLog("recalc.failed", {
+      candidateId: input.candidate.id,
+      error: error instanceof Error ? error.message : String(error),
+    });
     console.error("Triage recalculate failed", error);
     return null;
   }

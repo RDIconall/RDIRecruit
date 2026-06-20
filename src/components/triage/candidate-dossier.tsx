@@ -1,7 +1,8 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useState } from "react";
-import { APP, DECISION_LABEL, decisionColor, verdictDot } from "@/lib/triage/app-theme";
+import { APP, DECISION_LABEL, decisionColor, verdictDot, describeMissingInputs } from "@/lib/triage/app-theme";
+import { standingLabel } from "@/lib/triage/ranking";
 import type { ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
@@ -280,6 +281,11 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
     { k: "Recommendation", v: <span style={{ color: decisionC, fontWeight: 600 }}>{decisionLabel}</span> },
   ];
 
+  const standing = standingLabel(c.standing);
+  if (standing) facts.push({ k: "Pool standing", v: standing });
+
+  const blockedReadiness = c.decision === "blocked" && c.readiness && !c.readiness.ready ? c.readiness : null;
+
   const reviewed = reviewedList(c, activity.length);
   const hasAssessment = !!(c.assessment && (c.assessment.bio || c.assessment.application || c.assessment.commute));
 
@@ -384,6 +390,49 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           </div>
         </div>
       </div>
+
+      {/* readiness gate — no grade is made until all inputs are on file */}
+      {blockedReadiness && (
+        <div
+          style={{
+            margin: "0 0 18px",
+            background: APP.weakSoft,
+            border: `1px solid ${APP.weakBorder}`,
+            borderRadius: 10,
+            padding: narrow ? "14px 16px" : "16px 18px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div style={mono({ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: APP.weak })}>
+            Review blocked
+          </div>
+          <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5, color: APP.ink2 }}>
+            No read can be made yet — grading is waiting on{" "}
+            <strong>{describeMissingInputs(blockedReadiness.missing)}</strong>. Pull the missing
+            materials from Workable, then the candidate is graded automatically.
+          </p>
+          <div>
+            <button
+              onClick={() => wsApi.resync(id)}
+              disabled={busy}
+              style={mono({
+                cursor: busy ? "default" : "pointer",
+                background: busy ? APP.hair : APP.weak,
+                color: busy ? APP.muted : "#fff",
+                border: "none",
+                borderRadius: 5,
+                padding: "6px 14px",
+                fontSize: 12.5,
+                fontWeight: 600,
+              })}
+            >
+              {busy ? "Syncing…" : "Resync from Workable & retry"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* dossier facts */}
       <Section title="Dossier">

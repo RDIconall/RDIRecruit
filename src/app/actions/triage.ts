@@ -8,7 +8,8 @@ import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
-import { recalculateRead } from "@/lib/triage/recalc";
+import { gradeCandidate } from "@/lib/triage/grade";
+import { prepareGradingInputs, describeMissing } from "@/lib/triage/readiness";
 import { chatWithClaude } from "@/lib/triage/chat";
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
@@ -104,8 +105,17 @@ async function persistAndMaybeRecalc(
   // Write the human edit first so it survives even if Claude is unavailable.
   await upsertWorkingFile(candidateId, { workspace: patch }, updatedBy);
 
-  const one = await loadOneCandidate(candidateId);
+  let one = await loadOneCandidate(candidateId);
   if (!one) return { ok: false, recalculated: false, read: null, message: "Candidate not found" };
+
+  // For a recalc, run the readiness gate (and its repair step) BEFORE building the
+  // materials, so a freshly-ingested résumé / re-synced answers are reflected in
+  // the candidate view Claude sees — and we never grade on partial data.
+  let prepared: Awaited<ReturnType<typeof prepareGradingInputs>> | undefined;
+  if (opts.recalc) {
+    prepared = await prepareGradingInputs(candidateId, one.jobShortcode);
+    one = (await loadOneCandidate(candidateId)) ?? one;
+  }
 
   let candidate = one.candidate;
   const priorDecision = candidate.decision;
@@ -117,20 +127,22 @@ async function persistAndMaybeRecalc(
   });
 
   let read: DecisionRead | null = null;
+  let blocked = false;
 
-  if (opts.recalc) {
-    const rubric = await getJobRubric(one.jobShortcode);
-    read = await recalculateRead({
+  if (opts.recalc && prepared) {
+    const result = await gradeCandidate({
       candidate,
+      jobShortcode: one.jobShortcode,
       workingFile: baseContent,
       materials: renderCandidateMaterials(candidate),
       corrections: one.slice.corrections ?? [],
       transcript: one.slice.transcript ?? "",
       replies: one.slice.replies ?? {},
       reviewer: reviewer ? { label: reviewer.label, kind: reviewer.kind } : undefined,
-      rubric: rubric.rubricMd,
-      jobSpec: rubric.specMd,
+      prepared,
     });
+    read = result.read;
+    blocked = result.blocked;
     if (read) {
       // #7: carry the reviewer-signal lens (rev/revNote) on the persisted read so
       // the pool + candidate views show the human's signal, not a generic "none".
@@ -172,11 +184,19 @@ async function persistAndMaybeRecalc(
   );
 
   revalidatePath("/");
+
+  let message: string | undefined;
+  if (opts.recalc && blocked && read?.missingInputs?.length) {
+    message = `Saved. Review blocked — waiting on ${describeMissing(read.missingInputs)} before a read can be made.`;
+  } else if (opts.recalc && !read) {
+    message = "Saved. Claude re-analysis unavailable (no API key or transient error).";
+  }
+
   return {
     ok: true,
-    recalculated: Boolean(read),
+    recalculated: Boolean(read) && !blocked,
     read,
-    message: opts.recalc && !read ? "Saved. Claude re-analysis unavailable (no API key or transient error)." : undefined,
+    message,
   };
 }
 
@@ -432,8 +452,12 @@ export async function updateAssessment(input: {
   await requireAuth();
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
 
-  const one = await loadOneCandidate(input.candidateId);
+  let one = await loadOneCandidate(input.candidateId);
   if (!one) return { ok: false, recalculated: false, read: null, message: "Candidate not found" };
+
+  // Readiness gate + repair first, then reload so freshly-pulled materials are used.
+  const prepared = await prepareGradingInputs(input.candidateId, one.jobShortcode);
+  one = (await loadOneCandidate(input.candidateId)) ?? one;
 
   const acts = await fetchActivity(input.candidateId);
   const { transcript, notes } = activityDigest(acts);
@@ -444,19 +468,33 @@ export async function updateAssessment(input: {
     workableUrl: one.workableUrl,
     disqualified: one.disqualified,
   });
-  const rubric = await getJobRubric(one.jobShortcode);
   const priorDecision = one.candidate.decision;
 
-  let read = await recalculateRead({
+  const result = await gradeCandidate({
     candidate: one.candidate,
+    jobShortcode: one.jobShortcode,
     workingFile: baseContent,
     materials: renderCandidateMaterials(one.candidate),
     corrections,
     transcript: combinedTranscript,
     replies: one.slice.replies ?? {},
-    rubric: rubric.rubricMd,
-    jobSpec: rubric.specMd,
+    prepared,
   });
+  let read = result.read;
+
+  if (result.blocked && read?.missingInputs?.length) {
+    // Persist the blocked read so the UI shows exactly what grading is waiting on.
+    const blockedCandidate = applyRead(one.candidate, read);
+    const blockedContent = renderWorkingFile(blockedCandidate, one.slice, { workableUrl: one.workableUrl, disqualified: one.disqualified });
+    await upsertWorkingFile(input.candidateId, { content: blockedContent, read }, await reviewerLabel());
+    revalidatePath("/");
+    return {
+      ok: true,
+      recalculated: false,
+      read,
+      message: `Saved. Review blocked — waiting on ${describeMissing(read.missingInputs)} before a read can be made.`,
+    };
+  }
 
   if (!read) {
     return { ok: true, recalculated: false, read: null, message: "Saved. Claude re-analysis unavailable (no API key or transient error)." };
@@ -670,13 +708,22 @@ export async function resyncCandidate(input: {
     revalidatePath("/");
 
     if (needResume) {
+      if (result.applicationIngested) {
+        return { ok: true, message: "Synced from Workable · résumé pulled in." };
+      }
+      if (result.resumeError) {
+        // The ingest was attempted and genuinely failed — surface it rather than
+        // reporting a misleading success.
+        return {
+          ok: false,
+          message: `Synced from Workable, but résumé parse failed: ${result.resumeError}`,
+        };
+      }
       return {
         ok: true,
-        message: result.applicationIngested
-          ? "Synced from Workable · résumé pulled in."
-          : candidate.resume_url
-            ? "Synced from Workable · résumé queued (parse pending)."
-            : "Synced from Workable · no résumé on file in Workable yet.",
+        message: candidate.resume_url
+          ? "Synced from Workable · résumé queued (parse pending)."
+          : "Synced from Workable · no résumé on file in Workable yet.",
       };
     }
     return { ok: true, message: "Synced from Workable." };

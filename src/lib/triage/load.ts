@@ -19,6 +19,9 @@ import type {
 import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
 import { mapCandidate, type ApplicationLite, type CandidateEvaluations, type ParsedExperienceEntry } from "./from-supabase";
 import { getWorkingFiles } from "./store";
+import { assignPoolStanding } from "./ranking";
+import { computeReadiness, type GradingInputs } from "./readiness";
+import { getMethodDoc } from "../evaluation/method";
 import type { Decision } from "./types";
 
 export const DEFAULT_JOB_SHORTCODE = "379AA16E8F"; // Clinical Data Manager — Data Integrity & Investigation
@@ -300,7 +303,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const jobs: JobOption[] = jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title }));
   const jobMeta = await getJobByShortcode(jobShortcode);
   const title = jobMeta?.title ?? jobShortcode;
-  const rubric = await getJobRubric(jobShortcode);
+  const [rubric, methodology] = await Promise.all([getJobRubric(jobShortcode), getMethodDoc()]);
 
   if (!hasSupabase()) return emptyPool(jobShortcode, jobs, title, rubric);
 
@@ -390,6 +393,26 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
 
     return candidate;
   });
+
+  // Attach grading readiness to blocked candidates (so the UI can say exactly what
+  // it is waiting on) and assign each active candidate an ordinal pool standing.
+  for (const c of candidates) {
+    if (c.decision !== "blocked") continue;
+    const app = appsByCandidate.get(c.id);
+    const inputs: GradingInputs = {
+      candidateId: c.id,
+      jobShortcode,
+      answers: (app?.answers as Record<string, string> | null) ?? null,
+      resumeText: (app?.resume_text as string | null) ?? null,
+      resumeStoragePath: null,
+      resumeUrl: (app?.resume_url as string | null) ?? null,
+      jobSpec: rubric.specMd ?? "",
+      rubric: rubric.rubricMd ?? "",
+      methodology,
+    };
+    c.readiness = computeReadiness(inputs);
+  }
+  assignPoolStanding(candidates, (id) => Boolean(workspace.dq[id]));
 
   return {
     candidates,

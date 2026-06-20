@@ -3,7 +3,7 @@
 // Contract: cursor-handoff/HANDOFF-v2.md §0 + cursor-handoff/RDIRecruit (app).dc.html.
 // No brand fonts, no scores/tiers, no emoji.
 
-import type { Decision } from "./types";
+import type { Decision, ReadinessInput } from "./types";
 
 export const APP = {
   // type — system stack only
@@ -70,6 +70,19 @@ export const POOL_GROUPS: { key: Decision; label: string }[] = [
 export function poolGroupOf(decision: Decision): Decision {
   if (decision === "interview" || decision === "verify" || decision === "short") return decision;
   return "hold"; // hold, cut, blocked all live in the Hold group on the board
+}
+
+// Client-safe labels for the grading-readiness inputs (the server-only readiness
+// module has its own copy; this one is importable from client components).
+export const READINESS_INPUT_LABELS: Record<ReadinessInput, string> = {
+  answers: "screening answers",
+  resume: "parsed résumé",
+  jobSpec: "job spec",
+  methodology: "how-we-hire methodology",
+};
+
+export function describeMissingInputs(missing: ReadinessInput[]): string {
+  return missing.map((m) => READINESS_INPUT_LABELS[m]).join(", ");
 }
 
 // The fixed decision vocabulary — the ONLY status language (no scores/tiers).
