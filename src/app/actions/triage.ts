@@ -19,11 +19,14 @@ import type {
   Candidate,
   ChatMessage,
   CorrectionEntry,
+  Decision,
   DecisionRead,
   ReviewerKind,
   TimelineRow,
   WorkspaceSlice,
 } from "@/lib/triage/types";
+
+const VALID_DECISIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
 
 async function requireAuth(): Promise<string> {
   const { userId } = await auth();
@@ -160,7 +163,13 @@ async function persistAndMaybeRecalc(
     ? renderWorkingFile(candidate, one.slice, { workableUrl: one.workableUrl, disqualified: one.disqualified })
     : baseContent;
 
-  await upsertWorkingFile(candidateId, read ? { content, read } : { content }, updatedBy);
+  // A successful Claude re-analysis hands the call back to the model, so any
+  // prior manual decision override is cleared.
+  await upsertWorkingFile(
+    candidateId,
+    read ? { content, read, workspace: { decisionOverride: null } } : { content },
+    updatedBy,
+  );
 
   revalidatePath("/");
   return {
@@ -220,6 +229,24 @@ export async function saveReply(input: { candidateId: string; key: string; value
 export async function saveTimeline(input: { candidateId: string; ovr: TimelineRow[] }): Promise<RecalcResult> {
   await requireAuth();
   return persistAndMaybeRecalc(input.candidateId, { ovr: input.ovr }, { recalc: false });
+}
+
+/**
+ * Manually set a candidate's decision/status. Persists as a workspace override
+ * that wins over the model read until the next Claude re-analysis clears it.
+ */
+export async function setDecision(input: { candidateId: string; decision: Decision }): Promise<RecalcResult> {
+  await requireAuth();
+  if (!VALID_DECISIONS.includes(input.decision)) {
+    return { ok: false, recalculated: false, read: null, message: "Invalid decision" };
+  }
+  return persistAndMaybeRecalc(input.candidateId, { decisionOverride: input.decision }, { recalc: false });
+}
+
+/** Re-run Claude on the current materials (with the per-role rubric). Clears any manual override. */
+export async function reanalyze(input: { candidateId: string }): Promise<RecalcResult> {
+  await requireAuth();
+  return persistAndMaybeRecalc(input.candidateId, {}, { recalc: true, trigger: "Re-analysis" });
 }
 
 /** What happened to the candidate's status in Workable as a result of a triage cut. */

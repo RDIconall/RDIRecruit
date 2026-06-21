@@ -83,6 +83,8 @@ export interface MapInput {
   read: DecisionRead | null;
   /** Persisted human corrections (with optional reviewer identity) — drives rev/revNote (#7). */
   corrections?: CorrectionEntry[];
+  /** Manual decision set by a human reviewer; wins over the model read. */
+  decisionOverride?: Decision | null;
   rank: number;
   jobLocation: string;
   jobShortcode: string;
@@ -116,6 +118,8 @@ function hasDiscrepancy(v: VerificationPayload | null): boolean {
  * gates layered on top.
  */
 export function deriveDecision(input: MapInput): Decision {
+  // A human's manual status wins over everything else, including the model read.
+  if (input.decisionOverride) return input.decisionOverride;
   if (input.read?.decision) return input.read.decision;
 
   const { score, evals } = input;
@@ -721,7 +725,7 @@ export function mapCandidate(input: MapInput): Candidate {
     revNote: "No human review yet — read synced from submitted materials.",
     why: truncate(why, 240),
     flag: risk,
-    next: input.read?.next || nextFor(decision),
+    next: (input.decisionOverride ? nextFor(input.decisionOverride) : input.read?.next) || nextFor(decision),
     survivor: decision === "interview" || decision === "short",
 
     askTier,

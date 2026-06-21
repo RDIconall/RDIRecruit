@@ -4,12 +4,15 @@ import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   APP,
+  DECISION_LABEL,
   POOL_GROUPS,
   poolGroupOf,
   verdictDot,
   fitWeight,
 } from "@/lib/triage/app-theme";
-import type { Candidate, VerdictRead } from "@/lib/triage/types";
+import type { Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+
+const DECISION_OPTIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -22,7 +25,7 @@ const ellipsis: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", text
 const cell: CSSProperties = { minWidth: 0, overflow: "hidden" };
 
 const COLS =
-  "26px 34px minmax(150px,1.6fr) minmax(110px,1.1fr) minmax(82px,0.9fr) 46px 92px minmax(98px,0.9fr) minmax(98px,0.9fr) 78px 158px";
+  "26px 34px minmax(150px,1.6fr) minmax(110px,1.1fr) minmax(82px,0.9fr) 46px 92px minmax(98px,0.9fr) minmax(98px,0.9fr) 78px 240px";
 
 /**
  * Compacts a raw salary ask into a tight column-friendly form:
@@ -138,7 +141,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
 
       {!narrow ? (
         <div style={{ marginTop: 14, overflowX: "auto" }}>
-          <div style={{ minWidth: 980 }}>
+          <div style={{ minWidth: 1060 }}>
             {/* header */}
             <div
               style={mono({
@@ -188,7 +191,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
                   <span>{g.rows.length}</span>
                 </div>
                 {g.rows.map((c) => (
-                  <Row key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} />
+                  <Row key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} onSetDecision={(d) => wsApi.setDecision(c.id, d)} />
                 ))}
               </div>
             ))}
@@ -215,7 +218,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
                 <span>{g.rows.length}</span>
               </div>
               {g.rows.map((c) => (
-                <MobileRow key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} />
+                <MobileRow key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} onSetDecision={(d) => wsApi.setDecision(c.id, d)} />
               ))}
             </div>
           ))}
@@ -502,6 +505,23 @@ function Dot({ read }: { read: VerdictRead }) {
   );
 }
 
+function StatusSelect({ value, onChange }: { value: Decision; onChange: (d: Decision) => void }) {
+  return (
+    <select
+      value={value}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => { e.stopPropagation(); onChange(e.target.value as Decision); }}
+      aria-label="Set status manually"
+      title="Set status manually"
+      style={mono({ fontSize: 11.5, color: APP.ink, background: APP.surface, border: `1px solid ${APP.hair}`, borderRadius: 4, padding: "3px 6px", cursor: "pointer", maxWidth: 120 })}
+    >
+      {DECISION_OPTIONS.map((d) => (
+        <option key={d} value={d}>{DECISION_LABEL[d]}</option>
+      ))}
+    </select>
+  );
+}
+
 function DisqButton({ onClick }: { onClick: () => void }) {
   return (
     <button
@@ -513,7 +533,7 @@ function DisqButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function Row({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void }) {
+function Row({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void; onSetDecision: (d: Decision) => void }) {
   return (
     <div
       onClick={onOpen}
@@ -548,6 +568,7 @@ function Row({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected
       </div>
       <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink, ...ellipsis })} title={c.roLevel}>{c.roLevel}</div>
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 9 }}>
+        <StatusSelect value={c.decision} onChange={onSetDecision} />
         <a
           href={c.workableUrl}
           target="_blank"
@@ -563,7 +584,7 @@ function Row({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected
   );
 }
 
-function MobileRow({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void }) {
+function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void; onSetDecision: (d: Decision) => void }) {
   return (
     <div
       onClick={onOpen}
@@ -584,6 +605,7 @@ function MobileRow({ c, selected, onToggle, onOpen, onDisq }: { c: Candidate; se
         <Dot read={c.answersRead} />
         <Dot read={c.specRead} />
         <span style={{ flex: 1 }} />
+        <StatusSelect value={c.decision} onChange={onSetDecision} />
         <DisqButton onClick={onDisq} />
       </div>
     </div>

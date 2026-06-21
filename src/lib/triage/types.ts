@@ -341,6 +341,12 @@ export interface WorkspaceSlice {
   transcript?: string;
   deep?: boolean;
   chat?: ChatMessage[];
+  /**
+   * Manual decision set by a human reviewer. Wins over Claude's read in
+   * deriveDecision, so the board/dossier reflect it immediately. Cleared when a
+   * Claude re-analysis runs (re-analyze hands the call back to the model).
+   */
+  decisionOverride?: Decision | null;
 }
 
 // Claude's re-derived decision read, stored in candidate_working_files.read.

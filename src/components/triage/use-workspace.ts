@@ -2,13 +2,14 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ActivityEntry, ActivityType, Candidate, ChatMessage, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
   clearCandidateChat,
   compareToRubric,
   logActivity as logActivityAction,
+  reanalyze as reanalyzeAction,
   resyncCandidate,
   runDeepAnalysis,
   saveCorrection,
@@ -16,6 +17,7 @@ import {
   saveTimeline,
   saveTranscript,
   sendCandidateChat,
+  setDecision as setDecisionAction,
   setDisqualified,
   updateAssessment,
 } from "@/app/actions/triage";
@@ -35,6 +37,10 @@ export interface WorkspaceApi {
   setDqMany: (ids: string[], value: boolean) => void;
   openCount: number;
   runDeep: (id: string) => void;
+  /** Manually set a candidate's decision/status (optimistic; persisted as an override). */
+  setDecision: (id: string, decision: Decision) => void;
+  /** Re-run Claude on current materials with the per-role rubric (clears manual override). */
+  reanalyze: (id: string) => void;
   compareRubric: (id: string) => void;
   resync: (id: string) => void;
   effTimeline: (id: string) => TimelineRow[];
@@ -145,6 +151,28 @@ export function useWorkspace(
     (id: string) => {
       setWs((w) => ({ ...w, deep: { ...w.deep, [id]: true } }));
       void handleRecalc(id, () => runDeepAnalysis({ candidateId: id }));
+    },
+    [handleRecalc],
+  );
+
+  const setDecision = useCallback(
+    (id: string, decision: Decision) => {
+      // Optimistic: applyRead reads only the fields we set, leaving the rest intact.
+      onRead(id, { decision } as DecisionRead);
+      setBusyFor(id, true);
+      void setDecisionAction({ candidateId: id, decision })
+        .then((res) => {
+          if (!res.ok && res.message) setNotice(res.message);
+        })
+        .catch(() => setNotice("Status change failed — please retry."))
+        .finally(() => setBusyFor(id, false));
+    },
+    [onRead, setBusyFor],
+  );
+
+  const reanalyze = useCallback(
+    (id: string) => {
+      void handleRecalc(id, () => reanalyzeAction({ candidateId: id }));
     },
     [handleRecalc],
   );
@@ -343,6 +371,8 @@ export function useWorkspace(
     setDqMany,
     openCount,
     runDeep,
+    setDecision,
+    reanalyze,
     compareRubric,
     resync,
     effTimeline,

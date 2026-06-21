@@ -2,13 +2,15 @@
 
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { APP, DECISION_LABEL, decisionColor, verdictDot } from "@/lib/triage/app-theme";
-import type { ActivityType, Candidate, VerdictRead } from "@/lib/triage/types";
+import type { ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
 import { getWorkingFileContent } from "@/app/actions/triage";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
+
+const DECISION_OPTIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
 
 interface Props {
   wsApi: WorkspaceApi;
@@ -309,6 +311,35 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           Open in Workable ↗
         </a>
         <span style={{ flex: 1 }} />
+        <label style={mono({ fontSize: 11, color: APP.faint, textTransform: "uppercase", letterSpacing: "0.04em" })}>
+          Status
+        </label>
+        <select
+          value={c.decision}
+          onChange={(e) => wsApi.setDecision(id, e.target.value as Decision)}
+          aria-label="Set candidate status manually"
+          style={mono({ fontSize: 12.5, color: decisionC, background: APP.surface, border: `1px solid ${APP.hair}`, borderRadius: 5, padding: "5px 10px", cursor: "pointer" })}
+        >
+          {DECISION_OPTIONS.map((d) => (
+            <option key={d} value={d}>{DECISION_LABEL[d]}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => wsApi.reanalyze(id)}
+          disabled={busy}
+          style={{
+            cursor: busy ? "default" : "pointer",
+            background: "transparent",
+            color: busy ? APP.muted : APP.accent,
+            border: `1px solid ${busy ? "#CFCFCF" : APP.accentBorder}`,
+            borderRadius: 5,
+            padding: "5px 12px",
+            fontSize: 12.5,
+            fontWeight: 500,
+          }}
+        >
+          {busy ? "Re-analyzing…" : "Re-analyze with Claude"}
+        </button>
         <button
           onClick={() => wsApi.toggleDq(id)}
           style={{
