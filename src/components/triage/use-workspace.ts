@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { Candidate, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { Candidate, Decision, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
+  reanalyze as reanalyzeAction,
   runDeepAnalysis,
   saveCorrection,
   saveReply,
   saveTimeline,
   saveTranscript,
+  setDecision as setDecisionAction,
   setDisqualified,
 } from "@/app/actions/triage";
 
@@ -23,6 +25,10 @@ export interface WorkspaceApi {
   bulkDq: () => void;
   openCount: number;
   runDeep: (id: string) => void;
+  /** Manually set a candidate's decision/status (optimistic; persisted as an override). */
+  setDecision: (id: string, decision: Decision) => void;
+  /** Re-run Claude on current materials with the per-role rubric (clears manual override). */
+  reanalyze: (id: string) => void;
   effTimeline: (id: string) => TimelineRow[];
   editCell: (id: string, idx: number, field: keyof TimelineRow, val: string) => void;
   addRow: (id: string, type: "role" | "gap" | "cert") => void;
@@ -95,6 +101,28 @@ export function useWorkspace(
     (id: string) => {
       setWs((w) => ({ ...w, deep: { ...w.deep, [id]: true } }));
       void handleRecalc(id, () => runDeepAnalysis({ candidateId: id }));
+    },
+    [handleRecalc],
+  );
+
+  const setDecision = useCallback(
+    (id: string, decision: Decision) => {
+      // Optimistic: applyRead reads only the fields we set, leaving the rest intact.
+      onRead(id, { decision } as DecisionRead);
+      setBusyFor(id, true);
+      void setDecisionAction({ candidateId: id, decision })
+        .then((res) => {
+          if (!res.ok && res.message) setNotice(res.message);
+        })
+        .catch(() => setNotice("Status change failed — please retry."))
+        .finally(() => setBusyFor(id, false));
+    },
+    [onRead, setBusyFor],
+  );
+
+  const reanalyze = useCallback(
+    (id: string) => {
+      void handleRecalc(id, () => reanalyzeAction({ candidateId: id }));
     },
     [handleRecalc],
   );
@@ -200,6 +228,8 @@ export function useWorkspace(
     bulkDq,
     openCount,
     runDeep,
+    setDecision,
+    reanalyze,
     effTimeline,
     editCell,
     addRow,

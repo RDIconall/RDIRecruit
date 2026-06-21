@@ -9,6 +9,8 @@ import { useTriageData } from "./context";
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: FONTS.mono, ...extra });
 const ink = (a: number) => `rgba(22,35,53,${a})`;
 
+const DECISION_OPTIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
+
 interface Props {
   wsApi: WorkspaceApi;
   filter: string;
@@ -49,11 +51,11 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
   const cutRemaining = nCut - nDq;
 
   const counts = [
-    { label: "To cut now", value: nCut, color: "#9E3B28" },
-    { label: "Strong interview", value: nInterview, color: "#E74424" },
+    { label: "To reject now", value: nCut, color: "#9E3B28" },
+    { label: "Leadership interview", value: nInterview, color: "#E74424" },
     { label: "Worth screening", value: nShort + nVerify, color: "#162335" },
     { label: "Hold", value: nHold, color: "rgba(22,35,53,0.6)" },
-    { label: "Review blocked", value: nBlocked, color: "#E74424" },
+    { label: "Blocked", value: nBlocked, color: "#E74424" },
   ];
 
   const cuts = CANDIDATES.filter((c) => c.decision === "cut");
@@ -68,9 +70,9 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
 
   const chipDefs = [
     { key: "all", label: "All", count: CANDIDATES.filter((c) => c.decision !== "cut").length },
-    { key: "interview", label: "Interview", count: nInterview },
-    { key: "short", label: "Short screen", count: nShort },
-    { key: "verify", label: "Verify", count: nVerify },
+    { key: "interview", label: "Leadership interview", count: nInterview },
+    { key: "short", label: "HR screen", count: nShort },
+    { key: "verify", label: "Targeted follow-up", count: nVerify },
     { key: "hold", label: "Hold", count: nHold + nBlocked },
   ];
 
@@ -213,9 +215,20 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                       style={{ cursor: "pointer", display: "flex", alignItems: "baseline", gap: 8, fontSize: 14.5, lineHeight: 1.4, color: "rgba(22,35,53,0.78)", minWidth: 0 }}
                     >
                       <span style={mono({ fontSize: 11, color: "#9E3B28", flexShrink: 0, transform: isOpen ? "none" : "none" })}>{isOpen ? "▾" : "▸"}</span>
-                      <span style={{ minWidth: 0 }}>{c.cutReason}</span>
+                      <span style={{ minWidth: 0 }}>{c.why || c.cutReason}</span>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, justifySelf: "end" }} onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value={c.decision}
+                        onChange={(e) => wsApi.setDecision(c.id, e.target.value as Decision)}
+                        aria-label={`Set status for ${c.name}`}
+                        title="Set status manually"
+                        style={mono({ fontSize: 11.5, color: "#162335", background: "#fff", border: "1px solid rgba(22,35,53,0.22)", borderRadius: 9999, padding: "3px 8px", cursor: "pointer" })}
+                      >
+                        {DECISION_OPTIONS.map((d) => (
+                          <option key={d} value={d}>{DM(d).label}</option>
+                        ))}
+                      </select>
                       <button
                         onClick={() => toggleDq(c.id)}
                         title="Disqualify"
@@ -272,7 +285,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
       {/* ============ INTERVIEW PRIORITY ============ */}
       <div style={{ marginTop: 52 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap", borderBottom: "1px solid rgba(22,35,53,0.15)", paddingBottom: 11 }}>
-          <h2 style={{ margin: 0, fontSize: 27, fontWeight: 500, letterSpacing: "-0.02em" }}>Interview priority</h2>
+          <h2 style={{ margin: 0, fontSize: 27, fontWeight: 500, letterSpacing: "-0.02em" }}>Action priority</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
             {chipDefs.map((chip) => (
               <button
@@ -304,7 +317,7 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
             <div style={mono({ display: "grid", gridTemplateColumns: tableCols, gap: 0, alignItems: "center", padding: "11px 8px", borderBottom: "1px solid rgba(22,35,53,0.15)", fontSize: 11.5, letterSpacing: "0.04em", textTransform: "uppercase", color: "rgba(22,35,53,0.45)" })}>
               <div>#</div>
               <div>Candidate</div>
-              <div>Decision</div>
+              <div>Action</div>
               <div>Reviewer signal</div>
               <div>Why</div>
               <div>Ask / RO level</div>
@@ -325,10 +338,18 @@ export function PoolScreen({ wsApi, filter, setFilter, openCandidate, openDeep }
                     <div style={{ fontSize: 16.5, fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</div>
                     <div style={{ marginTop: 1, fontSize: 13.5, color: "rgba(22,35,53,0.55)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.role}</div>
                   </div>
-                  <div style={{ paddingRight: 10 }}>
-                    <span style={mono({ display: "inline-block", fontSize: 12, letterSpacing: "0.01em", color: dm.c, background: dm.bg, border: `1px solid ${dm.b}`, borderRadius: 9999, padding: "3px 10px", lineHeight: 1.3, whiteSpace: "nowrap" })}>
-                      {dm.label}
-                    </span>
+                  <div style={{ paddingRight: 10 }} onClick={(e) => e.stopPropagation()}>
+                    <select
+                      value={c.decision}
+                      onChange={(e) => wsApi.setDecision(c.id, e.target.value as Decision)}
+                      aria-label={`Set status for ${c.name}`}
+                      title="Set status manually"
+                      style={mono({ maxWidth: "100%", fontSize: 12, letterSpacing: "0.01em", color: dm.c, background: dm.bg, border: `1px solid ${dm.b}`, borderRadius: 9999, padding: "3px 8px", lineHeight: 1.3, cursor: "pointer" })}
+                    >
+                      {DECISION_OPTIONS.map((d) => (
+                        <option key={d} value={d}>{DM(d).label}</option>
+                      ))}
+                    </select>
                   </div>
                   <div style={{ paddingRight: 10, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                     <span style={{ width: 7, height: 7, borderRadius: 9999, background: rev.dot, flexShrink: 0 }} />

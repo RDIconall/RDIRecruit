@@ -255,6 +255,12 @@ export interface WorkspaceSlice {
   corrections?: CorrectionEntry[];
   transcript?: string;
   deep?: boolean;
+  /**
+   * Manual decision set by a human reviewer. Wins over Claude's read in
+   * deriveDecision, so the table/profile reflect it immediately. Cleared when a
+   * Claude re-analysis runs (re-analyze hands the call back to the model).
+   */
+  decisionOverride?: Decision | null;
 }
 
 // Claude's re-derived decision read, stored in candidate_working_files.read.

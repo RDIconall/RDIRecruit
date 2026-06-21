@@ -81,6 +81,8 @@ export interface MapInput {
   read: DecisionRead | null;
   /** Persisted human corrections (with optional reviewer identity) — drives rev/revNote (#7). */
   corrections?: CorrectionEntry[];
+  /** Manual decision set by a human reviewer; wins over the model read. */
+  decisionOverride?: Decision | null;
   rank: number;
   jobLocation: string;
   jobShortcode: string;
@@ -114,6 +116,8 @@ function hasDiscrepancy(v: VerificationPayload | null): boolean {
  * gates layered on top.
  */
 export function deriveDecision(input: MapInput): Decision {
+  // A human's manual status wins over everything else, including the model read.
+  if (input.decisionOverride) return input.decisionOverride;
   if (input.read?.decision) return input.read.decision;
 
   const { score, evals } = input;
@@ -139,12 +143,12 @@ export function deriveDecision(input: MapInput): Decision {
 
 function nextFor(decision: Decision): string {
   return {
-    interview: "Screen",
-    short: "Short screen",
-    verify: "Verify",
-    hold: "Hold",
-    cut: "Reject",
-    blocked: "Re-sync",
+    interview: "Schedule leadership interview.",
+    short: "Run HR screen to confirm the open items before leadership.",
+    verify: "Send a targeted follow-up to confirm the open fact.",
+    hold: "Hold. Revisit only if the pool weakens.",
+    cut: "Reject.",
+    blocked: "Cannot evaluate until materials are re-synced.",
   }[decision];
 }
 
@@ -651,7 +655,7 @@ export function mapCandidate(input: MapInput): Candidate {
     revNote: "No human review yet — read synced from submitted materials.",
     why: truncate(why, 240),
     flag: risk,
-    next: input.read?.next || nextFor(decision),
+    next: (input.decisionOverride ? nextFor(input.decisionOverride) : input.read?.next) || nextFor(decision),
     survivor: decision === "interview" || decision === "short",
 
     askTier,
@@ -661,7 +665,7 @@ export function mapCandidate(input: MapInput): Candidate {
     mismatch,
     mismatchLabel:
       decision === "blocked"
-        ? "Review blocked"
+        ? "Blocked"
         : hasDiscrepancy(input.evals.verification)
           ? "Contradiction"
           : salaryValue === "rich for fit" || salaryValue === "poor value"

@@ -31,14 +31,18 @@ export interface DecisionMeta {
   b: string;
 }
 
+// Labels are the recruiting ACTION each decision maps to (single source of truth
+// for the pills on both screens and the .md working file's Decision line):
+//   interview=Leadership Interview · short=HR Screen · verify=Targeted Follow-Up
+//   · hold=Hold · cut=Reject · blocked=Blocked
 export function DM(d: Decision): DecisionMeta {
   const m: Record<Decision, DecisionMeta> = {
-    interview: { label: "Interview first", c: "#E74424", bg: "rgba(231,68,36,0.10)", b: "rgba(231,68,36,0.32)" },
-    short: { label: "Short screen", c: "#162335", bg: "rgba(22,35,53,0.06)", b: "rgba(22,35,53,0.22)" },
-    verify: { label: "Verify first", c: "#162335", bg: "transparent", b: "rgba(22,35,53,0.30)" },
+    interview: { label: "Leadership Interview", c: "#E74424", bg: "rgba(231,68,36,0.10)", b: "rgba(231,68,36,0.32)" },
+    short: { label: "HR Screen", c: "#162335", bg: "rgba(22,35,53,0.06)", b: "rgba(22,35,53,0.22)" },
+    verify: { label: "Targeted Follow-Up", c: "#162335", bg: "transparent", b: "rgba(22,35,53,0.30)" },
     hold: { label: "Hold", c: "rgba(22,35,53,0.55)", bg: "transparent", b: "rgba(22,35,53,0.16)" },
-    cut: { label: "Cut", c: "#9E3B28", bg: "rgba(158,59,40,0.07)", b: "rgba(158,59,40,0.24)" },
-    blocked: { label: "Review blocked", c: "#E74424", bg: "transparent", b: "rgba(231,68,36,0.32)" },
+    cut: { label: "Reject", c: "#9E3B28", bg: "rgba(158,59,40,0.07)", b: "rgba(158,59,40,0.24)" },
+    blocked: { label: "Blocked", c: "#E74424", bg: "transparent", b: "rgba(231,68,36,0.32)" },
   };
   return m[d] || m.hold;
 }

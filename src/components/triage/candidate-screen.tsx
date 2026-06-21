@@ -12,7 +12,9 @@ import {
   askTierLabel,
   logColor,
 } from "@/lib/triage/theme";
-import type { ReviewerKind, TimelineRow } from "@/lib/triage/types";
+import type { Decision, ReviewerKind, TimelineRow } from "@/lib/triage/types";
+
+const DECISION_OPTIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
 import { REVIEWER_OPTIONS } from "@/lib/triage/reviewer";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
@@ -77,7 +79,7 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
   const aSources = srcParts.join(" · ");
 
   const readRows = [
-    { label: "Decision", value: dm.label, labelColor: dm.c },
+    { label: "Action", value: dm.label, labelColor: dm.c },
     { label: "Why", value: candidate.why, labelColor: ink(0.45) },
     { label: "Main risk", value: candidate.flag, labelColor: C.brick },
     { label: "Next action", value: candidate.next, labelColor: ink(0.45) },
@@ -184,7 +186,39 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
           >
             {dm.label}
           </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <label style={{ fontFamily: F.mono, fontSize: 10.5, letterSpacing: "0.04em", textTransform: "uppercase", color: ink(0.5) }}>
+              Set status
+            </label>
+            <select
+              value={candidate.decision}
+              onChange={(e) => wsApi.setDecision(id, e.target.value as Decision)}
+              aria-label="Set candidate status manually"
+              style={{ fontFamily: F.mono, fontSize: 12.5, color: C.navy, background: "#fff", border: `1px solid ${ink(0.22)}`, borderRadius: 8, padding: "5px 9px", cursor: "pointer" }}
+            >
+              {DECISION_OPTIONS.map((d) => (
+                <option key={d} value={d}>{DM(d).label}</option>
+              ))}
+            </select>
+          </div>
           <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <button
+              onClick={() => wsApi.reanalyze(id)}
+              disabled={!!wsApi.busy[id]}
+              style={{
+                cursor: wsApi.busy[id] ? "default" : "pointer",
+                border: "none",
+                background: "transparent",
+                color: wsApi.busy[id] ? ink(0.4) : C.orange,
+                fontFamily: F.mono,
+                fontSize: 12.5,
+                padding: 0,
+                textDecoration: "underline",
+                textUnderlineOffset: 3,
+              }}
+            >
+              {wsApi.busy[id] ? "Re-analyzing…" : "Re-analyze with Claude"}
+            </button>
             <a
               href={candidate.workableUrl}
               target="_blank"
@@ -288,6 +322,23 @@ export function CandidateScreen({ wsApi, activeId, openPool }: Props) {
                 <div style={{ fontSize: 14.5, lineHeight: 1.5, color: r.value ? ink(0.85) : ink(0.45) }}>{r.value || "—"}</div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* short / verify action callout — the exact recruiting step, surfaced
+          prominently the way the cut-evidence block is for cuts. */}
+      {(candidate.decision === "short" || candidate.decision === "verify") && (
+        <div style={{ marginTop: 14, border: `1px solid ${ink(0.18)}`, borderTop: `2px solid ${C.navy}`, background: "#fff", padding: "16px 20px", maxWidth: 760 }}>
+          <div style={{ fontFamily: F.mono, fontSize: 11.5, letterSpacing: "0.05em", textTransform: "uppercase", color: C.navy }}>
+            {candidate.decision === "short"
+              ? "HR screen — confirm before leadership"
+              : "Targeted follow-up — send this"}
+          </div>
+          <div style={{ marginTop: 9, fontSize: 15.5, lineHeight: 1.55, color: ink(0.85) }}>
+            {candidate.next || (candidate.decision === "short"
+              ? "Run an HR screen to confirm the open items before leadership time."
+              : "Send a targeted follow-up to confirm the one open fact.")}
           </div>
         </div>
       )}
