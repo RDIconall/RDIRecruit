@@ -109,8 +109,15 @@ export async function listJobs(params?: {
 }
 
 export async function getJob(shortcode: string): Promise<WorkableJob> {
-  const data = await workableFetch<{ job: WorkableJob }>(`/jobs/${shortcode}`);
-  return data.job;
+  // Workable's SPI v3 single-job endpoint returns the job object at the TOP LEVEL
+  // (id, title, full_description, …) — unlike the list endpoint (`{ jobs: [...] }`)
+  // and the single-candidate endpoint (`{ candidate: {...} }`). Reading `data.job`
+  // therefore yielded `undefined`, so `full_description` was silently dropped and
+  // every job spec resolved empty (blocking grading). Accept either shape.
+  const data = await workableFetch<{ job?: WorkableJob } & Partial<WorkableJob>>(
+    `/jobs/${shortcode}`,
+  );
+  return (data.job ?? (data as WorkableJob));
 }
 
 export async function listCandidates(

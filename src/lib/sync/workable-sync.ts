@@ -73,14 +73,31 @@ export async function upsertJob(job: WorkableJob) {
 
 export async function syncJobsFromWorkable() {
   const jobs = await listJobs({ state: "published", limit: 100 });
+
+  // Which jobs already have a stored posting body? The list endpoint omits the
+  // body, so re-fetching a job we already have wastes a (rate-limited) Workable
+  // call, and — worse — if that getJob is 429'd, the old fallback overwrote
+  // jobs.raw with the body-less summary, WIPING a previously-good
+  // full_description and re-blocking grading. We therefore skip jobs that
+  // already have the body, and never clobber a stored body on failure.
+  const hasBody = new Map<string, boolean>();
+  if (hasSupabase()) {
+    const supabase = getServiceSupabase();
+    const { data: existingJobs } = await supabase.from("jobs").select("shortcode, raw");
+    for (const row of existingJobs ?? []) {
+      const raw = row.raw as { full_description?: string } | null;
+      hasBody.set(row.shortcode as string, Boolean(raw?.full_description));
+    }
+  }
+
   for (const summary of jobs) {
-    // The list endpoint omits the posting body, so storing it directly would
-    // leave jobs.raw without `full_description` — and the grading readiness gate
-    // would then block every candidate on the job for a missing job spec. Fetch
-    // the full job so the spec is available; fall back to the summary on error.
+    if (hasBody.get(summary.shortcode)) continue;
+    // Fetch the full job so the spec (full_description) is available. Only persist
+    // when we actually got a posting body; otherwise upsert the summary so the job
+    // exists, but never overwrite an existing body with a body-less summary.
     try {
       const full = await getJob(summary.shortcode);
-      await upsertJob(full);
+      await upsertJob(full?.full_description ? full : summary);
     } catch (error) {
       console.error(`Full job fetch failed for ${summary.shortcode}; storing summary only`, error);
       await upsertJob(summary);
