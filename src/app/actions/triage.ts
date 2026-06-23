@@ -27,7 +27,7 @@ import type {
   WorkspaceSlice,
 } from "@/lib/triage/types";
 
-const VALID_DECISIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
+const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
 
 async function requireAuth(): Promise<string> {
   const { userId } = await auth();
@@ -74,6 +74,8 @@ function applyRead(candidate: Candidate, read: DecisionRead): Candidate {
     next: read.next || candidate.next,
     redFlags: read.flags ?? candidate.redFlags,
     reanalysis: read.reanalysis ?? candidate.reanalysis,
+    value: read.value ?? candidate.value,
+    caveat: read.caveat ?? candidate.caveat,
     careerRead: read.careerRead ?? candidate.careerRead,
     assessment: read.assessment ?? candidate.assessment,
     assessedAt: read.assessment ? read.recalculatedAt ?? candidate.assessedAt : candidate.assessedAt,
@@ -270,7 +272,7 @@ export async function reanalyze(input: { candidateId: string }): Promise<RecalcR
 }
 
 /** What happened to the candidate's status in Workable as a result of a triage cut. */
-type WorkableSync = "disqualified" | "restore-local" | "skipped" | "failed";
+type WorkableSync = "disqualified" | "reinstated" | "skipped" | "failed";
 
 async function jobShortcodeFor(candidateId: string): Promise<string | null> {
   if (!hasSupabase()) return null;
@@ -284,9 +286,10 @@ async function jobShortcodeFor(candidateId: string): Promise<string | null> {
 }
 
 /**
- * Propagate a triage cut to Workable. Disqualify hits Workable's disqualify endpoint
- * (rate-limited) and mirrors the result back to Supabase. Restore stays local: Workable
- * has no safe requalify endpoint wired here, so un-cutting only clears our overlay.
+ * Propagate a triage cut to Workable. Disqualify hits the SPI v3
+ * `/candidates/{id}/disqualify` endpoint and reinstate hits `/candidates/{id}/revert`
+ * (both rate-limited, both require a member id, resolved in the client). After a
+ * successful write we mirror the candidate's fresh status back into Supabase.
  * Best-effort: a Workable failure never blocks the local overlay write.
  */
 async function pushDisqualifyToWorkable(
@@ -295,25 +298,37 @@ async function pushDisqualifyToWorkable(
   reason: string,
 ): Promise<WorkableSync> {
   if (!hasWorkable()) return "skipped";
-  if (!disqualified) return "restore-local";
   try {
     const shortcode = await jobShortcodeFor(candidateId);
-    if (!shortcode) return "failed";
     const { enqueueWorkableWrite } = await import("@/lib/workable/write-queue");
-    const { disqualifyCandidate, getCandidate } = await import("@/lib/workable/client");
+    const { disqualifyCandidate, revertCandidate, getCandidate } = await import("@/lib/workable/client");
+    // The SPI v3 write returns a skip sentinel (instead of throwing) when no
+    // WORKABLE_MEMBER_ID is configured — surface that as "skipped" so the UI never
+    // claims a Workable change that did not happen.
+    let skipped = false;
     await enqueueWorkableWrite(async () => {
-      // SPI v3 disqualify is account-level (candidateId + optional note) and
-      // returns an empty body, so re-fetch the candidate to mirror the new state.
-      await disqualifyCandidate(candidateId, reason);
-      if (hasSupabase()) {
-        const updated = await getCandidate(shortcode, candidateId);
-        const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
-        await upsertCandidateFromWorkable(updated, shortcode, { analyze: false, syncComments: false });
+      const res = disqualified
+        ? await disqualifyCandidate(candidateId, reason)
+        : await revertCandidate(candidateId);
+      if (res && (res as { skipped?: boolean }).skipped) {
+        skipped = true;
+        return;
+      }
+      // Mirror the fresh Workable status back into Supabase when we can.
+      if (shortcode && hasSupabase()) {
+        try {
+          const updated = await getCandidate(shortcode, candidateId);
+          const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
+          await upsertCandidateFromWorkable(updated, shortcode, { analyze: false, syncComments: false });
+        } catch (mirrorError) {
+          console.warn(`Workable status mirror skipped for ${candidateId}`, mirrorError);
+        }
       }
     });
-    return "disqualified";
+    if (skipped) return "skipped";
+    return disqualified ? "disqualified" : "reinstated";
   } catch (error) {
-    console.error(`Workable disqualify failed for ${candidateId}`, error);
+    console.error(`Workable ${disqualified ? "disqualify" : "revert"} failed for ${candidateId}`, error);
     return "failed";
   }
 }
@@ -367,7 +382,7 @@ export async function bulkDisqualify(input: {
       label,
     );
     const res = await pushDisqualifyToWorkable(id, input.disqualified, "Cut via triage");
-    if (res === "disqualified") workableDisqualified += 1;
+    if (res === "disqualified" || res === "reinstated") workableDisqualified += 1;
     else if (res === "failed") workableFailed += 1;
   }
   revalidatePath("/");

@@ -49,6 +49,7 @@ export function blockedRead(missing: ReadinessInput[]): DecisionRead {
     why: `Review blocked — cannot grade until ${describeMissing(missing)} ${missing.length === 1 ? "is" : "are"} on file.`,
     risk: "No read is possible on incomplete materials.",
     next: "Re-sync",
+    value: { headline: "No read yet", level: "none", detail: "Materials incomplete — strength-vs-salary read pending." },
     missingInputs: missing,
     recalculatedAt: new Date().toISOString(),
     model: "readiness-gate",

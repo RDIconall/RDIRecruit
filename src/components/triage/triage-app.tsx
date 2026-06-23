@@ -42,10 +42,12 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
               rev: read.rev ?? c.rev,
               revNote: read.revNote ?? c.revNote,
               careerRead: read.careerRead ?? c.careerRead,
+              value: read.value ?? c.value,
+              caveat: read.caveat ?? c.caveat,
               assessment: read.assessment ?? c.assessment,
               assessedAt: read.assessment ? read.recalculatedAt ?? c.assessedAt : c.assessedAt,
               rubricFit: read.rubricFit ?? c.rubricFit,
-              survivor: read.decision === "interview" || read.decision === "short",
+              survivor: read.decision === "interview",
             }
           : c,
       ),

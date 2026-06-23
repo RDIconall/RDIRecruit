@@ -33,14 +33,12 @@ export interface DecisionMeta {
 
 export function DM(d: Decision): DecisionMeta {
   const m: Record<Decision, DecisionMeta> = {
-    interview: { label: "Interview first", c: "#E74424", bg: "rgba(231,68,36,0.10)", b: "rgba(231,68,36,0.32)" },
-    short: { label: "Short screen", c: "#162335", bg: "rgba(22,35,53,0.06)", b: "rgba(22,35,53,0.22)" },
-    verify: { label: "Verify first", c: "#162335", bg: "transparent", b: "rgba(22,35,53,0.30)" },
-    hold: { label: "Hold", c: "rgba(22,35,53,0.55)", bg: "transparent", b: "rgba(22,35,53,0.16)" },
-    cut: { label: "Cut", c: "#9E3B28", bg: "rgba(158,59,40,0.07)", b: "rgba(158,59,40,0.24)" },
+    interview: { label: "Interview", c: "#E74424", bg: "rgba(231,68,36,0.10)", b: "rgba(231,68,36,0.32)" },
+    backup: { label: "Backup", c: "rgba(22,35,53,0.55)", bg: "transparent", b: "rgba(22,35,53,0.16)" },
+    reject: { label: "Reject", c: "#9E3B28", bg: "rgba(158,59,40,0.07)", b: "rgba(158,59,40,0.24)" },
     blocked: { label: "Review blocked", c: "#E74424", bg: "transparent", b: "rgba(231,68,36,0.32)" },
   };
-  return m[d] || m.hold;
+  return m[d] || m.backup;
 }
 
 export interface ReviewerMeta {

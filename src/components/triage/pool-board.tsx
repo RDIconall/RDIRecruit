@@ -8,13 +8,14 @@ import {
   POOL_GROUPS,
   poolGroupOf,
   verdictDot,
+  valueDot,
   fitWeight,
   describeMissingInputs,
 } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
-import type { Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+import type { Candidate, Decision, ValueRead, VerdictRead } from "@/lib/triage/types";
 
-const DECISION_OPTIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
+const DECISION_OPTIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -27,7 +28,7 @@ const ellipsis: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", text
 const cell: CSSProperties = { minWidth: 0, overflow: "hidden" };
 
 const COLS =
-  "26px 34px minmax(150px,1.6fr) minmax(110px,1.1fr) minmax(82px,0.9fr) 46px 92px minmax(98px,0.9fr) minmax(98px,0.9fr) 78px 240px";
+  "24px 30px minmax(140px,1.5fr) minmax(94px,1fr) minmax(72px,0.8fr) 40px 76px minmax(132px,1.4fr) minmax(86px,0.8fr) minmax(86px,0.8fr) 60px 210px";
 
 /**
  * Compacts a raw salary ask into a tight column-friendly form:
@@ -168,6 +169,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
               <div style={ellipsis}>Location</div>
               <div style={{ textAlign: "right" }}>Exp.</div>
               <div style={{ textAlign: "right" }}>Ask</div>
+              <div style={ellipsis}>Strength vs ask</div>
               <div style={ellipsis}>Answers</div>
               <div style={ellipsis}>Vs. spec</div>
               <div style={{ textAlign: "right" }}>RO</div>
@@ -228,8 +230,8 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
       )}
 
       {!narrow && (
-        <p style={{ margin: "22px 6px 0", fontSize: 14, lineHeight: 1.5, color: APP.faint, maxWidth: 780 }}>
-          Verdict dots: filled reads strong, hollow reads mixed, red reads weak. Both AI reads are cached at ingest — opening a candidate never re-runs the model.
+        <p style={{ margin: "22px 6px 0", fontSize: 14, lineHeight: 1.5, color: APP.faint, maxWidth: 820 }}>
+          The interview list is ranked — work it top-down (#1 first). &quot;Strength vs ask&quot; weighs the candidate against their salary target: filled accent reads strong value, hollow reads fair, red reads weak. The do-not-interview list shows the reason for each cut — tick rows to disqualify in bulk. All reads are cached; opening a candidate never re-runs the model.
         </p>
       )}
 
@@ -301,11 +303,43 @@ function StandingLine({ c }: { c: Candidate }) {
       </div>
     );
   }
+  // For the do-not-interview list, surface WHY so the reason is visible at a glance.
+  if (c.decision === "reject") {
+    const reason = c.cutReason || c.why;
+    if (reason) {
+      return (
+        <div style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })} title={reason}>
+          {reason}
+        </div>
+      );
+    }
+  }
+  // Surface the verify-first caveat as a sub-line where present.
+  if (c.caveat) {
+    return (
+      <div style={mono({ fontSize: 11, color: APP.secondary, lineHeight: 1.3, ...ellipsis })} title={c.caveat}>
+        Confirm: {c.caveat}
+      </div>
+    );
+  }
   const label = standingLabel(c.standing);
   if (!label) return null;
   return (
     <div style={mono({ fontSize: 11, color: APP.faint, lineHeight: 1.3, ...ellipsis })} title={`Pool standing: ${label}`}>
       {label}
+    </div>
+  );
+}
+
+function ValueCell({ value }: { value: ValueRead | undefined }) {
+  if (!value || value.level === "none") {
+    return <span style={mono({ fontSize: 12, color: "#C9C9C9" })}>—</span>;
+  }
+  const d = valueDot(value.level);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }} title={value.detail || value.headline}>
+      <span style={{ width: 8, height: 8, borderRadius: 9999, flexShrink: 0, background: d.fill, border: `1.5px solid ${d.color}` }} />
+      <span style={{ fontSize: 13, color: d.color, ...ellipsis }}>{value.headline}</span>
     </div>
   );
 }
@@ -590,7 +624,12 @@ function Row({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Cand
       </div>
       <Avatar c={c} />
       <div style={cell}>
-        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, ...ellipsis }} title={c.name}>{c.name}</div>
+        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, ...ellipsis }} title={c.name}>
+          {c.decision === "interview" && c.standing?.groupRank ? (
+            <span style={mono({ color: APP.accent, marginRight: 6, fontSize: 12.5 })}>#{c.standing.groupRank}</span>
+          ) : null}
+          {c.name}
+        </div>
         <div style={{ fontSize: 11.5, color: APP.muted, lineHeight: 1.2, ...ellipsis }} title={c.role}>{c.role}</div>
         <StandingLine c={c} />
       </div>
@@ -598,6 +637,9 @@ function Row({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Cand
       <div style={{ ...cell, fontSize: 13, color: APP.secondary, ...ellipsis }} title={c.locationShort}>{c.locationShort}</div>
       <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink2, fontVariantNumeric: "tabular-nums", ...ellipsis })}>{c.experience}</div>
       <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink, fontVariantNumeric: "tabular-nums", ...ellipsis })} title={c.salary}>{compactAsk(c.salary)}</div>
+      <div style={cell}>
+        <ValueCell value={c.value} />
+      </div>
       <div style={cell}>
         <Dot read={c.answersRead} />
       </div>
@@ -632,7 +674,12 @@ function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c
         <Check checked={selected} onClick={onToggle} />
         <Avatar c={c} size={30} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, ...ellipsis }}>{c.name}</div>
+          <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, ...ellipsis }}>
+            {c.decision === "interview" && c.standing?.groupRank ? (
+              <span style={mono({ color: APP.accent, marginRight: 6, fontSize: 13 })}>#{c.standing.groupRank}</span>
+            ) : null}
+            {c.name}
+          </div>
           <div style={{ fontSize: 12, color: APP.muted, lineHeight: 1.25, ...ellipsis }}>{c.role} · {c.company}</div>
           <StandingLine c={c} />
         </div>
@@ -641,6 +688,7 @@ function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", paddingLeft: 42, fontSize: 12.5, color: APP.secondary }}>
         <span style={mono({ color: APP.ink })} title={c.salary}>{compactAsk(c.salary)}</span>
         <span>{c.locationShort}</span>
+        <ValueCell value={c.value} />
         <Dot read={c.answersRead} />
         <Dot read={c.specRead} />
         <span style={{ flex: 1 }} />

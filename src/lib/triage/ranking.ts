@@ -1,19 +1,22 @@
-import { POOL_GROUPS, poolGroupOf, fitWeight } from "./app-theme";
+import { POOL_GROUPS, poolGroupOf, fitWeight, valueWeight } from "./app-theme";
 import type { Candidate, Decision, PoolStanding } from "./types";
 
-// Human label for each decision group's standing copy ("3rd of 12 interview-ready").
+// Human label for each decision group's standing copy ("3rd of 12 to interview").
 const GROUP_LABEL: Record<Decision, string> = {
-  interview: "interview-ready",
-  verify: "to verify",
-  short: "to short-screen",
-  hold: "in the hold group",
-  cut: "in the hold group",
-  blocked: "in the hold group",
+  interview: "to interview",
+  backup: "in the backup group",
+  reject: "on the do-not-interview list",
+  blocked: "blocked",
 };
 
-/** Coarse within-group fit signal — mirrors the pool board's fit sort. */
-function fit(c: Candidate): number {
-  return fitWeight(c.answersRead.level) + fitWeight(c.specRead.level);
+/**
+ * Ordering signal within a group. The interview list is worked top-down, so it is
+ * ordered by the strength-vs-salary value read first, then by raw fit; the other
+ * groups fall back to fit alone.
+ */
+function rankWeight(c: Candidate): number {
+  const value = c.value ? valueWeight(c.value.level) * 10 : 0;
+  return value + fitWeight(c.answersRead.level) + fitWeight(c.specRead.level);
 }
 
 /**
@@ -39,7 +42,7 @@ export function assignPoolStanding(
   for (const g of POOL_GROUPS) {
     const rows = active
       .filter((x) => poolGroupOf(x.c.decision) === g.key)
-      .sort((a, b) => fit(b.c) - fit(a.c) || a.index - b.index);
+      .sort((a, b) => rankWeight(b.c) - rankWeight(a.c) || a.index - b.index);
     rows.forEach((row, i) => {
       groupRank.set(row.c.id, { rank: i + 1, total: rows.length, label: GROUP_LABEL[g.key] });
     });

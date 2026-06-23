@@ -21,7 +21,8 @@ import type {
 } from "../types";
 import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
-import { avatarColor, initialsOf } from "./app-theme";
+import { avatarColor, fitWeight, initialsOf } from "./app-theme";
+import { normalizeDecision } from "./types";
 import type {
   AnswerRow,
   Candidate,
@@ -42,6 +43,7 @@ import type {
   ReviewerSignal,
   TimelineRow,
   TimelineSignal,
+  ValueRead,
   VerdictRead,
 } from "./types";
 
@@ -119,37 +121,37 @@ function hasDiscrepancy(v: VerificationPayload | null): boolean {
  */
 export function deriveDecision(input: MapInput): Decision {
   // A human's manual status wins over everything else, including the model read.
-  if (input.decisionOverride) return input.decisionOverride;
-  if (input.read?.decision) return input.read.decision;
+  // Legacy/stored values are normalized to the current four-action vocabulary.
+  if (input.decisionOverride) return normalizeDecision(input.decisionOverride);
+  if (input.read?.decision) return normalizeDecision(input.read.decision);
 
   const { score, evals } = input;
   if (!evals.invest || !score) return "blocked";
 
-  if (humanCut(input)) return "cut";
+  if (humanCut(input)) return "reject";
 
   const integrity = (evals.dig?.integrity ?? "").toLowerCase();
-  if (integrity.startsWith("material")) return "cut";
+  if (integrity.startsWith("material")) return "reject";
 
   const total = score.total ?? 0;
-  if (total < 55) return "cut";
+  if (total < 55) return "reject";
 
-  if (hasDiscrepancy(evals.verification)) return "verify";
+  // A discrepancy or an unstated salary no longer earns its own status — the
+  // candidate is held as a backup with the thing-to-confirm surfaced as a caveat.
+  if (hasDiscrepancy(evals.verification)) return "backup";
 
   const salaryUnstated = !evals.invest.ask || (score.salary_value ?? "") === "unstated";
-  if (salaryUnstated && total < 82) return "verify";
+  if (salaryUnstated && total < 82) return "backup";
 
-  if (total >= 82) return "interview";
-  if (total >= 68) return "short";
-  return "hold";
+  if (total >= 68) return "interview";
+  return "backup";
 }
 
 function nextFor(decision: Decision): string {
   return {
-    interview: "Screen",
-    short: "Short screen",
-    verify: "Verify",
-    hold: "Hold",
-    cut: "Reject",
+    interview: "Interview",
+    backup: "Hold as backup",
+    reject: "Reject",
     blocked: "Re-sync",
   }[decision];
 }
@@ -190,11 +192,6 @@ function firstSentence(text: string | null | undefined): string {
   const trimmed = text.trim();
   const m = trimmed.match(/^.*?[.!?](\s|$)/);
   return (m ? m[0] : trimmed).trim();
-}
-
-function truncate(text: string, max = 220): string {
-  if (text.length <= max) return text;
-  return text.slice(0, max - 1).trimEnd() + "…";
 }
 
 // "Clinical Data Manager at Synergen Bio" → { role, org }
@@ -287,7 +284,7 @@ function timelineFromNarrative(
       org: org || "—",
       role: role || match?.role || "Role",
       tenure: tenureFromSpan(seg.span),
-      scope: match?.read ? truncate(match.read, 180) : "—",
+      scope: match?.read || "—",
       lang: match?.level ? `Reads ${match.level}` : "—",
       signal: "Positive" as TimelineSignal,
     };
@@ -427,9 +424,9 @@ function cutFieldsFor(input: MapInput): Pick<Candidate, "cutGroup" | "cutReason"
 
   return {
     cutGroup,
-    cutReason: truncate(cutReason, 200),
+    cutReason,
     cite: citeFor(input, { cutGroup, materialIntegrity, discrepancy, hasCover, answerCount }),
-    cutMatters: dig?.integrityNote ? truncate(dig.integrityNote, 200) : truncate(input.evals.dig?.careerRead ?? "Does not remove the burden this seat exists to cover.", 200),
+    cutMatters: dig?.integrityNote || dig?.careerRead || "Does not remove the burden this seat exists to cover.",
   };
 }
 
@@ -564,7 +561,7 @@ function reviewerFrom(
     const who = c.reviewerLabel || c.reviewerKind;
     return {
       rev: reviewerSignalFor(c.reviewerKind, decision),
-      revNote: truncate(`${who}: ${c.text}`, 200),
+      revNote: `${who}: ${c.text}`,
     };
   }
   return null;
@@ -592,20 +589,18 @@ function careerReadFrom(input: MapInput): CareerRead | undefined {
   const path = dig.careerRead?.trim() || firstSentence(input.evals.invest?.summary);
   if (!path && !positive && !riskText) return undefined;
   return {
-    path: truncate(path || "Career path read not yet derived.", 320),
-    positive: truncate(positive || "No standout positive inference on file yet.", 280),
-    risk: truncate(riskText || "No decisive risk surfaced from the materials.", 280),
+    path: path || "Career path read not yet derived.",
+    positive: positive || "No standout positive inference on file yet.",
+    risk: riskText || "No decisive risk surfaced from the materials.",
     implication: implicationFor(input.read?.decision ?? deriveDecision(input)),
   };
 }
 
 function implicationFor(decision: Decision): string {
   return {
-    interview: "Clears the bar — screen this one first.",
-    short: "Worth a short screen to test the one open caveat.",
-    verify: "Promising, but verify the key claim before booking a slot.",
-    hold: "Competent but not differentiating — hold behind stronger files.",
-    cut: "Does not clear the bar for this seat — cut on the materials.",
+    interview: "Clears the bar — put them on the interview list.",
+    backup: "Competent but not differentiating — hold as a backup behind the interview list.",
+    reject: "Does not clear the bar for this seat — do not interview.",
     blocked: "Materials incomplete — re-sync before any read.",
   }[decision];
 }
@@ -649,16 +644,51 @@ function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
   switch (decision) {
     case "interview":
       return { label: "Strong fit", level: "strong" };
-    case "short":
-    case "verify":
+    case "backup":
       return { label: "Partial", level: "mixed" };
-    case "hold":
-      return { label: "Weak fit", level: "weak" };
-    case "cut":
+    case "reject":
       return { label: "Below bar", level: "weak" };
     default:
       return { label: "—", level: "none" };
   }
+}
+
+/**
+ * The headline strength-vs-salary value read for the board + page. Prefers a
+ * Claude-persisted value; otherwise derives a coarse read from the cached answer/
+ * spec fit and the salary-value signal so the column is never blank. Words only.
+ */
+function valueReadFrom(input: MapInput, decision: Decision, answers: VerdictRead, spec: VerdictRead): ValueRead {
+  if (input.read?.value) return input.read.value;
+  if (decision === "blocked") {
+    return { headline: "No read yet", level: "none", detail: "Materials incomplete — strength-vs-salary read pending." };
+  }
+
+  const strength = fitWeight(answers.level) + fitWeight(spec.level); // 0..4
+  const salaryValue = (input.score?.salary_value ?? "").toLowerCase();
+  const richAsk = salaryValue === "rich for fit" || salaryValue === "poor value";
+  const goodValue = salaryValue === "great value" || salaryValue === "justified";
+
+  let level: ValueRead["level"];
+  if (decision === "reject") level = "weak";
+  else if (strength >= 3 && !richAsk) level = "strong";
+  else if (strength <= 1 || (richAsk && strength < 3)) level = "weak";
+  else level = "fair";
+
+  const askPart = richAsk ? "rich ask" : goodValue ? "good value" : "fair ask";
+  const strengthPart = strength >= 3 ? "Strong" : strength <= 1 ? "Thin" : "Solid";
+  const headline =
+    decision === "reject"
+      ? "Below the bar for the ask"
+      : `${strengthPart} candidate, ${askPart}`;
+
+  return {
+    headline,
+    level,
+    detail:
+      input.read?.why ||
+      `Reads ${strengthPart.toLowerCase()} on the materials against a ${askPart}. Re-analyze for a full strength-vs-salary read.`,
+  };
 }
 
 /** Total years of experience, from the earliest parsed role start to now. */
@@ -701,7 +731,7 @@ export function mapCandidate(input: MapInput): Candidate {
     integrity !== "clear" && integrity !== "" && dig?.integrityNote
       ? dig.integrityNote
       : dig?.resolve?.[0] || input.evals.verification?.read || "No decisive risk surfaced.";
-  const risk = input.read?.risk || truncate(riskBase, 220);
+  const risk = input.read?.risk || riskBase;
 
   const salaryValue = input.score?.salary_value ?? null;
   const askTier = askTierFor(salaryValue);
@@ -711,6 +741,17 @@ export function mapCandidate(input: MapInput): Candidate {
   const location = input.candidate.location || ((input.candidate.raw?.address as string) ?? "") || "—";
 
   const baseRedFlags = input.read?.flags ?? redFlagsFrom(input);
+
+  const answersRead = answersReadFrom(input.evals.answerGrades);
+  const specRead = specReadFrom(input, decision);
+  const value = valueReadFrom(input, decision, answersRead, specRead);
+
+  // What must be confirmed before booking (the old "verify first", now a caveat).
+  let caveat = input.read?.caveat;
+  if (!caveat) {
+    if (hasDiscrepancy(input.evals.verification)) caveat = "Confirm the flagged discrepancy before booking an interview.";
+    else if (!invest?.ask || salaryValue === "unstated") caveat = "Salary expectation not stated — confirm it before an interview.";
+  }
 
   const candidate: Candidate = {
     id: input.candidate.workable_id,
@@ -723,13 +764,15 @@ export function mapCandidate(input: MapInput): Candidate {
     decision,
     rev: "none",
     revNote: "No human review yet — read synced from submitted materials.",
-    why: truncate(why, 240),
+    why,
     flag: risk,
-    next: (input.decisionOverride ? nextFor(input.decisionOverride) : input.read?.next) || nextFor(decision),
-    survivor: decision === "interview" || decision === "short",
+    next: (input.decisionOverride ? nextFor(normalizeDecision(input.decisionOverride)) : input.read?.next) || nextFor(decision),
+    survivor: decision === "interview",
+    value,
+    caveat,
 
     askTier,
-    askNote: invest?.vector ? truncate(invest.vector, 90) : salaryValue ?? "ask unstated",
+    askNote: invest?.vector || salaryValue || "ask unstated",
     roLevel: ro?.current_capability || ro?.seat_stratum || "—",
     roVsPool: ro?.trajectory ? TRAJECTORY_LABEL[ro.trajectory] ?? ro.trajectory : "—",
     mismatch,
@@ -766,11 +809,11 @@ export function mapCandidate(input: MapInput): Candidate {
     avatarColor: avatarColor(input.candidate.workable_id || input.candidate.name || "x"),
     locationShort: location,
     experience: experienceFrom(input.application, ro),
-    answersRead: answersReadFrom(input.evals.answerGrades),
-    specRead: specReadFrom(input, decision),
+    answersRead,
+    specRead,
   };
 
-  if (decision === "cut") {
+  if (decision === "reject") {
     Object.assign(candidate, cutFieldsFor(input));
   }
 

@@ -3,7 +3,7 @@
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { APP, DECISION_LABEL, decisionColor, verdictDot, describeMissingInputs } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
-import type { ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -11,7 +11,14 @@ import { getWorkingFileContent } from "@/app/actions/triage";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
-const DECISION_OPTIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
+const DECISION_OPTIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
+
+/** Headline color for the strength-vs-salary read on the dark assessment card. */
+function valueHeadlineColor(level: "strong" | "fair" | "weak" | "none"): string {
+  if (level === "strong") return "#93b4ff";
+  if (level === "weak") return "#f0a89e";
+  return "#fff";
+}
 
 interface Props {
   wsApi: WorkspaceApi;
@@ -450,25 +457,28 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         </div>
       )}
 
-      {/* dossier facts */}
-      <Section title="Dossier">
-        <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: "0 40px" }}>
-          {facts.map((f) => (
-            <div key={f.k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "7px 0", borderBottom: `1px solid ${APP.line}` }}>
-              <span style={mono({ fontSize: 12, color: APP.faint, textTransform: "uppercase", letterSpacing: "0.04em" })}>{f.k}</span>
-              <span style={{ fontSize: 14, color: APP.ink, textAlign: "right" }}>{f.v}</span>
-            </div>
-          ))}
-        </div>
-      </Section>
-
       {/* Claude assessment — pinned dark card */}
       <div style={{ margin: "26px 0", background: APP.ink, color: "#fff", borderRadius: 10, padding: narrow ? "18px 16px" : "22px 24px" }}>
         <div style={mono({ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.5)", marginBottom: 10 })}>
-          Claude's assessment
+          Claude&apos;s assessment
         </div>
+        {/* headline strength-vs-salary value read */}
+        {c.value && c.value.level !== "none" && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={mono({ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 4 })}>
+              Strength vs salary target
+            </div>
+            <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-0.01em", color: valueHeadlineColor(c.value.level) }}>
+              {c.value.headline}
+            </div>
+            {c.value.detail && (
+              <p style={{ margin: "6px 0 0", fontSize: 14.5, lineHeight: 1.5, color: "rgba(255,255,255,0.82)" }}>{c.value.detail}</p>
+            )}
+          </div>
+        )}
         <p style={{ margin: "0 0 14px", fontSize: 17, lineHeight: 1.5 }}>{c.why || "No assessment on file yet."}</p>
-        <AssessRow label="Recommendation" value={decisionLabel} valueColor={c.decision === "interview" ? "#93b4ff" : c.decision === "cut" ? "#f0a89e" : "#fff"} />
+        <AssessRow label="Recommendation" value={decisionLabel} valueColor={c.decision === "interview" ? "#93b4ff" : c.decision === "reject" ? "#f0a89e" : "#fff"} />
+        {c.caveat && <AssessRow label="Confirm first" value={c.caveat} valueColor="#f5d28a" />}
         {c.flag && <AssessRow label="Main risk" value={c.flag} />}
         {c.next && <AssessRow label="Next" value={c.next} />}
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
@@ -499,6 +509,67 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           </button>
         </div>
       </div>
+
+      {/* application answers — surfaced right under the assessment (their own words) */}
+      {c.answers.length > 0 && (
+        <Section title="Their answers">
+          <p style={mono({ margin: "0 0 14px", fontSize: 12, color: APP.faint })}>
+            Shown in the order answered · Claude&apos;s notes in the margin
+          </p>
+          {c.answers.map((a, i) => (
+            <div
+              key={i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: narrow ? "1fr" : "1fr 260px",
+                gap: narrow ? 8 : 22,
+                padding: "14px 0",
+                borderBottom: `1px solid ${APP.line}`,
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>
+                  <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
+                  {a.q || "Application question"}
+                </div>
+                <p style={{ margin: "6px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2, whiteSpace: "pre-wrap" }}>{a.a}</p>
+              </div>
+              <div style={{ minWidth: 0 }}>
+                {a.comment ? (
+                  <div
+                    style={mono({
+                      fontSize: 12.5,
+                      lineHeight: 1.5,
+                      color: APP.secondary,
+                      background: APP.accentSoft,
+                      border: `1px solid ${APP.accentBorder}`,
+                      borderRadius: 8,
+                      padding: "9px 11px",
+                    })}
+                  >
+                    <span style={{ color: APP.accent, fontWeight: 600 }}>Claude</span>
+                    <span style={{ display: "block", marginTop: 3 }}>{a.comment}</span>
+                  </div>
+                ) : (
+                  !narrow && <span style={mono({ fontSize: 11.5, color: APP.faint })}>No comment</span>
+                )}
+              </div>
+            </div>
+          ))}
+        </Section>
+      )}
+
+      {/* dossier facts */}
+      <Section title="Dossier">
+        <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: "0 40px" }}>
+          {facts.map((f) => (
+            <div key={f.k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "7px 0", borderBottom: `1px solid ${APP.line}` }}>
+              <span style={mono({ fontSize: 12, color: APP.faint, textTransform: "uppercase", letterSpacing: "0.04em" })}>{f.k}</span>
+              <span style={{ fontSize: 14, color: APP.ink, textAlign: "right" }}>{f.v}</span>
+            </div>
+          ))}
+        </div>
+      </Section>
 
       {/* bio */}
       {bio.length > 0 && (
@@ -682,55 +753,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         </Section>
       )}
 
-      {/* application answers — original order, Claude's comments alongside */}
-      {c.answers.length > 0 && (
-        <Section title="Application answers">
-          <p style={mono({ margin: "0 0 14px", fontSize: 12, color: APP.faint })}>
-            Shown in the order answered · Claude&apos;s notes in the margin
-          </p>
-          {c.answers.map((a, i) => (
-            <div
-              key={i}
-              style={{
-                display: "grid",
-                gridTemplateColumns: narrow ? "1fr" : "1fr 260px",
-                gap: narrow ? 8 : 22,
-                padding: "14px 0",
-                borderBottom: `1px solid ${APP.line}`,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>
-                  <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
-                  {a.q || "Application question"}
-                </div>
-                <p style={{ margin: "6px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2, whiteSpace: "pre-wrap" }}>{a.a}</p>
-              </div>
-              <div style={{ minWidth: 0 }}>
-                {a.comment ? (
-                  <div
-                    style={mono({
-                      fontSize: 12.5,
-                      lineHeight: 1.5,
-                      color: APP.secondary,
-                      background: APP.accentSoft,
-                      border: `1px solid ${APP.accentBorder}`,
-                      borderRadius: 8,
-                      padding: "9px 11px",
-                    })}
-                  >
-                    <span style={{ color: APP.accent, fontWeight: 600 }}>Claude</span>
-                    <span style={{ display: "block", marginTop: 3 }}>{a.comment}</span>
-                  </div>
-                ) : (
-                  !narrow && <span style={mono({ fontSize: 11.5, color: APP.faint })}>No comment</span>
-                )}
-              </div>
-            </div>
-          ))}
-        </Section>
-      )}
-
       {/* add information — transcripts, Fireflies pulls, and comments (shared) */}
       <Section title={`Add information & comments${activity.length ? ` · ${activity.length}` : ""}`}>
         <p style={{ margin: "0 0 14px", fontSize: 13.5, lineHeight: 1.5, color: APP.muted }}>
@@ -740,15 +762,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         {activity.length > 0 ? (
           <div style={{ marginBottom: 16 }}>
             {activity.map((e) => (
-              <div key={e.id} style={{ display: "flex", gap: 12, padding: "10px 0", borderBottom: `1px solid ${APP.line}` }}>
-                <span style={mono({ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.04em", color: APP.accent, width: 70, flexShrink: 0, paddingTop: 2 })}>{e.type}</span>
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 14.5, color: APP.ink2, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{e.body}</div>
-                  <div style={mono({ fontSize: 11, color: APP.faint, marginTop: 3 })}>
-                    {e.author} · {e.at.slice(0, 16).replace("T", " ")}
-                  </div>
-                </div>
-              </div>
+              <ActivityEvent key={e.id} e={e} />
             ))}
           </div>
         ) : (
@@ -955,6 +969,63 @@ function DotInline({ read }: { read: VerdictRead }) {
       <span style={{ width: 8, height: 8, borderRadius: 9999, background: d.fill, border: `1.5px solid ${d.color}` }} />
       <span style={{ color: d.color }}>{read.label}</span>
     </span>
+  );
+}
+
+/**
+ * One activity-log row. Long entries — interview transcripts especially — collapse
+ * to a single header line (type · size + first-line preview) and expand on click,
+ * the way a Workable / Salesforce activity event does, so a pasted transcript no
+ * longer floods the page.
+ */
+function ActivityEvent({ e }: { e: ActivityEntry }) {
+  const collapsible = e.type === "interview" || e.body.length > 280;
+  const [open, setOpen] = useState(!collapsible);
+  const firstLine = e.body.split(/\r?\n/).find((l) => l.trim()) ?? e.body;
+  const preview = firstLine.length > 120 ? firstLine.slice(0, 119) + "…" : firstLine;
+  const stamp = e.at.slice(0, 16).replace("T", " ");
+  const headLabel = `${e.type === "interview" ? "Transcript" : e.type === "comment" ? "Comment" : "Note"} · ${e.body.length.toLocaleString()} chars`;
+
+  return (
+    <div style={{ display: "flex", gap: 12, padding: "10px 0", borderBottom: `1px solid ${APP.line}` }}>
+      <span style={mono({ fontSize: 10.5, textTransform: "uppercase", letterSpacing: "0.04em", color: APP.accent, width: 70, flexShrink: 0, paddingTop: 2 })}>{e.type}</span>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        {collapsible ? (
+          <>
+            <button
+              onClick={() => setOpen((v) => !v)}
+              aria-expanded={open}
+              style={{ display: "flex", alignItems: "baseline", gap: 8, width: "100%", textAlign: "left", background: "transparent", border: "none", padding: 0, cursor: "pointer" }}
+            >
+              <span style={mono({ fontSize: 11, color: APP.muted, flexShrink: 0 })}>{open ? "▾" : "▸"}</span>
+              <span
+                style={{
+                  fontSize: 14,
+                  color: open ? APP.ink : APP.ink2,
+                  fontWeight: open ? 600 : 400,
+                  lineHeight: 1.4,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: open ? "normal" : "nowrap",
+                }}
+              >
+                {open ? headLabel : preview}
+              </span>
+            </button>
+            {open && (
+              <div style={{ fontSize: 14.5, color: APP.ink2, lineHeight: 1.55, whiteSpace: "pre-wrap", marginTop: 8, paddingLeft: 14, borderLeft: `2px solid ${APP.hair}` }}>
+                {e.body}
+              </div>
+            )}
+          </>
+        ) : (
+          <div style={{ fontSize: 14.5, color: APP.ink2, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{e.body}</div>
+        )}
+        <div style={mono({ fontSize: 11, color: APP.faint, marginTop: 3 })}>
+          {e.author} · {stamp}
+        </div>
+      </div>
+    </div>
   );
 }
 

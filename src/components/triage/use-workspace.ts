@@ -79,7 +79,7 @@ export function useWorkspace(
   wsRef.current = ws;
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
-  const cuts = useMemo(() => candidates.filter((c) => c.decision === "cut"), [candidates]);
+  const cuts = useMemo(() => candidates.filter((c) => c.decision === "reject"), [candidates]);
   const openCount = cuts.filter((c) => !ws.dq[c.id]).length;
 
   const setBusyFor = useCallback((id: string, v: boolean) => {
@@ -108,7 +108,13 @@ export function useWorkspace(
     setWs((w) => ({ ...w, dq: { ...w.dq, [id]: next } }));
     void setDisqualified({ candidateId: id, disqualified: next }).then((res) => {
       if (res?.workable === "disqualified") setNotice("Disqualified in Workable too.");
-      else if (res?.workable === "failed") setNotice("Cut saved locally, but the Workable disqualify failed — retry or do it in Workable.");
+      else if (res?.workable === "reinstated") setNotice("Reinstated in Workable too.");
+      else if (res?.workable === "failed")
+        setNotice(
+          next
+            ? "Saved locally, but the Workable disqualify failed — retry or do it in Workable."
+            : "Saved locally, but the Workable reinstate failed — retry or do it in Workable.",
+        );
     });
   }, []);
 

@@ -58,18 +58,20 @@ export function fitWeight(level: VerdictLevel): number {
   return level === "strong" ? 2 : level === "mixed" ? 1 : 0;
 }
 
-// The pool's four active groups, in fixed display order (HANDOFF-v2 §1.A).
-// `cut`/`blocked` reads fold into Hold; disqualified collapses out separately.
+// The pool's groups, in fixed display order. Interview is the ranked list you
+// work top-down; Reject is the visible "do not interview" list (each with a
+// reason) so you can disqualify; Blocked is waiting on materials. Disqualified
+// candidates collapse out separately below the board.
 export const POOL_GROUPS: { key: Decision; label: string }[] = [
-  { key: "interview", label: "Interview first" },
-  { key: "verify", label: "Verify first" },
-  { key: "short", label: "Short screen" },
-  { key: "hold", label: "Hold" },
+  { key: "interview", label: "Interview — in priority order" },
+  { key: "backup", label: "Backup" },
+  { key: "reject", label: "Do not interview" },
+  { key: "blocked", label: "Review blocked" },
 ];
 
 export function poolGroupOf(decision: Decision): Decision {
-  if (decision === "interview" || decision === "verify" || decision === "short") return decision;
-  return "hold"; // hold, cut, blocked all live in the Hold group on the board
+  if (decision === "interview" || decision === "reject" || decision === "blocked") return decision;
+  return "backup";
 }
 
 // Client-safe labels for the grading-readiness inputs (the server-only readiness
@@ -87,21 +89,39 @@ export function describeMissingInputs(missing: ReadinessInput[]): string {
 
 // The fixed decision vocabulary — the ONLY status language (no scores/tiers).
 export const DECISION_LABEL: Record<Decision, string> = {
-  interview: "Interview first",
-  short: "Short screen",
-  verify: "Verify first",
-  hold: "Hold",
-  cut: "Cut",
+  interview: "Interview",
+  backup: "Backup",
+  reject: "Reject",
   blocked: "Review blocked",
 };
 
-// Neutral decision color: the accent reads "interview first", red reads "cut",
-// muted reads "blocked"; everything else is plain ink. One accent only.
+// Neutral decision color: the accent reads "interview", red reads "reject",
+// muted reads "blocked"; backup is plain ink. One accent only.
 export function decisionColor(d: Decision): string {
   if (d === "interview") return APP.accent;
-  if (d === "cut") return APP.weak;
+  if (d === "reject") return APP.weak;
   if (d === "blocked") return APP.muted;
   return APP.ink;
+}
+
+// Strength-vs-salary value read → dot color (mirrors verdictDot). strong reads
+// as the accent, fair neutral, weak red.
+export function valueDot(level: "strong" | "fair" | "weak" | "none"): { fill: string; color: string } {
+  switch (level) {
+    case "strong":
+      return { fill: APP.accent, color: APP.accent };
+    case "weak":
+      return { fill: "transparent", color: APP.weak };
+    case "none":
+      return { fill: "transparent", color: "#C9C9C9" };
+    default:
+      return { fill: "transparent", color: APP.ink };
+  }
+}
+
+// Numeric weight for ordering the interview list by value (strong first).
+export function valueWeight(level: "strong" | "fair" | "weak" | "none"): number {
+  return level === "strong" ? 2 : level === "fair" ? 1 : 0;
 }
 
 // Deterministic, stable avatar tint from a candidate id/name — muted neutrals

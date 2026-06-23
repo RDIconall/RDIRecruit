@@ -29,13 +29,12 @@ export const REVIEWER_OPTIONS: { kind: ReviewerKind; label: string }[] = [
 
 /**
  * Translate a reviewer + the resulting decision into the ReviewerSignal lens
- * used by REV()/the reviewer-signal chip. A cut/hold/blocked/verify outcome reads
- * as a concern; interview/short reads as positive. Lara's cut is a hard no.
+ * used by REV()/the reviewer-signal chip. A reject/backup/blocked outcome reads
+ * as a concern; interview reads as positive. Lara's reject is a hard no.
  */
 export function reviewerSignalFor(kind: ReviewerKind, decision: Decision): ReviewerSignal {
-  const concern =
-    decision === "cut" || decision === "hold" || decision === "blocked" || decision === "verify";
+  const concern = decision === "reject" || decision === "backup" || decision === "blocked";
   if (kind === "conall") return concern ? "conallConcern" : "conallPos";
-  if (kind === "lara") return decision === "cut" ? "laraNo" : concern ? "laraConcern" : "laraPos";
+  if (kind === "lara") return decision === "reject" ? "laraNo" : concern ? "laraConcern" : "laraPos";
   return "second"; // other reviewer — flag for a second read
 }

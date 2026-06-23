@@ -111,26 +111,21 @@ function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
 function deriveMeta(candidates: Candidate[], jobShortcode: string, title: string): PoolMeta {
   const n = (d: Candidate["decision"]) => candidates.filter((c) => c.decision === d).length;
   const interview = n("interview");
-  const short = n("short");
-  const verify = n("verify");
-  const worth = interview + short + verify;
-  const cut = n("cut");
+  const backup = n("backup");
+  const reject = n("reject");
 
   let healthState: string;
-  if (interview > 0) healthState = "Has interview-ready files";
-  else if (short > 0) healthState = "Usable, not strong";
-  else if (worth > 0) healthState = "Needs verification";
+  if (interview > 0) healthState = "Has people to interview";
+  else if (backup > 0) healthState = "Backups only, no clear interview";
   else healthState = "Thin";
 
   const healthRead =
     candidates.length === 0
       ? "No candidates synced for this job yet."
-      : `${candidates.length} in pool · ${worth} worth screening, ${cut} to cut. ` +
+      : `${candidates.length} in pool · ${interview} to interview, ${backup} backup, ${reject} to reject. ` +
         (interview > 0
-          ? `Clear the cut list, then screen the ${interview} interview-ready file${interview === 1 ? "" : "s"} first.`
-          : short > 0
-            ? `No standout interview-first file yet — clear the cut list, then short-screen the strongest group.`
-            : `Clear the cut list and keep recruiting; nothing yet clears the bar for a first interview.`);
+          ? `Work the interview list top-down (it's ranked), then clear the do-not-interview list.`
+          : `No file clears the bar for a first interview yet — review the backups and keep recruiting.`);
 
   return {
     title,

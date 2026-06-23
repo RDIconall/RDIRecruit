@@ -54,6 +54,10 @@ export function renderWorkingFile(
     `- Salary ask: ${c.salary}\n` +
     `- RO level: ${c.roLevel}\n` +
     `- Decision: ${DM(c.decision).label}${opts.disqualified ? " (DISQUALIFIED)" : ""}\n` +
+    (c.value && c.value.headline && c.value.headline !== "—"
+      ? `- Strength vs salary: ${c.value.headline}${c.value.detail ? ` — ${c.value.detail}` : ""}\n`
+      : "") +
+    (c.caveat ? `- Confirm before interview: ${c.caveat}\n` : "") +
     `- Workable: ${opts.workableUrl}\n` +
     `- Last updated: ${nowStamp()}\n\n`;
 

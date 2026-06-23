@@ -4,7 +4,7 @@ import { env, hasAnthropic } from "../env";
 import { computeCommute } from "./commute";
 import { gradeLog } from "./grade-log";
 import type { RosterEntry } from "./load";
-import type { AssessmentNarrative, CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit } from "./types";
+import type { AssessmentNarrative, CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit, ValueRead } from "./types";
 
 const MODEL = "claude-sonnet-4-6";
 
@@ -12,32 +12,39 @@ const MODEL = "claude-sonnet-4-6";
 // Used to ground Claude's fallback commute estimate.
 const OFFICE = `RDI's office in ${env.RDI_OFFICE_ADDRESS}`;
 
-const VALID_DECISIONS: Decision[] = ["interview", "short", "verify", "hold", "cut", "blocked"];
+const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
 
-const SYSTEM_PROMPT = `You are the candidate-triage decision engine for RDI Trials. Your job is to protect interview time: cut weak candidates first, decide who is worth a screen, and flag who needs verification before any human time is spent.
+const SYSTEM_PROMPT = `You are the candidate-triage decision engine for RDI Trials. Your job is to protect interview time. You answer three questions for the recruiter: (1) how strong is this candidate relative to the salary they are asking for, (2) is this someone to interview, hold as a backup, or reject, and (3) if interview, why they rank where they do against the rest of the pool.
 
-OUTPUT IS A DECISION, NOT A SCORE. You must NEVER produce, mention, or imply a numeric score, points, percentage, grade, or tier. The ONLY status language allowed is this fixed decision vocabulary:
-- "interview"  = Interview first (clears the bar; screen this one first)
-- "short"      = Short screen (worth a quick screen, with a caveat to test)
-- "verify"     = Verify first (promising but a key claim, salary, or fact must be confirmed before a slot)
-- "hold"       = Hold (competent but not differentiating; does not beat the top of the pool)
-- "cut"        = Cut (reject on materials — application-care failure, contradiction, pattern risk, or role mismatch)
-- "blocked"    = Review blocked (materials incomplete / failed to parse — no read possible until re-sync)
+OUTPUT IS A DECISION, NOT A SCORE. You must NEVER produce, mention, or imply a numeric score, points, percentage, grade, or tier. The ONLY status language allowed is this fixed four-action vocabulary:
+- "interview" = Interview. Worth your time; belongs on the ranked interview list.
+- "backup"    = Backup. Competent but does not beat the interview list — only reach for them if the top of the list falls through.
+- "reject"    = Reject / do not interview. Below the bar for this seat — application-care failure, contradiction, pattern risk, role mismatch, or simply outclassed by the pool. ALWAYS give a concrete reason in "why".
+- "blocked"   = Review blocked. Materials incomplete / failed to parse — no read possible until re-sync.
+There is no "short screen" and no "verify first" status. If a key claim, fact, or salary needs confirming before booking, the candidate can still be "interview" or "backup" — put what must be confirmed in the "caveat" field.
 
-Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. Integrity problems and clear contradictions are gates: they push to cut regardless of fit.
+JUDGE STRENGTH VS SALARY. The headline judgment is the candidate's strength weighed against their salary target. Strength = the quality of the life/career choices visible on the résumé (progression, tenure, the level their biggest accomplishments imply), the substance of their answers to the application questions, and their fit to the ROLE SPEC and JOB RUBRIC. Weigh that against their stated/target salary. A strong operator at a fair ask is high value; a thin candidate at a top-of-band ask is poor value. Fill the "value" object with this read.
+
+Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. Integrity problems and clear contradictions are gates: they push to reject regardless of fit.
 
 When a named human reviewer (e.g. Conall or Lara) leaves a correction, treat their signal as authoritative human judgment and weight it accordingly — name them as the source of the change.
 
 GROUND YOUR REASONING IN THE SUPPLIED METHOD. When a "HOW WE HIRE" methodology doc is provided below, that is the org's evaluation philosophy — reason the way it says to (read choices and omissions, weigh the gap not the person, run the reads in its order). When a ROLE SPEC and JOB RUBRIC are provided, judge fit strictly against them.
 
-RANK AGAINST THE POOL. When a POOL ROSTER is provided, it lists every OTHER candidate in this job's pool with their current decision. Your call is RELATIVE, not absolute: "interview" is reserved for files that beat the top of the current pool; "hold" means competent but does NOT beat the candidates already worth screening. Position this candidate against that roster and say, in "why", roughly where they stand relative to the pool (e.g. "among the strongest", "mid-pack", "below the top group") — but NEVER as a number, percentile, or tier.
+RANK AGAINST THE POOL. When a POOL ROSTER is provided, it lists every OTHER candidate in this job's pool with their current decision. Your call is RELATIVE, not absolute: "interview" is reserved for files that genuinely beat the field on strength-for-the-ask; "backup" means competent but does NOT beat the interview list. In "why", say plainly where they stand relative to the pool (e.g. "among the strongest for the ask", "mid-pack", "below the interview list") so the recruiter can order who to interview first — but NEVER as a number, percentile, or tier.
 
 Return JSON only, no prose outside the JSON, in exactly this shape:
 {
   "decision": one of ${VALID_DECISIONS.map((d) => `"${d}"`).join(" | ")},
-  "why": "one or two sentences — the decisive reason for this call, grounded in the materials/corrections",
+  "why": "one or two sentences — the decisive reason for this call AND roughly where they stand in the pool, grounded in the materials/corrections",
   "risk": "the single main risk or the one thing a human must settle (one sentence)",
-  "next": "the concrete next action, e.g. Screen | Short screen | Verify | Hold | Reject | Re-sync",
+  "next": "the concrete next action, e.g. Interview | Hold as backup | Reject | Re-sync",
+  "caveat": "what must be confirmed before an interview (a claim, a fact, or the salary), or an empty string if nothing needs confirming",
+  "value": {
+    "headline": "a short strength-vs-salary verdict, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Overpriced for the level'",
+    "level": "strong | fair | weak",
+    "detail": "1-2 sentences weighing their strength (résumé choices + answers + spec/rubric fit) against their salary target"
+  },
   "timelineNote": "one short note on what changed vs the prior read, or empty string if nothing changed",
   "careerRead": {
     "path": "the candidate's career-path read in one or two sentences (no numbers)",
@@ -57,6 +64,7 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
     "commute": "One or two sentences: state where the candidate currently lives, then estimate the typical driving commute time (in minutes) from there to ${OFFICE}. Use your geographic knowledge to give a realistic door-to-door drive-time estimate (e.g. 'about 25-35 minutes in normal traffic'). If the location is far (another state/country) say so plainly and note relocation would be required. If no location is on file, say it is not stated and must be confirmed."
   }
 }
+The "value" object MUST ALWAYS be included — it is the headline strength-vs-salary read the recruiter sees first.
 The "careerRead" object is optional context — include it when you have enough to say something real, otherwise omit it entirely.
 The "assessment" object MUST ALWAYS be included — it is the written candidate brief the recruiter reads. Ground every claim in the supplied materials (résumé, cover letter, answers, transcript). Prose only, never a numeric score.
 The "rubricFit" object MUST be included whenever a JOB RUBRIC and/or a ROLE SPEC is provided below. Grade strictly against the JOB RUBRIC's categories, hard gates, and pattern-recognition guidance when one is provided; when there is NO separate rubric, the ROLE SPEC is the grading basis — judge fit against the spec's responsibilities and requirements instead. Translate any point bands into the words-only verdict — NEVER output a numeric score. Omit "rubricFit" only when NEITHER a rubric nor a role spec is provided.`;
@@ -200,6 +208,19 @@ function parseAssessment(value: unknown): AssessmentNarrative | undefined {
   return { bio, application, commute };
 }
 
+function parseValue(value: unknown): ValueRead | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string).trim() : "");
+  const headline = str("headline");
+  const detail = str("detail");
+  const rawLevel = str("level").toLowerCase();
+  const level: ValueRead["level"] =
+    rawLevel === "strong" ? "strong" : rawLevel === "weak" ? "weak" : rawLevel === "fair" ? "fair" : "none";
+  if (!headline && !detail && level === "none") return undefined;
+  return { headline: headline || "—", level: level === "none" ? "fair" : level, detail };
+}
+
 function parseRubricFit(value: unknown): RubricFit | undefined {
   if (!value || typeof value !== "object") return undefined;
   const v = value as Record<string, unknown>;
@@ -274,6 +295,10 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       why: (parsed.why || input.candidate.why || "").trim(),
       risk: (parsed.risk || input.candidate.flag || "").trim(),
       next: (parsed.next || "").trim(),
+      caveat: (typeof (parsed as Record<string, unknown>).caveat === "string"
+        ? ((parsed as Record<string, unknown>).caveat as string).trim()
+        : "") || undefined,
+      value: parseValue((parsed as Record<string, unknown>).value),
       timelineNote: (parsed.timelineNote || "").trim() || undefined,
       careerRead: parseCareerRead((parsed as Record<string, unknown>).careerRead),
       assessment,

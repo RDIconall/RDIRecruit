@@ -1,11 +1,38 @@
 // Decision vocabulary — the ONLY status language. No scores, no tiers.
+// Four meaningful actions:
+//   interview = Interview (worth your time; ranked in priority order)
+//   backup    = Backup (competent, only if the interview list falls through)
+//   reject    = Reject / do not interview (with a reason — the cut list)
+//   blocked   = Review blocked (materials incomplete — no read possible)
 export type Decision =
   | "interview"
-  | "short"
-  | "verify"
-  | "hold"
-  | "cut"
+  | "backup"
+  | "reject"
   | "blocked";
+
+// Legacy persisted decisions (pre-collapse) that may still live in stored reads /
+// overrides. Mapped to the four current actions at the data boundary.
+export type LegacyDecision = "short" | "verify" | "hold" | "cut";
+
+/** Normalize any stored/legacy decision to the current four-action vocabulary. */
+export function normalizeDecision(d: string | null | undefined): Decision {
+  switch (d) {
+    case "interview":
+    case "short": // "short screen" was still worth human time → interview
+    case "verify": // "verify first" → interview, with the caveat surfaced separately
+      return "interview";
+    case "backup":
+    case "hold":
+      return "backup";
+    case "reject":
+    case "cut":
+      return "reject";
+    case "blocked":
+      return "blocked";
+    default:
+      return "backup";
+  }
+}
 
 // Reviewer-signal lens (Conall / Lara).
 export type ReviewerSignal =
@@ -66,6 +93,23 @@ export type VerdictLevel = "strong" | "mixed" | "weak" | "none";
 export interface VerdictRead {
   label: string;
   level: VerdictLevel;
+}
+
+// The headline "strength vs salary target" read — the core judgment the recruiter
+// wants: how strong is this person (life choices on the résumé + answers + fit to
+// the spec/rubric) weighed against what they are asking to be paid. Words only,
+// never a number.
+//   strong = strong candidate for the ask (good value)
+//   fair   = strength and ask line up (priced about right)
+//   weak   = not strong enough for what they want (poor value / overpriced)
+export type ValueLevel = "strong" | "fair" | "weak" | "none";
+
+export interface ValueRead {
+  // One-line verdict, e.g. "Strong operator, fair ask" / "Overpriced for the level".
+  headline: string;
+  level: ValueLevel;
+  // 1-2 sentences weighing candidate strength against the salary target.
+  detail: string;
 }
 
 export type CutGroup = "care" | "evidence" | "pattern" | "mismatch" | "human";
@@ -274,6 +318,13 @@ export interface Candidate {
   next: string;
   survivor: boolean;
 
+  // The headline strength-vs-salary read (surfaced at the top of the page + on the
+  // board). Prefer the Claude-generated value; degrades to a derived read.
+  value: ValueRead;
+  // What must be confirmed before booking an interview (the old "verify first",
+  // now a caveat flag rather than a status). Empty when there is nothing to verify.
+  caveat?: string;
+
   askTier: AskTier;
   askNote: string;
   roLevel: string;
@@ -405,6 +456,10 @@ export interface DecisionRead {
   revNote?: string;
   // Career-read prose, optionally filled/refined by Claude (#6).
   careerRead?: CareerRead;
+  // Headline strength-vs-salary value read.
+  value?: ValueRead;
+  // What to confirm before an interview (verify-first caveat). Empty if nothing.
+  caveat?: string;
   // Long-form written assessment (bio / application summary / commute).
   assessment?: AssessmentNarrative;
   // Rubric-fit read, filled by Claude when a job rubric is available.
