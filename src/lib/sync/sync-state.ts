@@ -2,7 +2,6 @@ import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 
 export type SyncStateKey =
-  | "workable_events"
   | "last_incremental"
   | "last_daily"
   | "last_delta_scan"
@@ -30,11 +29,3 @@ export async function writeSyncState(key: SyncStateKey, value: Record<string, un
   });
 }
 
-export async function getEventsCursor(): Promise<string | null> {
-  const state = await readSyncState<{ since: string | null }>("workable_events", { since: null });
-  return state.since;
-}
-
-export async function setEventsCursor(since: string) {
-  await writeSyncState("workable_events", { since });
-}

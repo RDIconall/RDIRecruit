@@ -5,6 +5,10 @@ const envSchema = z.object({
   WORKABLE_API_KEY: z.string().optional(),
   WORKABLE_SUBDOMAIN: z.string().default("rditrials"),
   WORKABLE_WEBHOOK_SECRET: z.string().optional(),
+  // Member id credited with candidate write actions (move/disqualify/revert/
+  // comment). Required by the SPI v3 action endpoints; when unset those writes
+  // skip gracefully (logged, no throw). Discover it via GET /members.
+  WORKABLE_MEMBER_ID: z.string().optional(),
   SUPABASE_URL: z.string().optional(),
   SUPABASE_SERVICE_KEY: z.string().optional(),
   SUPABASE_ANON_KEY: z.string().optional(),

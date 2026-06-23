@@ -12,23 +12,121 @@ function headers(): Record<string, string> {
   };
 }
 
+// Workable enforces ~10 req/s per token and returns 429 when exceeded. 5xx are
+// transient. We retry both, bounded, honouring rate-limit headers when present.
+const MAX_RETRIES = 5;
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Read the server-advised wait from a throttled/erroring response. Workable does
+ * not consistently document `Retry-After`, so we also accept `X-Rate-Limit-Reset`
+ * (epoch seconds) and tolerate either a delta-seconds or HTTP-date `Retry-After`.
+ */
+function retryAfterMs(res: Response): number | null {
+  const retryAfter = res.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = Number(retryAfter);
+    if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+    const dateMs = Date.parse(retryAfter);
+    if (Number.isFinite(dateMs)) return Math.max(0, dateMs - Date.now());
+  }
+  const reset = res.headers.get("x-rate-limit-reset");
+  if (reset) {
+    const resetSec = Number(reset);
+    if (Number.isFinite(resetSec)) {
+      const ms = resetSec * 1000 - Date.now();
+      if (ms > 0) return ms;
+    }
+  }
+  return null;
+}
+
+/** Exponential backoff (base 500ms, capped 20s) with full jitter. */
+function backoffMs(attempt: number): number {
+  const ceil = Math.min(20_000, 500 * 2 ** attempt);
+  return Math.round(ceil / 2 + Math.random() * (ceil / 2));
+}
+
 export async function workableFetch<T>(
   path: string,
   options: RequestInit = {},
 ): Promise<T> {
-  const url = `${BASE_URL()}${path}`;
-  const res = await fetch(url, {
-    ...options,
-    headers: {
-      ...headers(),
-      ...(options.headers as Record<string, string> | undefined),
-    },
-  });
-  if (!res.ok) {
+  // `paging.next` returns a fully-qualified URL — follow it verbatim rather than
+  // re-prefixing the base, while relative paths keep the subdomain base URL.
+  const url = path.startsWith("http") ? path : `${BASE_URL()}${path}`;
+  let lastError: Error | null = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        ...options,
+        headers: {
+          ...headers(),
+          ...(options.headers as Record<string, string> | undefined),
+        },
+      });
+    } catch (networkError) {
+      // Transient network/DNS blips: back off and retry, then surface the error.
+      lastError =
+        networkError instanceof Error ? networkError : new Error(String(networkError));
+      if (attempt < MAX_RETRIES) {
+        await sleep(backoffMs(attempt));
+        continue;
+      }
+      throw lastError;
+    }
+
+    // 429 (rate limit) and 5xx (transient) are retryable. Don't read the body
+    // before deciding — `continue` discards the response and retries cleanly.
+    if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
+      const waitMs = retryAfterMs(res) ?? backoffMs(attempt);
+      console.warn(
+        `workable.fetch.retry: ${res.status} on ${path} — attempt ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`,
+      );
+      await sleep(waitMs);
+      continue;
+    }
+
     const body = await res.text();
-    throw new Error(`Workable API error ${res.status} on ${path}: ${body}`);
+    if (!res.ok) {
+      throw new Error(`Workable API error ${res.status} on ${path}: ${body}`);
+    }
+    // Action endpoints (move/disqualify/revert/comments) return 200/202 with an
+    // empty or `text/plain` body. Don't blow up trying to JSON-parse a non-JSON
+    // success body — return undefined for empty, parsed JSON when possible, else
+    // the raw text.
+    if (!body) return undefined as T;
+    try {
+      return JSON.parse(body) as T;
+    } catch {
+      return body as unknown as T;
+    }
   }
-  return res.json() as Promise<T>;
+
+  throw lastError ?? new Error(`Workable API error on ${path}: retries exhausted`);
+}
+
+/**
+ * Follow Workable's documented `paging.next` cursor (a fully-qualified URL) until
+ * exhausted, collecting every item under `key`. Robust across list endpoints and
+ * avoids the boundary-duplicate bug of hand-built `since_id` (which is inclusive).
+ * Bounded page count is a safety valve against an unexpected cursor loop.
+ * https://workable.readme.io/reference/job-candidates-index (paging.next)
+ */
+type PagedResponse = Record<string, unknown> & { paging?: { next?: string | null } };
+
+async function fetchAllPages<T>(firstPath: string, key: string): Promise<T[]> {
+  const out: T[] = [];
+  let next: string | null = firstPath;
+  for (let page = 0; next && page < 500; page += 1) {
+    const data: PagedResponse = await workableFetch<PagedResponse>(next);
+    const items = (data[key] as T[] | undefined) ?? [];
+    out.push(...items);
+    next = data.paging?.next ?? null;
+  }
+  return out;
 }
 
 export interface WorkableJob {
@@ -100,12 +198,12 @@ export async function listJobs(params?: {
   state?: string;
   limit?: number;
 }): Promise<WorkableJob[]> {
+  // `limit` is the per-page size; `paging.next` is followed to return every job
+  // (the list previously capped silently at one page of 100).
   const query = new URLSearchParams();
   if (params?.state) query.set("state", params.state);
-  if (params?.limit) query.set("limit", String(params.limit));
-  const qs = query.toString() ? `?${query}` : "";
-  const data = await workableFetch<{ jobs: WorkableJob[] }>(`/jobs${qs}`);
-  return data.jobs;
+  query.set("limit", String(params?.limit ?? 100));
+  return fetchAllPages<WorkableJob>(`/jobs?${query}`, "jobs");
 }
 
 export async function getJob(shortcode: string): Promise<WorkableJob> {
@@ -147,27 +245,35 @@ export async function getCandidate(
 }
 
 /**
- * Fetch every candidate for a job, following `since_id` pagination.
- * Workable caps a page at 100; this loops until a short page (safety cap 50 pages).
+ * Fetch a candidate via the account-level endpoint (no job shortcode needed).
+ * Used before a tags PUT to read-modify-write the current tag set. Accepts the
+ * `{ candidate: {...} }` envelope or a top-level object defensively.
+ * https://workable.readme.io/reference/update-candidate (GET /candidates/:id)
+ */
+export async function getCandidateById(id: string): Promise<WorkableCandidate> {
+  const data = await workableFetch<
+    { candidate?: WorkableCandidate } & Partial<WorkableCandidate>
+  >(`/candidates/${id}`);
+  return data.candidate ?? (data as WorkableCandidate);
+}
+
+/**
+ * Fetch every candidate for a job, following the documented `paging.next` cursor.
+ * Replaces the prior hand-built `since_id` loop, whose boundary was inclusive
+ * (`>=`) and therefore re-fetched the last row of each page as the first of the
+ * next. https://workable.readme.io/reference/job-candidates-index
  */
 export async function listAllCandidates(
   shortcode: string,
   params?: { updatedAfter?: string | null },
 ): Promise<WorkableCandidate[]> {
-  const all: WorkableCandidate[] = [];
-  let sinceId: string | undefined;
-  for (let page = 0; page < 50; page += 1) {
-    const batch = await listCandidates(shortcode, {
-      limit: 100,
-      since_id: sinceId,
-      updated_after: params?.updatedAfter ?? undefined,
-    });
-    if (!batch.length) break;
-    all.push(...batch);
-    if (batch.length < 100) break;
-    sinceId = batch[batch.length - 1]!.id;
-  }
-  return all;
+  const query = new URLSearchParams();
+  query.set("limit", "100");
+  if (params?.updatedAfter) query.set("updated_after", params.updatedAfter);
+  return fetchAllPages<WorkableCandidate>(
+    `/jobs/${shortcode}/candidates?${query}`,
+    "candidates",
+  );
 }
 
 export interface WorkableActivity {
@@ -180,75 +286,184 @@ export interface WorkableActivity {
   actor?: { name?: string };
 }
 
+/**
+ * Fetch a candidate's activity stream. We intentionally do NOT pass an `actions`
+ * filter and rely on client-side filtering instead: the action enum is not
+ * reliably documented, so an unknown value risks either an error or a silently
+ * unfiltered response. Callers should filter on the `action` field they receive.
+ * https://workable.readme.io/reference/candidate-activities
+ */
 export async function listCandidateActivities(
   candidateId: string,
-  params?: { limit?: number; actions?: string; updated_after?: string },
+  params?: { limit?: number },
 ): Promise<WorkableActivity[]> {
   const query = new URLSearchParams();
-  if (params?.limit) query.set("limit", String(params.limit ?? 50));
-  if (params?.actions) query.set("actions", params.actions);
-  if (params?.updated_after) query.set("updated_after", params.updated_after);
-  const qs = query.toString() ? `?${query}` : "";
+  query.set("limit", String(params?.limit ?? 50));
   const data = await workableFetch<{ activities: WorkableActivity[] }>(
-    `/candidates/${candidateId}/activities${qs}`,
+    `/candidates/${candidateId}/activities?${query}`,
   );
   return data.activities ?? [];
 }
 
-export async function moveCandidateStage(
-  shortcode: string,
-  candidateId: string,
-  targetStage: string,
-): Promise<WorkableCandidate> {
-  const data = await workableFetch<{ candidate: WorkableCandidate }>(
-    `/jobs/${shortcode}/candidates/${candidateId}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ candidate: { stage: targetStage } }),
-    },
-  );
-  return data.candidate;
+export interface WorkableMember {
+  id: string;
+  name: string;
+  email?: string;
+  role?: string;
 }
 
-export async function addCandidateNote(
-  shortcode: string,
+/**
+ * List account members so the operator can discover their member id. Exposed for
+ * a one-off lookup (e.g. a script) — do NOT call this on the write hot path; the
+ * member id comes from WORKABLE_MEMBER_ID. https://workable.readme.io/reference/members
+ */
+export async function listMembers(): Promise<WorkableMember[]> {
+  return fetchAllPages<WorkableMember>(`/members`, "members");
+}
+
+export interface WorkableDisqualificationReason {
+  id: string;
+  name?: string;
+}
+
+/**
+ * List the account's disqualification reasons so the operator can map a reason to
+ * an id for `disqualify_reason_id`. Not used on the hot path.
+ * https://workable.readme.io/reference/disqualification_reasons
+ */
+export async function listDisqualificationReasons(): Promise<WorkableDisqualificationReason[]> {
+  const data = await workableFetch<{
+    disqualification_reasons?: WorkableDisqualificationReason[];
+    reasons?: WorkableDisqualificationReason[];
+  }>(`/disqualification_reasons`);
+  return data.disqualification_reasons ?? data.reasons ?? [];
+}
+
+/**
+ * The member id credited with candidate write actions (move/disqualify/revert/
+ * comment). Required by the SPI v3 action endpoints. Sourced ONLY from the env —
+ * we never call GET /members on the write hot path. Returns null when unset.
+ */
+export function getWorkableMemberId(): string | null {
+  return env.WORKABLE_MEMBER_ID ?? null;
+}
+
+/** Sentinel returned (instead of throwing) when a write can't run safely. */
+export interface WorkableWriteSkipped {
+  skipped: true;
+  reason: string;
+}
+
+export type WorkableWriteResult = WorkableWriteSkipped | void;
+
+function skipWrite(action: string): WorkableWriteSkipped {
+  // Structured, greppable warning so the operator can see exactly why a Workable
+  // write was a no-op without it ever surfacing as a 500 in the triage UI.
+  console.warn(
+    `workable.write.skipped: WORKABLE_MEMBER_ID not configured (action=${action})`,
+  );
+  return { skipped: true, reason: "WORKABLE_MEMBER_ID not configured" };
+}
+
+/**
+ * Move a candidate to a stage. SPI v3: `POST /candidates/{id}/move` with a FLAT
+ * body `{ member_id, target_stage }`, returning 202 with an empty body (the prior
+ * job-scoped PATCH + nested `{candidate:{stage}}` body was not a real endpoint).
+ * Skips gracefully when no member id is configured. https://workable.readme.io/reference/move-candidate
+ */
+export async function moveCandidateStage(
   candidateId: string,
-  body: string,
-): Promise<void> {
-  await workableFetch(`/jobs/${shortcode}/candidates/${candidateId}/activities`, {
+  targetStage: string,
+): Promise<WorkableWriteResult> {
+  const memberId = getWorkableMemberId();
+  if (!memberId) return skipWrite("move");
+  await workableFetch<unknown>(`/candidates/${candidateId}/move`, {
     method: "POST",
-    body: JSON.stringify({ activity: { action: "note", body } }),
+    body: JSON.stringify({ member_id: memberId, target_stage: targetStage }),
   });
 }
 
-export async function addCandidateTags(
-  shortcode: string,
+/**
+ * Add a comment to a candidate's timeline. SPI v3: `POST /candidates/{id}/comments`
+ * with `{ member_id, comment: { body } }`, returning 201 with an empty body (the
+ * prior job-scoped `/activities` POST with `{activity:{action:"note"}}` was wrong).
+ * Skips gracefully when no member id is configured. https://workable.readme.io/reference/comment-on-candidate
+ */
+export async function addCandidateNote(
   candidateId: string,
-  tags: string[],
-): Promise<WorkableCandidate> {
-  const data = await workableFetch<{ candidate: WorkableCandidate }>(
-    `/jobs/${shortcode}/candidates/${candidateId}`,
-    {
-      method: "PATCH",
-      body: JSON.stringify({ candidate: { tags } }),
-    },
-  );
-  return data.candidate;
+  body: string,
+): Promise<WorkableWriteResult> {
+  const memberId = getWorkableMemberId();
+  if (!memberId) return skipWrite("comment");
+  await workableFetch<unknown>(`/candidates/${candidateId}/comments`, {
+    method: "POST",
+    body: JSON.stringify({ member_id: memberId, comment: { body } }),
+  });
 }
 
+/**
+ * Replace a candidate's tags. SPI v3: `PUT /candidates/{id}/tags` with a FLAT
+ * body `{ tags }` — but PUT REPLACES the entire tag set, so we first GET the
+ * candidate's current tags and union them in to avoid wiping existing tags.
+ * No member id required. https://workable.readme.io/reference/tag-candidate
+ */
+export async function addCandidateTags(
+  candidateId: string,
+  tags: string[],
+): Promise<void> {
+  let existing: string[] = [];
+  try {
+    const current = await getCandidateById(candidateId);
+    existing = current.tags ?? [];
+  } catch (error) {
+    // If we can't read current tags, fall back to adding only the new ones rather
+    // than failing the action; better to risk a missing tag than wipe the set.
+    console.warn(
+      `workable.tags: could not read current tags for ${candidateId}; merging new tags only`,
+      error,
+    );
+  }
+  const merged = Array.from(new Set([...existing, ...tags]));
+  await workableFetch<unknown>(`/candidates/${candidateId}/tags`, {
+    method: "PUT",
+    body: JSON.stringify({ tags: merged }),
+  });
+}
+
+/**
+ * Disqualify a candidate in Workable. SPI v3: `POST /candidates/{id}/disqualify`
+ * (account-level, NOT `/jobs/{shortcode}/...`) with a required `member_id`.
+ * `disqualify_note` is the current field (max 256 chars); `disqualification_reason`
+ * is deprecated. Returns 200 with an empty/plain-text body. Skips gracefully when
+ * no member id is configured. https://workable.readme.io/reference/disqualify-candidate
+ */
 export async function disqualifyCandidate(
-  shortcode: string,
   candidateId: string,
   reason?: string,
-): Promise<WorkableCandidate> {
-  const data = await workableFetch<{ candidate: WorkableCandidate }>(
-    `/jobs/${shortcode}/candidates/${candidateId}/disqualify`,
-    {
-      method: "POST",
-      body: JSON.stringify({ disqualification_reason: reason ?? "" }),
-    },
-  );
-  return data.candidate;
+): Promise<WorkableWriteResult> {
+  const memberId = getWorkableMemberId();
+  if (!memberId) return skipWrite("disqualify");
+  await workableFetch<unknown>(`/candidates/${candidateId}/disqualify`, {
+    method: "POST",
+    body: JSON.stringify({
+      member_id: memberId,
+      ...(reason ? { disqualify_note: reason.slice(0, 256) } : {}),
+    }),
+  });
+}
+
+/**
+ * Revert (undo) a candidate's disqualification. SPI v3: `POST /candidates/{id}/revert`
+ * with a required `member_id`; 200 empty/plain-text body. Skips gracefully when no
+ * member id is configured. https://workable.readme.io/reference/revert-disqualification-candidate
+ */
+export async function revertCandidate(candidateId: string): Promise<WorkableWriteResult> {
+  const memberId = getWorkableMemberId();
+  if (!memberId) return skipWrite("revert");
+  await workableFetch<unknown>(`/candidates/${candidateId}/revert`, {
+    method: "POST",
+    body: JSON.stringify({ member_id: memberId }),
+  });
 }
 
 export interface WorkableStage {
@@ -263,25 +478,6 @@ export async function listStages(shortcode: string): Promise<WorkableStage[]> {
     `/jobs/${shortcode}/stages`,
   );
   return data.stages;
-}
-
-export interface WorkableEvent {
-  id: string;
-  type: string;
-  created_at: string;
-  payload: Record<string, unknown>;
-}
-
-export async function listEvents(params?: {
-  since?: string;
-  limit?: number;
-}): Promise<WorkableEvent[]> {
-  const query = new URLSearchParams();
-  if (params?.since) query.set("since", params.since);
-  if (params?.limit) query.set("limit", String(params.limit ?? 100));
-  const qs = query.toString() ? `?${query}` : "";
-  const data = await workableFetch<{ events: WorkableEvent[] }>(`/events${qs}`);
-  return data.events;
 }
 
 export interface WorkableSubscription {
@@ -303,22 +499,31 @@ export async function listSubscriptions(): Promise<WorkableSubscription[]> {
 
 /**
  * Register a webhook subscription. Workable's SPI v3 expects a FLAT body
- * (`{ target, event, args? }`) — NOT a `{ subscription: {...} }` envelope, which
- * 422s with "param is missing… event". Omit `job_shortcode` for an account-wide
- * subscription; when present it is passed through `args` to scope the hook to one
- * job. The endpoint returns the new subscription's numeric `id`.
+ * (`{ target, event, args? }`) — NOT a `{ subscription: {...} }` envelope.
+ *
+ * Only `candidate_created` and `candidate_moved` are real subscribable candidate
+ * events. `target` MUST be unique across subscriptions (a duplicate returns 409),
+ * so do not re-create a hook that already exists (e.g. the live candidate_created
+ * subscription id 103591). When `args` is sent for candidate events the docs
+ * require all of `account_id`, `job_shortcode`, `stage_slug` — empty strings mean
+ * "all jobs"/"all stages". https://workable.readme.io/reference/webhook-subscriptions
  */
 export async function createSubscription(input: {
   target: string;
   event: string;
   job_shortcode?: string;
+  stage_slug?: string;
 }): Promise<{ id: number }> {
   const body: Record<string, unknown> = {
     target: input.target,
     event: input.event,
   };
-  if (input.job_shortcode) {
-    body.args = { job_shortcode: input.job_shortcode };
+  if (input.job_shortcode !== undefined || input.stage_slug !== undefined) {
+    body.args = {
+      account_id: env.WORKABLE_SUBDOMAIN,
+      job_shortcode: input.job_shortcode ?? "",
+      stage_slug: input.stage_slug ?? "",
+    };
   }
   return workableFetch<{ id: number }>("/subscriptions", {
     method: "POST",

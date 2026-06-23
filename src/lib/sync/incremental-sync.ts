@@ -1,5 +1,4 @@
 import { hasAnthropic, hasSupabase, hasWorkable } from "../env";
-import { listEvents, type WorkableEvent } from "../workable/client";
 import {
   scoreUnscoredAcrossJobs,
   syncCandidateById,
@@ -7,7 +6,7 @@ import {
   syncJobsFromWorkable,
   upsertCandidateFromWorkable,
 } from "./workable-sync";
-import { getEventsCursor, setEventsCursor, readSyncState, writeSyncState } from "./sync-state";
+import { readSyncState, writeSyncState } from "./sync-state";
 import { getServiceSupabase } from "../supabase/server";
 import { getCandidate } from "../workable/client";
 
@@ -16,109 +15,21 @@ export type SyncMode = "incremental" | "daily" | "full";
 export interface SyncResult {
   mode: SyncMode;
   jobs: number;
-  eventsProcessed: number;
   candidatesSynced: number;
   candidatesSkipped: number;
   scored: number;
   rescored: number;
   /** Candidates still awaiting analysis after this pass (run again to continue). */
   remaining: number;
-  cursor?: string | null;
   /** First few mirror errors, when something fails (debug aid). */
   sampleErrors?: string[];
 }
 
+// Only `candidate_created` is a real new-applicant event. Lifecycle changes
+// (stage moves, disqualification, hire) all arrive as `candidate_moved` and are
+// handled by re-fetching the full candidate (which carries stage/disqualified/
+// hired_at) in syncCandidateFromWebhook.
 const NEW_CANDIDATE_EVENTS = new Set(["candidate_created"]);
-
-const METADATA_EVENTS = new Set([
-  "candidate_moved",
-  "candidate_disqualified",
-  "candidate_requalified",
-  "candidate_hired",
-  "candidate_updated",
-]);
-
-function extractEventRef(event: WorkableEvent): {
-  candidateId?: string;
-  jobShortcode?: string;
-} {
-  const payload = event.payload as Record<string, unknown>;
-  const data = (payload.data ?? payload) as Record<string, unknown>;
-  const candidate = (data.candidate ?? data) as {
-    id?: string;
-    job?: { shortcode?: string };
-  };
-  const job = (data.job ?? candidate.job) as { shortcode?: string } | undefined;
-
-  return {
-    candidateId: candidate.id ?? (data.id as string | undefined),
-    jobShortcode: job?.shortcode ?? (data.job_shortcode as string | undefined),
-  };
-}
-
-async function processWorkableEvents(since: string | null) {
-  const events = await listEvents({
-    since: since ?? undefined,
-    limit: 100,
-  });
-
-  if (!events.length) {
-    return { processed: 0, synced: 0, scored: 0, latestCursor: since };
-  }
-
-  let synced = 0;
-  let scored = 0;
-  const seen = new Set<string>();
-  let latestCursor = since;
-
-  for (const event of events) {
-    if (event.created_at && (!latestCursor || event.created_at > latestCursor)) {
-      latestCursor = event.created_at;
-    }
-
-    const { candidateId, jobShortcode } = extractEventRef(event);
-    if (!candidateId || !jobShortcode) continue;
-
-    const dedupeKey = `${event.type}:${candidateId}:${event.created_at}`;
-    if (seen.has(dedupeKey)) continue;
-    seen.add(dedupeKey);
-
-    try {
-      if (NEW_CANDIDATE_EVENTS.has(event.type)) {
-        // Backstop for a missed `candidate_created` webhook (and the résumé-attach
-        // race where the résumé lands after creation): pull the résumé + initial
-        // score here too, mirroring the real-time webhook path exactly. The isNew /
-        // existing-score guards in syncCandidateById keep this from double-scoring a
-        // candidate the webhook already handled, and résumé re-ingest is no-op'd by
-        // needsFirstIngest once the first ingest succeeded.
-        const { upsert } = await syncCandidateById(jobShortcode, candidateId, {
-          analyze: true,
-          initialScore: true,
-        });
-        if (!upsert.skipped) {
-          synced += 1;
-          if (upsert.applicationIngested) scored += 1;
-        }
-      } else if (METADATA_EVENTS.has(event.type)) {
-        // Status/stage/comment changes only mirror metadata (fast, no Claude).
-        const candidate = await getCandidate(jobShortcode, candidateId);
-        const upsert = await upsertCandidateFromWorkable(candidate, jobShortcode, {
-          analyze: false,
-          syncComments: true,
-        });
-        if (!upsert.skipped) synced += 1;
-      }
-    } catch (error) {
-      console.error(`Event sync failed (${event.type}, ${candidateId})`, error);
-    }
-  }
-
-  if (latestCursor && latestCursor !== since) {
-    await setEventsCursor(latestCursor);
-  }
-
-  return { processed: events.length, synced, scored, latestCursor };
-}
 
 async function deltaScanAllJobs() {
   if (!hasSupabase()) return { changed: 0, skipped: 0, errors: [] as string[] };
@@ -156,9 +67,13 @@ async function deltaScanAllJobs() {
 
 /**
  * Incremental sync:
- * - Workable events since cursor (status/comment changes)
  * - Delta scan with updated_after (skips unchanged candidates)
  * - Score only brand-new applicants; interview evidence triggers rescore separately
+ *
+ * Real-time status/stage changes arrive via the `candidate_moved` webhook. The
+ * previous SPI `/events` fast-path was removed: that endpoint returns only
+ * SCHEDULED events (call/interview/meeting), never candidate-lifecycle events, so
+ * it processed nothing while burning a rate-limited call every sync.
  */
 export async function incrementalSync(mode: SyncMode = "incremental"): Promise<SyncResult> {
   if (!hasWorkable()) {
@@ -168,37 +83,22 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
   const result: SyncResult = {
     mode,
     jobs: 0,
-    eventsProcessed: 0,
     candidatesSynced: 0,
     candidatesSkipped: 0,
     scored: 0,
     rescored: 0,
     remaining: 0,
-    cursor: await getEventsCursor(),
   };
 
   result.jobs = await syncJobsFromWorkable();
 
-  // 1) Events are a best-effort fast path for status/comment changes. A failure
-  //    here (e.g. /events unavailable) must never block the candidate mirror.
-  try {
-    const since = await getEventsCursor();
-    const eventBatch = await processWorkableEvents(since);
-    result.eventsProcessed = eventBatch.processed;
-    result.candidatesSynced += eventBatch.synced;
-    result.scored += eventBatch.scored;
-    result.cursor = eventBatch.latestCursor ?? since;
-  } catch (error) {
-    console.error("Workable events step failed (continuing with delta scan)", error);
-  }
-
-  // 2) Mirror candidates into Supabase — fast, no Claude. This is the source of truth.
+  // 1) Mirror candidates into Supabase — fast, no Claude. This is the source of truth.
   const delta = await deltaScanAllJobs();
   result.candidatesSynced += delta.changed;
   result.candidatesSkipped += delta.skipped;
   if (delta.errors.length) result.sampleErrors = delta.errors;
 
-  // 3) Analyze candidates that have no score yet, within a time budget.
+  // 2) Analyze candidates that have no score yet, within a time budget.
   if (hasAnthropic()) {
     // Incremental passes stay short (the Sync button loops); cron has more room.
     // Daily budget leaves headroom under the 300s function cap for the upfront
@@ -208,7 +108,7 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
     result.scored += batch.scored;
     result.remaining = batch.remaining;
 
-    // 4) Refresh the editorial board summary for jobs whose reads just changed.
+    // 3) Refresh the editorial board summary for jobs whose reads just changed.
     if (batch.scored > 0 && hasSupabase()) {
       try {
         const { regenerateBoardSummary } = await import("../board/summary");

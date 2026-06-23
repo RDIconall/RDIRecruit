@@ -52,18 +52,26 @@ export async function advanceCandidate(input: {
 
   if (!nextStage) return { ok: false, error: "No target stage" };
 
-  await enqueueWorkableWrite(async () => {
-    const updated = await moveCandidateStage(input.jobShortcode, input.candidateId, nextStage);
-    await addCandidateNote(
-      input.jobShortcode,
-      input.candidateId,
-      `Advanced to ${nextStage} via RDI Hiring Layer`,
-    );
-    if (hasSupabase()) {
-      const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
-      await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
-    }
-  });
+  // Workable propagation is best-effort: the move endpoint returns an empty 202,
+  // so we re-fetch the candidate to mirror the new stage. A Workable failure or a
+  // member-id skip must NOT 500 the UI — the local state is the source of truth.
+  try {
+    await enqueueWorkableWrite(async () => {
+      await moveCandidateStage(input.candidateId, nextStage);
+      await addCandidateNote(
+        input.candidateId,
+        `Advanced to ${nextStage} via RDI Hiring Layer`,
+      );
+      if (hasSupabase()) {
+        const { getCandidate } = await import("@/lib/workable/client");
+        const updated = await getCandidate(input.jobShortcode, input.candidateId);
+        const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
+        await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
+      }
+    });
+  } catch (error) {
+    console.error(`Workable advance failed for ${input.candidateId}`, error);
+  }
 
   revalidatePath("/board");
   revalidatePath(`/candidates/${input.candidateId}`);
@@ -77,14 +85,15 @@ export async function holdCandidate(input: {
   await requireAuth();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
 
-  await enqueueWorkableWrite(async () => {
-    await addCandidateTags(input.jobShortcode, input.candidateId, ["hold-rdi"]);
-    await addCandidateNote(
-      input.jobShortcode,
-      input.candidateId,
-      "Marked on hold via RDI Hiring Layer",
-    );
-  });
+  // Best-effort: tags/comment writes never block the local hold state.
+  try {
+    await enqueueWorkableWrite(async () => {
+      await addCandidateTags(input.candidateId, ["hold-rdi"]);
+      await addCandidateNote(input.candidateId, "Marked on hold via RDI Hiring Layer");
+    });
+  } catch (error) {
+    console.error(`Workable hold failed for ${input.candidateId}`, error);
+  }
 
   revalidatePath("/board");
   return { ok: true };
@@ -98,17 +107,25 @@ export async function denyCandidate(input: {
   await requireAuth();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
 
-  await enqueueWorkableWrite(async () => {
-    const updated = await disqualifyCandidate(
-      input.jobShortcode,
-      input.candidateId,
-      input.reason ?? "Not a fit at this time",
-    );
-    if (hasSupabase()) {
-      const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
-      await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
-    }
-  });
+  // Best-effort Workable propagation; the local overlay below is the source of
+  // truth and is written regardless of whether the Workable write succeeds/skips.
+  try {
+    await enqueueWorkableWrite(async () => {
+      await disqualifyCandidate(input.candidateId, input.reason ?? "Not a fit at this time");
+      if (hasSupabase()) {
+        try {
+          const { getCandidate } = await import("@/lib/workable/client");
+          const updated = await getCandidate(input.jobShortcode, input.candidateId);
+          const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
+          await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
+        } catch (mirrorError) {
+          console.warn(`Workable status mirror skipped for ${input.candidateId}`, mirrorError);
+        }
+      }
+    });
+  } catch (error) {
+    console.error(`Workable disqualify failed for ${input.candidateId}`, error);
+  }
 
   if (hasSupabase()) {
     await upsertOverlay(
