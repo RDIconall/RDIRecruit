@@ -284,19 +284,46 @@ export async function listEvents(params?: {
   return data.events;
 }
 
+export interface WorkableSubscription {
+  id: number;
+  event: string;
+  target: string;
+  job_shortcode: string | null;
+  stage_slug: string | null;
+  created_at: string;
+  valid_until: string | null;
+}
+
+export async function listSubscriptions(): Promise<WorkableSubscription[]> {
+  const data = await workableFetch<{ subscriptions: WorkableSubscription[] }>(
+    "/subscriptions",
+  );
+  return data.subscriptions ?? [];
+}
+
+/**
+ * Register a webhook subscription. Workable's SPI v3 expects a FLAT body
+ * (`{ target, event, args? }`) — NOT a `{ subscription: {...} }` envelope, which
+ * 422s with "param is missing… event". Omit `job_shortcode` for an account-wide
+ * subscription; when present it is passed through `args` to scope the hook to one
+ * job. The endpoint returns the new subscription's numeric `id`.
+ */
 export async function createSubscription(input: {
   target: string;
   event: string;
   job_shortcode?: string;
-}): Promise<{ id: string }> {
-  const data = await workableFetch<{ subscription: { id: string } }>(
-    "/subscriptions",
-    {
-      method: "POST",
-      body: JSON.stringify({ subscription: input }),
-    },
-  );
-  return data.subscription;
+}): Promise<{ id: number }> {
+  const body: Record<string, unknown> = {
+    target: input.target,
+    event: input.event,
+  };
+  if (input.job_shortcode) {
+    body.args = { job_shortcode: input.job_shortcode };
+  }
+  return workableFetch<{ id: number }>("/subscriptions", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
 }
 
 export function verifyWorkableSignature(
@@ -308,8 +335,10 @@ export function verifyWorkableSignature(
   const digest = createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
-  return timingSafeEqual(
-    Buffer.from(signature),
-    Buffer.from(digest),
-  );
+  const signatureBuffer = Buffer.from(signature);
+  const digestBuffer = Buffer.from(digest);
+  // timingSafeEqual throws on length mismatch — guard so a malformed/missing
+  // signature is a clean reject (401) rather than an unhandled 500.
+  if (signatureBuffer.length !== digestBuffer.length) return false;
+  return timingSafeEqual(signatureBuffer, digestBuffer);
 }

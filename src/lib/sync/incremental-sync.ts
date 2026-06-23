@@ -84,9 +84,23 @@ async function processWorkableEvents(since: string | null) {
     seen.add(dedupeKey);
 
     try {
-      // Polled events only mirror metadata (fast). New-applicant scoring is
-      // handled by the unified analyze pass; real-time webhooks score directly.
-      if (METADATA_EVENTS.has(event.type) || NEW_CANDIDATE_EVENTS.has(event.type)) {
+      if (NEW_CANDIDATE_EVENTS.has(event.type)) {
+        // Backstop for a missed `candidate_created` webhook (and the résumé-attach
+        // race where the résumé lands after creation): pull the résumé + initial
+        // score here too, mirroring the real-time webhook path exactly. The isNew /
+        // existing-score guards in syncCandidateById keep this from double-scoring a
+        // candidate the webhook already handled, and résumé re-ingest is no-op'd by
+        // needsFirstIngest once the first ingest succeeded.
+        const { upsert } = await syncCandidateById(jobShortcode, candidateId, {
+          analyze: true,
+          initialScore: true,
+        });
+        if (!upsert.skipped) {
+          synced += 1;
+          if (upsert.applicationIngested) scored += 1;
+        }
+      } else if (METADATA_EVENTS.has(event.type)) {
+        // Status/stage/comment changes only mirror metadata (fast, no Claude).
         const candidate = await getCandidate(jobShortcode, candidateId);
         const upsert = await upsertCandidateFromWorkable(candidate, jobShortcode, {
           analyze: false,
