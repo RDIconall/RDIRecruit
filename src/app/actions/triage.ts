@@ -300,10 +300,13 @@ async function pushDisqualifyToWorkable(
     const shortcode = await jobShortcodeFor(candidateId);
     if (!shortcode) return "failed";
     const { enqueueWorkableWrite } = await import("@/lib/workable/write-queue");
-    const { disqualifyCandidate } = await import("@/lib/workable/client");
+    const { disqualifyCandidate, getCandidate } = await import("@/lib/workable/client");
     await enqueueWorkableWrite(async () => {
-      const updated = await disqualifyCandidate(shortcode, candidateId, reason);
+      // SPI v3 disqualify is account-level (candidateId + optional note) and
+      // returns an empty body, so re-fetch the candidate to mirror the new state.
+      await disqualifyCandidate(candidateId, reason);
       if (hasSupabase()) {
+        const updated = await getCandidate(shortcode, candidateId);
         const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
         await upsertCandidateFromWorkable(updated, shortcode, { analyze: false, syncComments: false });
       }

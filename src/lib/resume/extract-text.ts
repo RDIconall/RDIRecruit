@@ -1,5 +1,6 @@
 import mammoth from "mammoth";
 import { ensurePdfPolyfills } from "./pdf-polyfills";
+import { MIN_RESUME_TEXT } from "./constants";
 
 export async function extractTextFromResume(
   buffer: Buffer,
@@ -26,12 +27,29 @@ export async function extractTextFromResume(
     ensurePdfPolyfills();
     const { PDFParse } = (await import("pdf-parse")) as unknown as PdfParseModule;
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    let text: string;
     try {
       const result = await parser.getText();
-      return normalizeText(result.text ?? "");
+      text = normalizeText(result.text ?? "");
     } finally {
       await parser.destroy();
     }
+
+    // Scanned / image-only PDFs carry no text layer, so pdf-parse returns only a
+    // few stray characters. Below the "real résumé" threshold, fall back to OCR
+    // (rasterize pages → recognize). Gated on the short-text condition so the
+    // heavy WASM path only runs for the rare image PDF, never the common case.
+    if (text.length < MIN_RESUME_TEXT) {
+      try {
+        const { ocrPdfText } = await import("./ocr");
+        const ocr = normalizeText(await ocrPdfText(buffer));
+        if (ocr.length > text.length) text = ocr;
+      } catch (error) {
+        // OCR is best-effort: keep the (short) extracted text on any failure.
+        console.warn("resume.extract.ocr_fallback_failed", error instanceof Error ? error.message : error);
+      }
+    }
+    return text;
   }
 
   if (

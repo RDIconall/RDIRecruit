@@ -4,10 +4,8 @@ import { getServiceSupabase } from "../supabase/server";
 import { getJobRubric } from "../rubric/store";
 import { getMethodDoc } from "../evaluation/method";
 import { gradeLog } from "./grade-log";
+import { MIN_RESUME_TEXT } from "../resume/constants";
 import type { CandidateReadiness, ReadinessInput } from "./types";
-
-/** Minimum extracted-text length that counts as a genuinely parsed résumé. */
-const MIN_RESUME_TEXT = 60;
 /** Minimum methodology length that counts as a real "how we hire" doc. */
 const MIN_METHOD = 40;
 
@@ -65,7 +63,20 @@ export function computeReadiness(inputs: GradingInputs): CandidateReadiness {
     methodology: Boolean(inputs.methodology.trim().length >= MIN_METHOD),
   };
   const missing = (Object.keys(detail) as ReadinessInput[]).filter((k) => !detail[k]);
-  return { ready: missing.length === 0, missing, detail };
+  // Is there any résumé source at all to ingest? A signed URL or an already-
+  // stored file both mean "a résumé exists, it just isn't parsed yet" (resync /
+  // OCR can fix it). Neither present means there is genuinely no résumé on file
+  // in Workable — nothing to grade, and a resync will not conjure one.
+  const hasResumeSource = Boolean(
+    (inputs.resumeUrl && inputs.resumeUrl.trim()) ||
+      (inputs.resumeStoragePath && inputs.resumeStoragePath.trim()),
+  );
+  return {
+    ready: missing.length === 0,
+    missing,
+    detail,
+    resumeMissingFromSource: !detail.resume && !hasResumeSource,
+  };
 }
 
 /**

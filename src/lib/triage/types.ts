@@ -123,6 +123,12 @@ export interface CandidateReadiness {
   missing: ReadinessInput[];
   // Per-input presence, for granular UI / logging.
   detail: Record<ReadinessInput, boolean>;
+  // True when the résumé is missing AND there is NOTHING to ingest — no résumé
+  // URL or stored file on record in Workable. Distinguishes a genuinely
+  // résumé-less candidate ("nothing to grade") from one whose résumé simply has
+  // not been pulled/parsed yet (a resync can fix that). Drives the UI copy so a
+  // no-résumé candidate is not mistaken for a fixable bug.
+  resumeMissingFromSource: boolean;
 }
 
 // Pool-relative standing — ordinal only, NEVER a numeric score or tier. Derived

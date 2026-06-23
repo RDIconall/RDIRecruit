@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { backfillMissingResumes } from "@/lib/resume/backfill";
+import { backfillMissingResumes, recaptureBlockedResumes } from "@/lib/resume/backfill";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -10,6 +10,13 @@ export const maxDuration = 300;
  * re-run: it only touches candidates with a résumé URL and no stored copy, and is
  * time-budgeted so each pass finishes within maxDuration. Returns `remaining` so
  * a caller can keep hitting it until the backlog is drained.
+ *
+ * `?mode=recapture` instead pulls the AUTHORITATIVE Workable candidate (which
+ * carries resume_url the bulk-mirror LIST endpoint drops) for blocked candidates
+ * with no stored résumé and re-ingests any that actually have one. Extra params:
+ *   dryRun=1            only report whether Workable has a résumé (verification sample)
+ *   limit=<n>           cap candidates processed
+ *   ids=<id,id,...>     force re-ingest specific candidates (e.g. re-OCR a scan)
  */
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
@@ -17,13 +24,27 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const limitParam = request.nextUrl.searchParams.get("limit");
+  const params = request.nextUrl.searchParams;
+  const limitParam = params.get("limit");
   const limit = limitParam ? Number(limitParam) : undefined;
+  const boundedLimit = Number.isFinite(limit) ? limit : undefined;
 
   try {
+    if (params.get("mode") === "recapture") {
+      const idsParam = params.get("ids");
+      const ids = idsParam ? idsParam.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
+      const result = await recaptureBlockedResumes({
+        budgetMs: 240_000,
+        limit: boundedLimit,
+        dryRun: params.get("dryRun") === "1",
+        ids,
+      });
+      return NextResponse.json({ ok: true, mode: "recapture", ...result });
+    }
+
     const result = await backfillMissingResumes({
       budgetMs: 240_000,
-      limit: Number.isFinite(limit) ? limit : undefined,
+      limit: boundedLimit,
     });
     return NextResponse.json({ ok: true, ...result });
   } catch (error) {

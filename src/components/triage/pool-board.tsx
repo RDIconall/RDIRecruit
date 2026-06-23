@@ -282,6 +282,16 @@ function fit(c: Candidate): number {
  */
 function StandingLine({ c }: { c: Candidate }) {
   if (c.decision === "blocked" && c.readiness && !c.readiness.ready) {
+    if (c.readiness.resumeMissingFromSource) {
+      return (
+        <div
+          style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
+          title="Review blocked — no résumé on file in Workable, nothing to grade"
+        >
+          Blocked · no résumé on file
+        </div>
+      );
+    }
     return (
       <div
         style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}

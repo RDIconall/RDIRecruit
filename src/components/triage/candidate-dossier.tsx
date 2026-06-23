@@ -406,13 +406,25 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           }}
         >
           <div style={mono({ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: APP.weak })}>
-            Review blocked
+            {blockedReadiness.resumeMissingFromSource ? "Review blocked · no résumé on file" : "Review blocked"}
           </div>
-          <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5, color: APP.ink2 }}>
-            No read can be made yet — grading is waiting on{" "}
-            <strong>{describeMissingInputs(blockedReadiness.missing)}</strong>. Pull the missing
-            materials from Workable, then the candidate is graded automatically.
-          </p>
+          {blockedReadiness.resumeMissingFromSource ? (
+            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5, color: APP.ink2 }}>
+              <strong>No résumé on file in Workable</strong> — there is nothing to grade. This
+              candidate applied without attaching a résumé, so the read stays blocked until one is
+              added in Workable.
+              {blockedReadiness.missing.some((m) => m !== "resume") && (
+                <> Grading is also waiting on{" "}
+                  <strong>{describeMissingInputs(blockedReadiness.missing.filter((m) => m !== "resume"))}</strong>.</>
+              )}
+            </p>
+          ) : (
+            <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5, color: APP.ink2 }}>
+              No read can be made yet — grading is waiting on{" "}
+              <strong>{describeMissingInputs(blockedReadiness.missing)}</strong>. Pull the missing
+              materials from Workable, then the candidate is graded automatically.
+            </p>
+          )}
           <div>
             <button
               onClick={() => wsApi.resync(id)}
@@ -428,7 +440,11 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
                 fontWeight: 600,
               })}
             >
-              {busy ? "Syncing…" : "Resync from Workable & retry"}
+              {busy
+                ? "Syncing…"
+                : blockedReadiness.resumeMissingFromSource
+                  ? "Re-check Workable for a résumé"
+                  : "Resync from Workable & retry"}
             </button>
           </div>
         </div>

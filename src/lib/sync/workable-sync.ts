@@ -184,15 +184,23 @@ export async function upsertCandidateFromWorkable(
 
   const { data: existingApp } = await supabase
     .from("applications")
-    .select("id")
+    .select("id, resume_url")
     .eq("candidate_id", candidate.id)
     .maybeSingle();
 
+  // The single-candidate endpoint (getCandidate) returns `resume_url`, but the
+  // bulk LIST endpoint (listAllCandidates → the mirror) OMITS it. Writing
+  // `candidate.resume_url ?? null` therefore NULLED OUT a previously-captured
+  // résumé URL every time the mirror ran on a metadata change (stage move, etc.)
+  // — which is exactly how candidates ended up "Review blocked" with no URL on
+  // file. Never overwrite a stored non-null résumé URL with null: only update it
+  // when the authoritative fetch actually carries one.
+  const existingResumeUrl = (existingApp as { resume_url?: string | null } | null)?.resume_url ?? null;
   const applicationPayload = {
     candidate_id: candidate.id,
     answers: answersToRecord(candidate),
     cover_letter: candidate.cover_letter ?? null,
-    resume_url: candidate.resume_url ?? null,
+    resume_url: candidate.resume_url ?? existingResumeUrl,
     parsed_experience: parseExperience(candidate),
     parsed_education: parseEducation(candidate),
   };
