@@ -85,7 +85,16 @@ Return JSON only:
 
   const raw = response.content[0]?.type === "text" ? response.content[0].text : "{}";
   const match = raw.match(/\{[\s\S]*\}/);
-  const parsed = JSON.parse(match?.[0] ?? "{}") as Omit<ParsedResumeReview, "modelVersion" | "parsedAt">;
+  let parsed: Omit<ParsedResumeReview, "modelVersion" | "parsedAt">;
+  try {
+    parsed = JSON.parse(match?.[0] ?? "{}") as Omit<ParsedResumeReview, "modelVersion" | "parsedAt">;
+  } catch {
+    // Claude occasionally returns truncated/invalid JSON (e.g. long résumés hit
+    // max_tokens mid-array). Don't let that abort the whole ingest — the résumé
+    // text already extracted fine; fall back to the structured-field heuristic
+    // so resume_text + storage stay populated and the decision still re-derives.
+    return heuristicParse(input.resumeText, input.workableExperience ?? []);
+  }
 
   return {
     chronologySummary: parsed.chronologySummary ?? "Résumé chronology parsed at ingest.",

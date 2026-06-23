@@ -1,4 +1,5 @@
 import mammoth from "mammoth";
+import { ensurePdfPolyfills } from "./pdf-polyfills";
 
 export async function extractTextFromResume(
   buffer: Buffer,
@@ -18,6 +19,11 @@ export async function extractTextFromResume(
         destroy(): Promise<void>;
       };
     };
+    // pdfjs (loaded by pdf-parse) references a global DOMMatrix at module load
+    // and only self-polyfills it from the optional @napi-rs/canvas package,
+    // which isn't bundled on Vercel. Install our own before importing so the
+    // module can evaluate in any Node runtime.
+    ensurePdfPolyfills();
     const { PDFParse } = (await import("pdf-parse")) as unknown as PdfParseModule;
     const parser = new PDFParse({ data: new Uint8Array(buffer) });
     try {
@@ -44,6 +50,10 @@ export async function extractTextFromResume(
 function normalizeText(raw: string): string {
   return raw
     .replace(/\r\n/g, "\n")
+    // Postgres text/jsonb columns reject NUL (\u0000); some PDFs also emit stray
+    // C0 control chars. If left in, the résumé `applications` UPDATE fails and the
+    // row never persists. Strip them (keep tab + newline).
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

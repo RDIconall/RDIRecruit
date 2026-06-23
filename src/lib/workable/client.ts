@@ -43,6 +43,12 @@ export interface WorkableJob {
   location: { location_str: string };
   created_at: string;
   updated_at: string;
+  /**
+   * The full posting body (intro + description + requirements + benefits) as a
+   * single HTML blob. Only the single-job endpoint (`GET /jobs/{shortcode}`)
+   * returns it — the list endpoint omits it entirely.
+   */
+  full_description?: string;
   description?: string;
   requirements?: string;
 }

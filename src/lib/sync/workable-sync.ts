@@ -1,7 +1,7 @@
 import { hasAnthropic, hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import type { WorkableCandidate, WorkableJob } from "../workable/client";
-import { getCandidate, listAllCandidates, listJobs } from "../workable/client";
+import { getCandidate, getJob, listAllCandidates, listJobs } from "../workable/client";
 import { computeApplicationFingerprint } from "./candidate-hash";
 import { syncWorkableComments } from "./sync-comments";
 
@@ -73,8 +73,18 @@ export async function upsertJob(job: WorkableJob) {
 
 export async function syncJobsFromWorkable() {
   const jobs = await listJobs({ state: "published", limit: 100 });
-  for (const job of jobs) {
-    await upsertJob(job);
+  for (const summary of jobs) {
+    // The list endpoint omits the posting body, so storing it directly would
+    // leave jobs.raw without `full_description` — and the grading readiness gate
+    // would then block every candidate on the job for a missing job spec. Fetch
+    // the full job so the spec is available; fall back to the summary on error.
+    try {
+      const full = await getJob(summary.shortcode);
+      await upsertJob(full);
+    } catch (error) {
+      console.error(`Full job fetch failed for ${summary.shortcode}; storing summary only`, error);
+      await upsertJob(summary);
+    }
   }
   return jobs.length;
 }

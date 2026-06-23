@@ -29,12 +29,20 @@ function isExecutiveAssistant(title: string | null | undefined): boolean {
 
 interface JobRow {
   title?: string | null;
-  raw?: { description?: string; requirements?: string } | null;
+  raw?: { full_description?: string; description?: string; requirements?: string } | null;
 }
 
 function specFromJob(row: JobRow | null): string {
   const raw = row?.raw ?? null;
   if (!raw) return "";
+  // Workable's single-job endpoint returns the entire posting (intro +
+  // description + requirements + benefits) under `full_description`. Prefer it.
+  // Fall back to the legacy `description` / `requirements` split for jobs synced
+  // before full descriptions were fetched. The list endpoint carries none of
+  // these, which is why a job-only sync leaves the spec empty until the full job
+  // is fetched (see syncJobsFromWorkable / the run-score job-spec repair).
+  const full = htmlToText(raw.full_description);
+  if (full) return full;
   const desc = htmlToText(raw.description);
   const reqs = htmlToText(raw.requirements);
   if (!desc && !reqs) return "";

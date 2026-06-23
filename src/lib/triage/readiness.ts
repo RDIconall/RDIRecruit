@@ -36,15 +36,30 @@ export interface GradingInputs {
   methodology: string;
 }
 
-function answersPresent(answers: Record<string, string> | null): boolean {
-  if (!answers || typeof answers !== "object") return false;
+/**
+ * Whether screening answers are satisfied for grading.
+ *
+ * Answers are a CONDITIONAL input, not an absolute one: many jobs (and every
+ * sourced / directly-imported candidate) carry no screening questions at all,
+ * so a candidate must never be permanently "Review blocked" merely for lacking
+ * them — a parsed résumé + job spec + methodology is gradeable on its own.
+ *
+ * We therefore only treat answers as MISSING when the candidate was actually
+ * asked screening questions (their application carries answer keys) yet every
+ * answer is blank. An empty / absent answers record means the candidate was not
+ * screened with questions, which is not a blocker.
+ */
+function answersReady(answers: Record<string, string> | null): boolean {
+  if (!answers || typeof answers !== "object") return true;
+  const keys = Object.keys(answers);
+  if (keys.length === 0) return true;
   return Object.values(answers).some((v) => typeof v === "string" && v.trim().length > 0);
 }
 
 /** Pure readiness check over an assembled input bundle. Never throws. */
 export function computeReadiness(inputs: GradingInputs): CandidateReadiness {
   const detail: Record<ReadinessInput, boolean> = {
-    answers: answersPresent(inputs.answers),
+    answers: answersReady(inputs.answers),
     resume: Boolean(inputs.resumeText && inputs.resumeText.trim().length >= MIN_RESUME_TEXT),
     jobSpec: Boolean(inputs.jobSpec.trim()),
     methodology: Boolean(inputs.methodology.trim().length >= MIN_METHOD),

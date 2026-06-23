@@ -1,3 +1,4 @@
+import { hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { upsertOverlay } from "../data/overlay";
 import { buildSeatContext } from "../jobs/seat-context";
@@ -179,7 +180,35 @@ export async function scoreCandidate(
     rubric: jobRubric.rubricMd,
     methodology: method,
   };
-  const readiness = computeReadiness(readinessInputs);
+  let readiness = computeReadiness(readinessInputs);
+
+  // Self-heal a missing job spec. The most common reason a well-populated new
+  // candidate is blocked is that the job was mirrored from Workable's list
+  // endpoint (which omits the posting body), so jobs.raw has no full_description
+  // and the spec resolves empty. Fetch the full job once, persist it, and re-read
+  // the spec before giving up — mirrors the readiness repair on the triage path.
+  if (!readiness.ready && !readiness.detail.jobSpec && candidate.job_shortcode && hasWorkable()) {
+    try {
+      const { getJob } = await import("../workable/client");
+      const { upsertJob } = await import("../sync/workable-sync");
+      await upsertJob(await getJob(candidate.job_shortcode));
+      const refreshed = await getJobRubric(candidate.job_shortcode);
+      readinessInputs.jobSpec = refreshed.specMd;
+      readinessInputs.rubric = refreshed.rubricMd;
+      readiness = computeReadiness(readinessInputs);
+      gradeLog("score.jobspec.repaired", {
+        candidateId,
+        jobShortcode: candidate.job_shortcode,
+        ready: readiness.ready,
+      });
+    } catch (error) {
+      gradeLog("score.jobspec.repair.failed", {
+        candidateId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   if (!readiness.ready) {
     gradeLog("score.blocked", { candidateId, missing: readiness.missing });
     return { skipped: true as const, reason: "not_ready" as const, missing: readiness.missing };

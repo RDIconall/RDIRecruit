@@ -52,7 +52,7 @@ export async function ingestResumeForCandidate(input: {
   const parsedExperience = experienceFromParsedResume(parsed);
   const parsedEducation = educationFromParsedResume(parsed);
 
-  await supabase
+  const { error: appUpdateError } = await supabase
     .from("applications")
     .update({
       resume_storage_path: storagePath,
@@ -65,6 +65,12 @@ export async function ingestResumeForCandidate(input: {
       parsed_education: parsedEducation.length ? parsedEducation : input.parsedEducation,
     })
     .eq("candidate_id", input.candidateId);
+
+  // Surface (don't swallow) a failed write — otherwise the upload "succeeds" and
+  // callers count a false ingest while resume_storage_path/resume_text stay null.
+  if (appUpdateError) {
+    throw new Error(`Application résumé update failed: ${appUpdateError.message}`);
+  }
 
   await supabase.from("evidence").delete().eq("candidate_id", input.candidateId).eq("source_type", "resume");
 
