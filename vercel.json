@@ -5,6 +5,10 @@
       "schedule": "*/10 * * * *"
     },
     {
+      "path": "/api/cron/backfill-resumes",
+      "schedule": "5-59/10 * * * *"
+    },
+    {
       "path": "/api/cron/radar-enrich",
       "schedule": "*/15 * * * *"
     }
