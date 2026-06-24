@@ -20,6 +20,7 @@ import {
 } from "@tanstack/react-table";
 import {
   APP,
+  DECISION_LABEL,
   POOL_GROUPS,
   poolGroupOf,
   fitWeight,
@@ -55,6 +56,24 @@ declare module "@tanstack/react-table" {
 
 const PAGE_SIZES = [25, 50, 100] as const;
 const ALL_ROWS = 100_000; // "All" page size sentinel — larger than any real pool
+
+// The app top bar (triage-app.tsx) is sticky at 54px tall; the table header
+// parks just beneath it when the page scrolls.
+const TOPBAR_H = 54;
+// Frozen identifying columns: the checkbox + the candidate column stay pinned
+// during horizontal scroll so you never lose track of who a row is.
+const SELECT_W = 40;
+const STICKY_COLS: Record<string, number> = { select: 0, candidate: SELECT_W };
+
+type Density = "comfortable" | "compact";
+const ROW_PAD_Y: Record<Density, number> = { comfortable: 8, compact: 3 };
+const AVATAR_SIZE: Record<Density, number> = { comfortable: 30, compact: 22 };
+
+// Decision filter selector options (Coyle: "basic filter selectors").
+const GROUP_FILTERS: { value: string; label: string }[] = [
+  { value: "all", label: "All groups" },
+  ...POOL_GROUPS.map((g) => ({ value: g.key, label: DECISION_LABEL[g.key] })),
+];
 
 /** Leading integer of an experience string ("16 yr" → 16, "—" → -1) for sorting. */
 function expNum(s: string): number {
@@ -102,6 +121,16 @@ export function PoolTable({
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: ALL_ROWS });
   const [menuOpen, setMenuOpen] = useState(false);
+  const [density, setDensity] = useState<Density>("comfortable");
+  const [groupFilter, setGroupFilter] = useState<string>("all");
+
+  // Decision-group filter (Coyle: "basic filter selectors") — narrows the rows
+  // to one decision group before the table sees them, so search/sort/selection
+  // all operate on the focused set.
+  const data = useMemo(
+    () => (groupFilter === "all" ? active : active.filter((c) => poolGroupOf(c.decision) === groupFilter)),
+    [active, groupFilter],
+  );
 
   // --- URL <-> state sync (opt-in). Read once on mount to avoid hydration drift,
   // then write back on change. history.replaceState keeps it client-side. -------
@@ -160,7 +189,7 @@ export function PoolTable({
         header: "Candidate",
         sortingFn: "textCaseSensitive",
         meta: { label: "Candidate" },
-        cell: ({ row }) => <CandidateCell c={row.original} onOpen={() => openCandidate(row.original.id)} />,
+        cell: ({ row }) => <CandidateCell c={row.original} density={density} onOpen={() => openCandidate(row.original.id)} />,
       },
       {
         id: "company",
@@ -264,11 +293,11 @@ export function PoolTable({
         ),
       },
     ],
-    [openCandidate, onDisqualify, onSetDecision],
+    [openCandidate, onDisqualify, onSetDecision, density],
   );
 
   const table = useReactTable({
-    data: active,
+    data,
     columns,
     state: { sorting, rowSelection, columnVisibility, globalFilter, pagination },
     getRowId: (c) => c.id,
@@ -306,9 +335,9 @@ export function PoolTable({
 
   return (
     <div>
-      {/* toolbar: search + column visibility */}
+      {/* toolbar: search + decision filter + density + column visibility */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-        <div style={{ position: "relative", flex: "1 1 260px", maxWidth: 360 }}>
+        <div style={{ position: "relative", flex: "1 1 240px", maxWidth: 340 }}>
           <input
             type="search"
             value={globalFilter}
@@ -328,16 +357,33 @@ export function PoolTable({
             }}
           />
         </div>
+        <select
+          value={groupFilter}
+          onChange={(e) => setGroupFilter(e.target.value)}
+          aria-label="Filter by decision group"
+          style={mono({ fontSize: 12, color: APP.ink, background: APP.surface, border: `1px solid ${APP.hair}`, borderRadius: 6, padding: "7px 8px", cursor: "pointer" })}
+        >
+          {GROUP_FILTERS.map((g) => (
+            <option key={g.value} value={g.value}>
+              {g.label}
+            </option>
+          ))}
+        </select>
         <span style={{ flex: 1 }} />
+        <DensityToggle density={density} setDensity={setDensity} />
         <ColumnMenu table={table} open={menuOpen} setOpen={setMenuOpen} />
       </div>
 
-      <div style={{ overflowX: "auto" }}>
+      {/* Single-axis scroller: horizontal scroll lives here (freezing the
+          identifying columns), while overflow-y:clip lets the sticky header fall
+          through to the page scroll. See modern-css.com/sticky-rows-and-columns. */}
+      <div style={{ overflowX: "auto", overflowY: "clip" }}>
         <table
-          style={{ width: "100%", minWidth: 1490, borderCollapse: "collapse", tableLayout: "fixed", fontFamily: APP.sans }}
+          style={{ width: "100%", minWidth: 1490, borderCollapse: "separate", borderSpacing: 0, tableLayout: "fixed", fontFamily: APP.sans }}
         >
           <caption style={srOnly}>
-            Candidate triage pool, grouped by decision in priority order. Use the column headers to sort.
+            Candidate triage pool, grouped by decision in priority order. The header row and the candidate column stay
+            fixed while scrolling. Use the column headers to sort.
           </caption>
           {/* Explicit colgroup drives the fixed layout so header and body columns
               always line up — and stay correct when columns are hidden. The
@@ -375,7 +421,7 @@ export function PoolTable({
                 </th>
               </tr>
               {g.rows.map((row) => (
-                <DataRow key={row.id} row={row} onOpen={() => openCandidate(row.original.id)} />
+                <DataRow key={row.id} row={row} density={density} onOpen={() => openCandidate(row.original.id)} />
               ))}
             </tbody>
           ))}
@@ -413,6 +459,8 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
   const ariaSort = sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : canSort ? "none" : undefined;
   const align = meta?.align ?? "left";
   const label = flexRender(column.columnDef.header, header.getContext());
+  const stickyLeft = STICKY_COLS[column.id]; // undefined for non-frozen columns
+  const isFrozen = stickyLeft !== undefined;
 
   return (
     <th
@@ -423,7 +471,16 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
         textAlign: align,
         verticalAlign: "bottom",
         padding: "0 8px 7px",
+        // Header sticks beneath the app top bar (vertical) and, for the
+        // identifying columns, also to the left edge (horizontal) — the corner
+        // cells get the highest z-index so they win in both directions.
+        position: "sticky",
+        top: TOPBAR_H,
+        left: isFrozen ? stickyLeft : undefined,
+        zIndex: isFrozen ? 4 : 3,
+        background: APP.surface,
         borderBottom: `1px solid ${APP.ink}`,
+        borderRight: column.id === "candidate" ? `1px solid ${APP.hair}` : undefined,
         fontSize: 10.5,
         letterSpacing: "0.04em",
         textTransform: "uppercase",
@@ -464,32 +521,40 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
   );
 }
 
-function DataRow({ row, onOpen }: { row: Row<Candidate>; onOpen: () => void }) {
+function DataRow({ row, density, onOpen }: { row: Row<Candidate>; density: Density; onOpen: () => void }) {
   const [hover, setHover] = useState(false);
   const selected = row.getIsSelected();
+  // Frozen cells paint over the columns scrolling beneath them, so they need an
+  // opaque background that mirrors the row state (selected / hover / base).
+  const rowBg = selected ? APP.accentSoft : hover ? APP.rowHover : APP.surface;
+  const padY = ROW_PAD_Y[density];
   return (
     <tr
       onClick={onOpen}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      style={{
-        cursor: "pointer",
-        background: selected ? APP.accentSoft : hover ? APP.rowHover : "transparent",
-        borderBottom: `1px solid ${APP.line}`,
-      }}
+      style={{ cursor: "pointer", background: rowBg }}
     >
       {row.getVisibleCells().map((cell) => {
         const meta = cell.column.columnDef.meta;
         const isRowHeader = cell.column.id === "candidate";
+        const stickyLeft = STICKY_COLS[cell.column.id];
+        const isFrozen = stickyLeft !== undefined;
         const content = flexRender(cell.column.columnDef.cell, cell.getContext());
         const style: CSSProperties = {
-          padding: "7px 8px",
+          padding: `${padY}px 8px`,
           verticalAlign: "middle",
           overflow: meta?.noTruncate ? "visible" : "hidden",
           whiteSpace: meta?.noTruncate ? "nowrap" : undefined,
           textAlign: meta?.align ?? "left",
           fontSize: 13,
           color: APP.ink2,
+          // Row border lives on the cells (border-collapse: separate ignores <tr> borders).
+          borderBottom: `1px solid ${APP.line}`,
+          ...(isFrozen
+            ? { position: "sticky", left: stickyLeft, zIndex: 1, background: rowBg }
+            : null),
+          ...(cell.column.id === "candidate" ? { borderRight: `1px solid ${APP.hair}` } : null),
           ...(meta?.mono ? { fontFamily: APP.mono, fontVariantNumeric: "tabular-nums" } : null),
         };
         if (isRowHeader) {
@@ -509,10 +574,41 @@ function DataRow({ row, onOpen }: { row: Row<Candidate>; onOpen: () => void }) {
   );
 }
 
-function CandidateCell({ c, onOpen }: { c: Candidate; onOpen: () => void }) {
+function DensityToggle({ density, setDensity }: { density: Density; setDensity: (d: Density) => void }) {
+  const opt = (value: Density, label: string) => {
+    const on = density === value;
+    return (
+      <button
+        type="button"
+        onClick={() => setDensity(value)}
+        aria-pressed={on}
+        title={`${label} row height`}
+        style={mono({
+          cursor: "pointer",
+          background: on ? APP.ink : "transparent",
+          color: on ? "#fff" : APP.secondary,
+          border: "none",
+          borderRadius: 5,
+          padding: "5px 10px",
+          fontSize: 11.5,
+        })}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div role="group" aria-label="Row density" style={{ display: "inline-flex", gap: 2, border: `1px solid ${APP.hair}`, borderRadius: 7, padding: 2 }}>
+      {opt("comfortable", "Comfortable")}
+      {opt("compact", "Compact")}
+    </div>
+  );
+}
+
+function CandidateCell({ c, density, onOpen }: { c: Candidate; density: Density; onOpen: () => void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-      <Avatar c={c} size={30} />
+      <Avatar c={c} size={AVATAR_SIZE[density]} />
       <div style={{ minWidth: 0, flex: 1 }}>
         <button
           type="button"
