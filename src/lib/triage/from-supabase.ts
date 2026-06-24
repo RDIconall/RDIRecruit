@@ -21,6 +21,7 @@ import type {
 } from "../types";
 import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
+import { cityState } from "./format";
 import { avatarColor, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision } from "./types";
 import type {
@@ -817,7 +818,7 @@ export function mapCandidate(input: MapInput): Candidate {
     initials: initialsOf(input.candidate.name || "?"),
     avatarColor: avatarColor(input.candidate.workable_id || input.candidate.name || "x"),
     photoUrl: photoUrlFor(input.candidate),
-    locationShort: location,
+    locationShort: cityState(location),
     experience: experienceFrom(input.application, ro),
     answersRead,
     specRead,

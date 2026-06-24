@@ -9,33 +9,32 @@ import {
   describeMissingInputs,
 } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
-import type { Candidate, Decision, ValueRead, VerdictRead } from "@/lib/triage/types";
+import { formatAsk } from "@/lib/triage/format";
+import type { Candidate, Decision, ValueLevel, ValueRead, VerdictRead } from "@/lib/triage/types";
 
 export const DECISION_OPTIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
 
 export const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 export const ellipsis: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 
-/**
- * Compacts a raw salary ask into a tight column-friendly form:
- * "$145,000-$160,000" → "$145–160k", "$130K" → "$130k", "$70,000" → "$70k".
- * Falls back to the raw string (truncated by the cell) when it can't parse.
- */
-export function compactAsk(raw: string | null | undefined): string {
-  if (!raw) return "—";
-  if (/[mb]/i.test(raw)) return raw; // leave millions/billions untouched
-  const nums = raw.match(/\d[\d,]*/g);
-  if (!nums) return raw;
-  const toK = (s: string): number | null => {
-    const n = parseInt(s.replace(/,/g, ""), 10);
-    if (!Number.isFinite(n)) return null;
-    return n >= 1000 ? Math.round(n / 1000) : n;
-  };
-  const vals = nums.map(toK).filter((n): n is number => n != null);
-  if (vals.length === 0) return raw;
-  if (vals.length >= 2) return `$${vals[0]}–${vals[1]}k`;
-  return `$${vals[0]}k`;
+/** Compact a salary ask for the column (delegates to the shared formatter). */
+export const compactAsk = formatAsk;
+
+/** Trim a long sub-line to a single short clause so it never crowds the name. */
+function clampLine(text: string, max = 56): string {
+  const t = text.replace(/\s+/g, " ").trim();
+  if (t.length <= max) return t;
+  return t.slice(0, max - 1).trimEnd() + "…";
 }
+
+// Fixed, consistent short codes for the strength-vs-ask read — one label per
+// level, so the column always reads the same way (full read stays in the tooltip).
+const VALUE_LABEL: Record<ValueLevel, string> = {
+  strong: "Good value",
+  fair: "Fair",
+  weak: "Overpriced",
+  none: "—",
+};
 
 /**
  * Sub-line under a candidate's name: when the read is blocked, says exactly what
@@ -63,22 +62,23 @@ export function StandingLine({ c }: { c: Candidate }) {
       </div>
     );
   }
-  // For the do-not-interview list, surface WHY so the reason is visible at a glance.
+  // For the do-not-interview list, surface WHY at a glance — but only a short
+  // clause; the full reason lives in the tooltip and on the candidate page.
   if (c.decision === "reject") {
     const reason = c.cutReason || c.why;
     if (reason) {
       return (
         <div style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })} title={reason}>
-          {reason}
+          {clampLine(reason)}
         </div>
       );
     }
   }
-  // Surface the verify-first caveat as a sub-line where present.
+  // Surface the verify-first caveat as a short tag; full text in the tooltip.
   if (c.caveat) {
     return (
       <div style={mono({ fontSize: 11, color: APP.secondary, lineHeight: 1.3, ...ellipsis })} title={c.caveat}>
-        Confirm: {c.caveat}
+        Verify: {clampLine(c.caveat, 44)}
       </div>
     );
   }
@@ -96,10 +96,11 @@ export function ValueCell({ value }: { value: ValueRead | undefined }) {
     return <span style={mono({ fontSize: 12, color: "#C9C9C9" })}>—</span>;
   }
   const d = valueDot(value.level);
+  const tip = [value.headline, value.detail].filter(Boolean).join(" — ");
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }} title={value.detail || value.headline}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }} title={tip || VALUE_LABEL[value.level]}>
       <span style={{ width: 8, height: 8, borderRadius: 9999, flexShrink: 0, background: d.fill, border: `1.5px solid ${d.color}` }} />
-      <span style={{ fontSize: 13, color: d.color, ...ellipsis }}>{value.headline}</span>
+      <span style={{ fontSize: 13, color: d.color, ...ellipsis }}>{VALUE_LABEL[value.level]}</span>
     </div>
   );
 }

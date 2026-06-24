@@ -3,6 +3,7 @@ import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/preview(.*)", // unauthenticated UI preview harness (mock data only — no PII)
   "/api/hooks/(.*)",
   "/api/cron/(.*)",
   "/api/health",
