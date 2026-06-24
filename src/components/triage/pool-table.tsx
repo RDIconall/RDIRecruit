@@ -49,6 +49,7 @@ declare module "@tanstack/react-table" {
     align?: "left" | "right" | "center";
     mono?: boolean;
     label?: string; // accessible header text when the rendered header is non-textual
+    noTruncate?: boolean; // cells size to content (no overflow clipping) — e.g. action buttons
   }
 }
 
@@ -140,7 +141,7 @@ export function PoolTable({
         id: "select",
         enableSorting: false,
         enableHiding: false,
-        meta: { width: 34, align: "center" },
+        meta: { width: 40, align: "center" },
         header: ({ table }) => (
           <Checkbox
             checked={table.getIsAllRowsSelected()}
@@ -165,7 +166,7 @@ export function PoolTable({
         id: "company",
         accessorFn: (c) => c.company,
         header: "Company",
-        meta: { width: 150 },
+        meta: { width: 152 },
         cell: ({ row }) => (
           <span style={{ fontSize: 13.5, color: APP.ink2, display: "block", ...ellipsis }} title={row.original.company}>
             {row.original.company}
@@ -176,7 +177,7 @@ export function PoolTable({
         id: "location",
         accessorFn: (c) => c.locationShort,
         header: "Location",
-        meta: { width: 150 },
+        meta: { width: 146 },
         cell: ({ row }) => (
           <span style={{ fontSize: 13, color: APP.secondary, display: "block", ...ellipsis }} title={row.original.locationShort}>
             {row.original.locationShort}
@@ -188,7 +189,7 @@ export function PoolTable({
         accessorFn: (c) => expNum(c.experience),
         header: "Exp.",
         sortDescFirst: true,
-        meta: { width: 72, align: "right", mono: true },
+        meta: { width: 66, align: "right", mono: true },
         cell: ({ row }) => row.original.experience,
       },
       {
@@ -208,7 +209,7 @@ export function PoolTable({
         accessorFn: (c) => valueWeight(c.value?.level ?? "none"),
         header: "Strength vs ask",
         sortDescFirst: true,
-        meta: { width: 178 },
+        meta: { width: 188 },
         cell: ({ row }) => <ValueCell value={row.original.value} />,
       },
       {
@@ -216,7 +217,7 @@ export function PoolTable({
         accessorFn: (c) => fitWeight(c.answersRead.level),
         header: "Answers",
         sortDescFirst: true,
-        meta: { width: 124 },
+        meta: { width: 126 },
         cell: ({ row }) => <Dot read={row.original.answersRead} />,
       },
       {
@@ -224,14 +225,14 @@ export function PoolTable({
         accessorFn: (c) => fitWeight(c.specRead.level),
         header: "Vs. spec",
         sortDescFirst: true,
-        meta: { width: 124 },
+        meta: { width: 126 },
         cell: ({ row }) => <Dot read={row.original.specRead} />,
       },
       {
         id: "ro",
         accessorFn: (c) => c.roLevel,
         header: "RO",
-        meta: { width: 70, align: "right", mono: true },
+        meta: { width: 66, align: "right", mono: true },
         cell: ({ row }) => (
           <span title={row.original.roLevel} style={{ ...ellipsis, display: "block" }}>
             {row.original.roLevel}
@@ -243,18 +244,20 @@ export function PoolTable({
         enableSorting: false,
         enableHiding: false,
         header: "Actions",
-        meta: { width: 218, align: "right" },
+        meta: { width: 256, align: "right", noTruncate: true },
         cell: ({ row }) => (
-          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 9 }}>
+          <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
             <StatusSelect value={row.original.decision} onChange={(d) => onSetDecision(row.original.id, d)} />
             <a
               href={row.original.workableUrl}
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              style={mono({ fontSize: 11.5, color: APP.muted, textDecoration: "none", whiteSpace: "nowrap" })}
+              title="Open in Workable"
+              aria-label={`Open ${row.original.name} in Workable`}
+              style={mono({ fontSize: 13, color: APP.muted, textDecoration: "none", whiteSpace: "nowrap", padding: "0 2px" })}
             >
-              Workable ↗
+              ↗
             </a>
             <DisqButton onClick={() => onDisqualify(row.original.id)} />
           </div>
@@ -331,11 +334,19 @@ export function PoolTable({
 
       <div style={{ overflowX: "auto" }}>
         <table
-          style={{ width: "100%", minWidth: 1080, borderCollapse: "collapse", tableLayout: "fixed", fontFamily: APP.sans }}
+          style={{ width: "100%", minWidth: 1490, borderCollapse: "collapse", tableLayout: "fixed", fontFamily: APP.sans }}
         >
           <caption style={srOnly}>
             Candidate triage pool, grouped by decision in priority order. Use the column headers to sort.
           </caption>
+          {/* Explicit colgroup drives the fixed layout so header and body columns
+              always line up — and stay correct when columns are hidden. The
+              Candidate column has no width, so it absorbs all remaining space. */}
+          <colgroup>
+            {visibleLeaf.map((col) => (
+              <col key={col.id} style={{ width: col.columnDef.meta?.width }} />
+            ))}
+          </colgroup>
           <thead>
             <tr>
               {table.getHeaderGroups()[0].headers.map((header) => (
@@ -474,7 +485,8 @@ function DataRow({ row, onOpen }: { row: Row<Candidate>; onOpen: () => void }) {
         const style: CSSProperties = {
           padding: "7px 8px",
           verticalAlign: "middle",
-          overflow: "hidden",
+          overflow: meta?.noTruncate ? "visible" : "hidden",
+          whiteSpace: meta?.noTruncate ? "nowrap" : undefined,
           textAlign: meta?.align ?? "left",
           fontSize: 13,
           color: APP.ink2,
