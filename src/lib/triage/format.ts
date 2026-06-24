@@ -22,10 +22,10 @@ const STREET_RE = /\d|\b(st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln
 
 /** Resolve a location part to a 2-letter state code, or null if it isn't a state. */
 function toStateCode(part: string): string | null {
-  const p = part.trim().toLowerCase().replace(/\.$/, "");
+  // Strip a trailing ZIP ("California 91101", "CA 95123-1234") then match.
+  const p = part.trim().toLowerCase().replace(/\.$/, "").replace(/\s+\d{5}(-\d{4})?$/, "").trim();
   if (US_STATES[p]) return US_STATES[p];
-  // "CA" or "CA 95123" → strip a trailing ZIP and test the code.
-  const code = p.replace(/\s+\d{5}(-\d{4})?$/, "").toUpperCase();
+  const code = p.toUpperCase();
   if (code.length === 2 && STATE_CODES.has(code)) return code;
   return null;
 }

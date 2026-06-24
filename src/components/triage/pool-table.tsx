@@ -188,7 +188,7 @@ export function PoolTable({
         accessorFn: (c) => c.name,
         header: "Candidate",
         sortingFn: "textCaseSensitive",
-        meta: { label: "Candidate" },
+        meta: { label: "Candidate", width: 320 },
         cell: ({ row }) => <CandidateCell c={row.original} density={density} onOpen={() => openCandidate(row.original.id)} />,
       },
       {
@@ -315,6 +315,11 @@ export function PoolTable({
   });
 
   const visibleLeaf = table.getVisibleLeafColumns();
+  // Drive the layout off proportional weights, not fixed pixels: every column
+  // (incl. Candidate) gets a share of the table width, so widening the viewport
+  // scales the whole grid together instead of dumping all the slack into one
+  // ballooning column. minWidth = the weight sum, so below it the grid scrolls.
+  const totalWidth = visibleLeaf.reduce((sum, col) => sum + (col.columnDef.meta?.width ?? 0), 0);
   const rows = table.getRowModel().rows;
   // Bucket the (sorted / filtered / paginated) rows into the fixed decision groups
   // so the board keeps its "Interview → Backup → Reject → Blocked" priority reading
@@ -379,19 +384,21 @@ export function PoolTable({
           through to the page scroll. See modern-css.com/sticky-rows-and-columns. */}
       <div style={{ overflowX: "auto", overflowY: "clip" }}>
         <table
-          style={{ width: "100%", minWidth: 1490, borderCollapse: "separate", borderSpacing: 0, tableLayout: "fixed", fontFamily: APP.sans }}
+          style={{ width: "100%", minWidth: totalWidth, borderCollapse: "separate", borderSpacing: 0, tableLayout: "fixed", fontFamily: APP.sans }}
         >
           <caption style={srOnly}>
             Candidate triage pool, grouped by decision in priority order. The header row and the candidate column stay
             fixed while scrolling. Use the column headers to sort.
           </caption>
           {/* Explicit colgroup drives the fixed layout so header and body columns
-              always line up — and stay correct when columns are hidden. The
-              Candidate column has no width, so it absorbs all remaining space. */}
+              always line up — and stay correct when columns are hidden. Widths are
+              percentages of the weight sum, so the columns keep their proportions
+              at any table width. */}
           <colgroup>
-            {visibleLeaf.map((col) => (
-              <col key={col.id} style={{ width: col.columnDef.meta?.width }} />
-            ))}
+            {visibleLeaf.map((col) => {
+              const w = col.columnDef.meta?.width ?? 0;
+              return <col key={col.id} style={{ width: totalWidth ? `${(w / totalWidth) * 100}%` : undefined }} />;
+            })}
           </colgroup>
           <thead>
             <tr>
@@ -467,7 +474,6 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
       scope="col"
       aria-sort={ariaSort}
       style={mono({
-        width: meta?.width,
         textAlign: align,
         verticalAlign: "bottom",
         padding: "0 8px 7px",
