@@ -372,6 +372,9 @@ export interface Candidate {
   // the two cached AI reads. All derived from existing cached data, no Claude. ---
   initials: string;
   avatarColor: string;
+  // Workable profile photo (raw.image_url), when present. The board renders it as
+  // the avatar and falls back to initials + avatarColor when absent or broken.
+  photoUrl?: string;
   locationShort: string;
   experience: string; // "30+ yr" | "16 yr" | "—"
   answersRead: VerdictRead; // cached read of the application answers

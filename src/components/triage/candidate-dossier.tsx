@@ -28,15 +28,38 @@ interface Props {
 
 // ---------- small derivations (all from cached data — never Claude on render) ----------
 
-/** Leading roman numeral of an RO stratum ("IIa" → 2, "IIIb" → 3.5). */
+/**
+ * Leading roman numeral of an RO stratum, as a coarse level only ("IIa"/"IIb" → 2,
+ * "IIIb" → 3). Sub-letters are intentionally ignored — we can't reliably distinguish
+ * e.g. IIb from IIIb, so we surface the level rather than imply false precision.
+ */
 function stratumToNum(stratum: string): number | null {
-  const m = (stratum || "").trim().match(/^(VII|VI|IV|IX|V|III|II|I)([a-c])?/i);
+  const m = (stratum || "").trim().match(/^(VII|VI|IV|IX|V|III|II|I)/i);
   if (!m) return null;
   const roman: Record<string, number> = { i: 1, ii: 2, iii: 3, iv: 4, v: 5, vi: 6, vii: 7, ix: 9 };
-  const base = roman[m[1].toLowerCase()];
-  if (!base) return null;
-  const sub = m[2]?.toLowerCase();
-  return base + (sub === "b" ? 0.5 : sub === "c" ? 0.66 : 0);
+  return roman[m[1].toLowerCase()] ?? null;
+}
+
+/** Reduce an RO stratum to its level only, dropping any sub-letter ("IIIb" → "III", "IIa" → "II"). */
+function stratumLevel(stratum: string): string {
+  const m = (stratum || "").trim().match(/^(VII|VI|IV|IX|V|III|II|I)/i);
+  return m ? m[1].toUpperCase() : stratum || "—";
+}
+
+/**
+ * A sortable start key from a résumé period like "May 2020 – Present" → 2020*12+4.
+ * Periods with no parseable year sort last so they never disrupt dated roles.
+ */
+function periodStartKey(period: string | undefined | null): number {
+  if (!period) return Number.POSITIVE_INFINITY;
+  const startSide = period.split(/[–—-]/)[0] ?? period;
+  const yearM = startSide.match(/\b(?:19|20)\d{2}\b/);
+  if (!yearM) return Number.POSITIVE_INFINITY;
+  const year = parseInt(yearM[0], 10);
+  const months = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+  const lower = startSide.toLowerCase();
+  const mi = months.findIndex((mo) => lower.includes(mo));
+  return year * 12 + (mi >= 0 ? mi : 0);
 }
 
 function reviewedList(c: Candidate, activityCount: number): string[] {
@@ -131,7 +154,7 @@ function buildRecord(c: Candidate): RecordRow[] {
         role: s.role || rr?.title || "—",
         tenure: s.tenure || "—",
         accomplishment: accomplishment || "—",
-        ro: s.stratumRange || s.stratum || "—",
+        ro: stratumLevel(s.stratum || s.stratumRange),
       };
     });
   }
@@ -219,21 +242,39 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
   const chartPts = useMemo<ChartPoint[]>(() => {
     if (!c.careerProgression?.hasData) return [];
-    const rolePts: ChartPoint[] = steps
-      .map((s): ChartPoint | null => {
+    const roles = c.resume?.roles ?? [];
+    // Career steps carry no dates, so borrow the matching résumé role's period to order them.
+    const periodFor = (company: string, role: string): string | undefined => {
+      const cl = (company || "").toLowerCase();
+      const rl = (role || "").toLowerCase();
+      const hit =
+        roles.find(
+          (r) =>
+            r.company &&
+            cl &&
+            (r.company.toLowerCase().includes(cl.slice(0, 6)) || cl.includes(r.company.toLowerCase().slice(0, 6))),
+        ) ?? roles.find((r) => r.title && rl && r.title.toLowerCase().includes(rl.slice(0, 6)));
+      return hit?.period;
+    };
+    const rolePts = steps
+      .map((s, i) => {
         const y = stratumToNum(s.stratum);
-        return y == null ? null : { label: s.company || s.role || "Role", sub: s.stratum, y, kind: "role" };
+        if (y == null) return null;
+        const pt: ChartPoint = { label: s.company || s.role || "Role", sub: stratumLevel(s.stratum), y, kind: "role" };
+        return { pt, sort: periodStartKey(periodFor(s.company, s.role)), i };
       })
-      .filter((p): p is ChartPoint => p !== null);
+      .filter((p): p is { pt: ChartPoint; sort: number; i: number } => p !== null);
     if (!rolePts.length) return [];
+    // Oldest → newest; undated roles keep their original relative order at the end.
+    const ordered = rolePts.sort((a, b) => a.sort - b.sort || a.i - b.i).map((p) => p.pt);
     // Prepend an education annotation so the line reads "school → first role → …".
     const edu = (wsApi.effTimeline(id) ?? []).find((r) => r.type === "edu" && r.org && r.org !== "—");
     if (edu) {
-      const baseY = Math.min(...rolePts.map((p) => p.y));
-      rolePts.unshift({ label: edu.org, sub: "Education", y: baseY, kind: "edu" });
+      const baseY = Math.min(...ordered.map((p) => p.y));
+      ordered.unshift({ label: edu.org, sub: "Education", y: baseY, kind: "edu" });
     }
-    return rolePts;
-  }, [c.careerProgression?.hasData, steps, id, wsApi]);
+    return ordered;
+  }, [c.careerProgression?.hasData, c.resume?.roles, steps, id, wsApi]);
 
   const downloadMd = async () => {
     try {
@@ -282,7 +323,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
     { k: "On-site likelihood", v: c.logistics.likelihood && c.logistics.likelihood !== "—" ? c.logistics.likelihood : "—" },
     { k: "Experience", v: c.experience },
     { k: "Salary ask", v: c.salary },
-    { k: "RO level", v: c.roLevel },
+    { k: "RO level", v: stratumLevel(c.roLevel) },
     { k: "Answers", v: <DotInline read={c.answersRead} /> },
     { k: "Vs. spec", v: <DotInline read={c.specRead} /> },
     { k: "Recommendation", v: <span style={{ color: decisionC, fontWeight: 600 }}>{decisionLabel}</span> },

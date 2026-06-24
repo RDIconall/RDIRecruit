@@ -92,6 +92,15 @@ export interface MapInput {
   jobShortcode: string;
 }
 
+/** Pull the candidate's Workable profile photo from the raw payload, if any. */
+function photoUrlFor(candidate: CandidateRow): string | undefined {
+  const raw = candidate.raw;
+  if (!raw || typeof raw !== "object") return undefined;
+  const img = (raw as { image_url?: unknown; image?: unknown }).image_url ?? (raw as { image?: unknown }).image;
+  if (typeof img === "string" && img.startsWith("http")) return img;
+  return undefined;
+}
+
 function workableUrlFor(candidate: CandidateRow, jobShortcode: string): string {
   const raw = candidate.raw;
   const profileUrl =
@@ -807,6 +816,7 @@ export function mapCandidate(input: MapInput): Candidate {
     // v2 app-board fields — derived from cached data only.
     initials: initialsOf(input.candidate.name || "?"),
     avatarColor: avatarColor(input.candidate.workable_id || input.candidate.name || "x"),
+    photoUrl: photoUrlFor(input.candidate),
     locationShort: location,
     experience: experienceFrom(input.application, ro),
     answersRead,

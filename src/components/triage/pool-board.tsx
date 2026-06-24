@@ -1,55 +1,27 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { RowSelectionState } from "@tanstack/react-table";
 import { useRouter } from "next/navigation";
-import {
-  APP,
-  DECISION_LABEL,
-  POOL_GROUPS,
-  poolGroupOf,
-  verdictDot,
-  valueDot,
-  fitWeight,
-  describeMissingInputs,
-} from "@/lib/triage/app-theme";
-import { standingLabel } from "@/lib/triage/ranking";
-import type { Candidate, Decision, ValueRead, VerdictRead } from "@/lib/triage/types";
-
-const DECISION_OPTIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
+import { APP, POOL_GROUPS, poolGroupOf, fitWeight } from "@/lib/triage/app-theme";
+import type { Candidate, Decision } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
 import { saveJobRubric } from "@/app/actions/triage";
-
-const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
-const ellipsis: CSSProperties = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-// every grid cell needs min-width:0 so nowrap text truncates instead of
-// overflowing into the next column (CSS grid items default to min-width:auto).
-const cell: CSSProperties = { minWidth: 0, overflow: "hidden" };
-
-const COLS =
-  "24px 30px minmax(140px,1.5fr) minmax(94px,1fr) minmax(72px,0.8fr) 40px 76px minmax(132px,1.4fr) minmax(86px,0.8fr) minmax(86px,0.8fr) 60px 210px";
-
-/**
- * Compacts a raw salary ask into a tight column-friendly form:
- * "$145,000-$160,000" → "$145–160k", "$130K" → "$130k", "$70,000" → "$70k".
- * Falls back to the raw string (truncated by the cell) when it can't parse.
- */
-function compactAsk(raw: string | null | undefined): string {
-  if (!raw) return "—";
-  if (/[mb]/i.test(raw)) return raw; // leave millions/billions untouched
-  const nums = raw.match(/\d[\d,]*/g);
-  if (!nums) return raw;
-  const toK = (s: string): number | null => {
-    const n = parseInt(s.replace(/,/g, ""), 10);
-    if (!Number.isFinite(n)) return null;
-    return n >= 1000 ? Math.round(n / 1000) : n;
-  };
-  const vals = nums.map(toK).filter((n): n is number => n != null);
-  if (vals.length === 0) return raw;
-  if (vals.length >= 2) return `$${vals[0]}–${vals[1]}k`;
-  return `$${vals[0]}k`;
-}
+import { PoolTable } from "./pool-table";
+import {
+  Avatar,
+  Checkbox,
+  Dot,
+  DisqButton,
+  StandingLine,
+  StatusSelect,
+  ValueCell,
+  compactAsk,
+  ellipsis,
+  mono,
+} from "./pool-shared";
 
 interface Props {
   wsApi: WorkspaceApi;
@@ -60,14 +32,24 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
   const { candidates, meta, rubricMd, specMd } = useTriageData();
   const narrow = useIsNarrow();
   const dq = wsApi.ws.dq;
-  const [sel, setSel] = useState<Record<string, boolean>>({});
+  const [sel, setSel] = useState<RowSelectionState>({});
   const [showDisq, setShowDisq] = useState(false);
 
   const isDq = (c: Candidate) => !!dq[c.id];
-  const active = useMemo(() => candidates.filter((c) => !isDq(c)), [candidates, dq]);
+  // Active candidates, ordered the way the pool reads top-down (decision-group
+  // priority, then pool standing within the group). The table keeps this as its
+  // default order; sorting a column overrides it per group.
+  const active = useMemo(
+    () =>
+      candidates
+        .filter((c) => !isDq(c))
+        .slice()
+        .sort((a, b) => (a.standing?.overallRank ?? 1e9) - (b.standing?.overallRank ?? 1e9)),
+    [candidates, dq],
+  );
   const disqRows = useMemo(() => candidates.filter((c) => isDq(c)), [candidates, dq]);
 
-  // Group by status (fixed order); within a group sort by fit = answers + spec.
+  // Mobile-only grouping (desktop grouping lives inside PoolTable).
   const groups = useMemo(() => {
     return POOL_GROUPS.map((g) => {
       const rows = active
@@ -81,21 +63,14 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
 
   const selIds = Object.keys(sel).filter((k) => sel[k] && active.some((c) => c.id === k));
   const selCount = selIds.length;
-  const allSelected = active.length > 0 && active.every((c) => sel[c.id]);
 
-  const toggleSel = (id: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const toggleSel = (id: string) =>
     setSel((s) => {
       const next = { ...s };
       if (next[id]) delete next[id];
       else next[id] = true;
       return next;
     });
-  };
-  const toggleAll = () => {
-    if (allSelected) setSel({});
-    else setSel(Object.fromEntries(active.map((c) => [c.id, true])));
-  };
   const clearSel = () => setSel({});
   const bulkDisqualify = () => {
     wsApi.setDqMany(selIds, true);
@@ -103,7 +78,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
   };
 
   return (
-    <div style={{ maxWidth: 1180, margin: "0 auto", padding: narrow ? "18px 16px 80px" : "24px 28px 90px" }}>
+    <div style={{ margin: "0 auto", padding: narrow ? "18px 16px 80px" : "24px 28px 90px" }}>
       {/* job-level spec + rubric (scoped to the active job, not the candidate) */}
       <JobSpecPanel jobShortcode={meta.jobShortcode} jobTitle={meta.title} rubricMd={rubricMd} specMd={specMd} />
 
@@ -143,64 +118,14 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
       </div>
 
       {!narrow ? (
-        <div style={{ marginTop: 14, overflowX: "auto" }}>
-          <div style={{ minWidth: 1060 }}>
-            {/* header */}
-            <div
-              style={mono({
-                display: "grid",
-                gridTemplateColumns: COLS,
-                alignItems: "end",
-                columnGap: 10,
-                padding: "0 6px 7px",
-                borderBottom: `1px solid ${APP.ink}`,
-                fontSize: 10.5,
-                letterSpacing: "0.04em",
-                textTransform: "uppercase",
-                color: APP.faint,
-              })}
-            >
-              <div style={{ display: "flex", alignItems: "center" }}>
-                <Check checked={allSelected} onClick={toggleAll} />
-              </div>
-              <div />
-              <div style={ellipsis}>Candidate</div>
-              <div style={ellipsis}>Company</div>
-              <div style={ellipsis}>Location</div>
-              <div style={{ textAlign: "right" }}>Exp.</div>
-              <div style={{ textAlign: "right" }}>Ask</div>
-              <div style={ellipsis}>Strength vs ask</div>
-              <div style={ellipsis}>Answers</div>
-              <div style={ellipsis}>Vs. spec</div>
-              <div style={{ textAlign: "right" }}>RO</div>
-              <div style={{ textAlign: "right" }}>Actions</div>
-            </div>
-
-            {groups.map((g) => (
-              <div key={g.key}>
-                <div
-                  style={mono({
-                    padding: "15px 6px 6px",
-                    fontSize: 10.5,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: APP.faint,
-                    display: "flex",
-                    gap: 8,
-                    alignItems: "baseline",
-                    borderBottom: `1px solid ${APP.hair2}`,
-                  })}
-                >
-                  <span style={{ color: APP.ink, fontWeight: 600 }}>{g.label}</span>
-                  <span>{g.rows.length}</span>
-                </div>
-                {g.rows.map((c) => (
-                  <Row key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} onSetDecision={(d) => wsApi.setDecision(c.id, d)} />
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
+        <PoolTable
+          active={active}
+          rowSelection={sel}
+          onRowSelectionChange={setSel}
+          openCandidate={openCandidate}
+          onDisqualify={(id) => wsApi.toggleDq(id)}
+          onSetDecision={(id, d) => wsApi.setDecision(id, d)}
+        />
       ) : (
         <div style={{ marginTop: 8, display: "flex", flexDirection: "column" }}>
           {groups.map((g) => (
@@ -222,7 +147,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
                 <span>{g.rows.length}</span>
               </div>
               {g.rows.map((c) => (
-                <MobileRow key={c.id} c={c} selected={!!sel[c.id]} onToggle={(e) => toggleSel(c.id, e)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} onSetDecision={(d) => wsApi.setDecision(c.id, d)} />
+                <MobileRow key={c.id} c={c} selected={!!sel[c.id]} onToggle={() => toggleSel(c.id)} onOpen={() => openCandidate(c.id)} onDisq={() => wsApi.toggleDq(c.id)} onSetDecision={(d) => wsApi.setDecision(c.id, d)} />
               ))}
             </div>
           ))}
@@ -231,7 +156,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
 
       {!narrow && (
         <p style={{ margin: "22px 6px 0", fontSize: 14, lineHeight: 1.5, color: APP.faint, maxWidth: 820 }}>
-          The interview list is ranked — work it top-down (#1 first). &quot;Strength vs ask&quot; weighs the candidate against their salary target: filled accent reads strong value, hollow reads fair, red reads weak. The do-not-interview list shows the reason for each cut — tick rows to disqualify in bulk. All reads are cached; opening a candidate never re-runs the model.
+          The interview list is ranked — work it top-down (#1 first). &quot;Strength vs ask&quot; weighs the candidate against their salary target: filled accent reads strong value, hollow reads fair, red reads weak. The do-not-interview list shows the reason for each cut — tick rows to disqualify in bulk. Sort any column, search, or hide columns; the view is remembered in the URL. All reads are cached; opening a candidate never re-runs the model.
         </p>
       )}
 
@@ -258,7 +183,10 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
                   </div>
                   <span style={mono({ fontSize: 12, color: APP.faint, whiteSpace: "nowrap" })}>{c.roLevel}</span>
                   <button
-                    onClick={(e) => { e.stopPropagation(); wsApi.toggleDq(c.id); }}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      wsApi.toggleDq(c.id);
+                    }}
                     style={{ cursor: "pointer", background: "transparent", color: APP.secondary, border: `1px solid #CFCFCF`, borderRadius: 4, padding: "3px 10px", fontSize: 11.5, fontWeight: 500, whiteSpace: "nowrap" }}
                   >
                     Reinstate
@@ -275,73 +203,6 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
 
 function fit(c: Candidate): number {
   return fitWeight(c.answersRead.level) + fitWeight(c.specRead.level);
-}
-
-/**
- * Sub-line under a candidate's name: when the read is blocked, says exactly what
- * grading is waiting on; otherwise shows the ordinal pool standing ("3rd of 12
- * interview-ready"). Ordinal only — never a numeric score.
- */
-function StandingLine({ c }: { c: Candidate }) {
-  if (c.decision === "blocked" && c.readiness && !c.readiness.ready) {
-    if (c.readiness.resumeMissingFromSource) {
-      return (
-        <div
-          style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
-          title="Review blocked — no résumé on file in Workable, nothing to grade"
-        >
-          Blocked · no résumé on file
-        </div>
-      );
-    }
-    return (
-      <div
-        style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
-        title={`Review blocked — waiting on ${describeMissingInputs(c.readiness.missing)}`}
-      >
-        Blocked · waiting on {describeMissingInputs(c.readiness.missing)}
-      </div>
-    );
-  }
-  // For the do-not-interview list, surface WHY so the reason is visible at a glance.
-  if (c.decision === "reject") {
-    const reason = c.cutReason || c.why;
-    if (reason) {
-      return (
-        <div style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })} title={reason}>
-          {reason}
-        </div>
-      );
-    }
-  }
-  // Surface the verify-first caveat as a sub-line where present.
-  if (c.caveat) {
-    return (
-      <div style={mono({ fontSize: 11, color: APP.secondary, lineHeight: 1.3, ...ellipsis })} title={c.caveat}>
-        Confirm: {c.caveat}
-      </div>
-    );
-  }
-  const label = standingLabel(c.standing);
-  if (!label) return null;
-  return (
-    <div style={mono({ fontSize: 11, color: APP.faint, lineHeight: 1.3, ...ellipsis })} title={`Pool standing: ${label}`}>
-      {label}
-    </div>
-  );
-}
-
-function ValueCell({ value }: { value: ValueRead | undefined }) {
-  if (!value || value.level === "none") {
-    return <span style={mono({ fontSize: 12, color: "#C9C9C9" })}>—</span>;
-  }
-  const d = valueDot(value.level);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }} title={value.detail || value.headline}>
-      <span style={{ width: 8, height: 8, borderRadius: 9999, flexShrink: 0, background: d.fill, border: `1.5px solid ${d.color}` }} />
-      <span style={{ fontSize: 13, color: d.color, ...ellipsis }}>{value.headline}</span>
-    </div>
-  );
 }
 
 /**
@@ -518,160 +379,14 @@ function SpecField({
   );
 }
 
-function Check({ checked, onClick }: { checked: boolean; onClick: (e: React.MouseEvent) => void }) {
-  return (
-    <span
-      onClick={onClick}
-      style={{
-        cursor: "pointer",
-        width: 15,
-        height: 15,
-        borderRadius: 3,
-        border: `1.5px solid ${checked ? APP.accent : "#CFCFCF"}`,
-        background: checked ? APP.accent : "transparent",
-        color: "#fff",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: 10,
-        lineHeight: 1,
-        flexShrink: 0,
-      }}
-    >
-      {checked ? "✓" : ""}
-    </span>
-  );
-}
-
-function Avatar({ c, size = 24 }: { c: Candidate; size?: number }) {
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: 9999,
-        background: c.avatarColor,
-        color: "#fff",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: size <= 22 ? 9 : 9.5,
-        fontWeight: 600,
-        fontFamily: APP.mono,
-        flexShrink: 0,
-      }}
-    >
-      {c.initials}
-    </div>
-  );
-}
-
-function Dot({ read }: { read: VerdictRead }) {
-  const d = verdictDot(read.level);
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-      <span style={{ width: 8, height: 8, borderRadius: 9999, flexShrink: 0, background: d.fill, border: `1.5px solid ${d.color}` }} />
-      <span style={{ fontSize: 13, color: d.color, ...ellipsis }}>{read.label}</span>
-    </div>
-  );
-}
-
-function StatusSelect({ value, onChange }: { value: Decision; onChange: (d: Decision) => void }) {
-  return (
-    <select
-      value={value}
-      onClick={(e) => e.stopPropagation()}
-      onChange={(e) => { e.stopPropagation(); onChange(e.target.value as Decision); }}
-      aria-label="Set status manually"
-      title="Set status manually"
-      style={mono({ fontSize: 11.5, color: APP.ink, background: APP.surface, border: `1px solid ${APP.hair}`, borderRadius: 4, padding: "3px 6px", cursor: "pointer", maxWidth: 120 })}
-    >
-      {DECISION_OPTIONS.map((d) => (
-        <option key={d} value={d}>{DECISION_LABEL[d]}</option>
-      ))}
-    </select>
-  );
-}
-
-function DisqButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      style={{ cursor: "pointer", background: "transparent", color: APP.weak, border: `1px solid ${APP.weakBorder}`, borderRadius: 4, padding: "4px 9px", fontSize: 11.5, fontWeight: 500, whiteSpace: "nowrap" }}
-    >
-      Disqualify
-    </button>
-  );
-}
-
-function Row({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void; onSetDecision: (d: Decision) => void }) {
-  return (
-    <div
-      onClick={onOpen}
-      style={{
-        display: "grid",
-        gridTemplateColumns: COLS,
-        alignItems: "center",
-        columnGap: 10,
-        padding: "6px 6px",
-        borderBottom: `1px solid ${APP.line}`,
-        cursor: "pointer",
-        background: selected ? APP.accentSoft : "transparent",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center" }}>
-        <Check checked={selected} onClick={onToggle} />
-      </div>
-      <Avatar c={c} />
-      <div style={cell}>
-        <div style={{ fontSize: 14, fontWeight: 600, lineHeight: 1.2, ...ellipsis }} title={c.name}>
-          {c.decision === "interview" && c.standing?.groupRank ? (
-            <span style={mono({ color: APP.accent, marginRight: 6, fontSize: 12.5 })}>#{c.standing.groupRank}</span>
-          ) : null}
-          {c.name}
-        </div>
-        <div style={{ fontSize: 11.5, color: APP.muted, lineHeight: 1.2, ...ellipsis }} title={c.role}>{c.role}</div>
-        <StandingLine c={c} />
-      </div>
-      <div style={{ ...cell, fontSize: 13.5, color: APP.ink2, ...ellipsis }} title={c.company}>{c.company}</div>
-      <div style={{ ...cell, fontSize: 13, color: APP.secondary, ...ellipsis }} title={c.locationShort}>{c.locationShort}</div>
-      <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink2, fontVariantNumeric: "tabular-nums", ...ellipsis })}>{c.experience}</div>
-      <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink, fontVariantNumeric: "tabular-nums", ...ellipsis })} title={c.salary}>{compactAsk(c.salary)}</div>
-      <div style={cell}>
-        <ValueCell value={c.value} />
-      </div>
-      <div style={cell}>
-        <Dot read={c.answersRead} />
-      </div>
-      <div style={cell}>
-        <Dot read={c.specRead} />
-      </div>
-      <div style={mono({ ...cell, textAlign: "right", fontSize: 13, color: APP.ink, ...ellipsis })} title={c.roLevel}>{c.roLevel}</div>
-      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 9 }}>
-        <StatusSelect value={c.decision} onChange={onSetDecision} />
-        <a
-          href={c.workableUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          onClick={(e) => e.stopPropagation()}
-          style={mono({ fontSize: 11.5, color: APP.muted, textDecoration: "none", whiteSpace: "nowrap" })}
-        >
-          Workable ↗
-        </a>
-        <DisqButton onClick={onDisq} />
-      </div>
-    </div>
-  );
-}
-
-function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Candidate; selected: boolean; onToggle: (e: React.MouseEvent) => void; onOpen: () => void; onDisq: () => void; onSetDecision: (d: Decision) => void }) {
+function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c: Candidate; selected: boolean; onToggle: () => void; onOpen: () => void; onDisq: () => void; onSetDecision: (d: Decision) => void }) {
   return (
     <div
       onClick={onOpen}
       style={{ display: "flex", flexDirection: "column", gap: 8, padding: "13px 2px", borderBottom: `1px solid ${APP.hair2}`, cursor: "pointer", background: selected ? APP.accentSoft : "transparent" }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <Check checked={selected} onClick={onToggle} />
+        <Checkbox checked={selected} onChange={onToggle} label={`Select ${c.name}`} />
         <Avatar c={c} size={30} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2, ...ellipsis }}>
