@@ -62,7 +62,7 @@ const ALL_ROWS = 100_000; // "All" page size sentinel — larger than any real p
 const TOPBAR_H = 54;
 // Frozen identifying columns: the checkbox + the candidate column stay pinned
 // during horizontal scroll so you never lose track of who a row is.
-const SELECT_W = 40;
+const SELECT_W = 36;
 const STICKY_COLS: Record<string, number> = { select: 0, candidate: SELECT_W };
 
 type Density = "comfortable" | "compact";
@@ -74,6 +74,10 @@ const GROUP_FILTERS: { value: string; label: string }[] = [
   { value: "all", label: "All groups" },
   ...POOL_GROUPS.map((g) => ({ value: g.key, label: DECISION_LABEL[g.key] })),
 ];
+
+const DESKTOP_COLUMNS: VisibilityState = {};
+const MID_COLUMNS: VisibilityState = { company: false, answers: false, ro: false };
+const NARROW_COLUMNS: VisibilityState = { company: false, answers: false, spec: false, ro: false };
 
 /** Leading integer of an experience string ("16 yr" → 16, "—" → -1) for sorting. */
 function expNum(s: string): number {
@@ -118,7 +122,7 @@ export function PoolTable({
 }: PoolTableProps) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(DESKTOP_COLUMNS);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: ALL_ROWS });
   const [menuOpen, setMenuOpen] = useState(false);
   const [density, setDensity] = useState<Density>("comfortable");
@@ -164,13 +168,25 @@ export function PoolTable({
     window.history.replaceState(null, "", qs ? `${window.location.pathname}?${qs}` : window.location.pathname);
   }, [syncUrl, globalFilter, sorting, pagination]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const applyResponsiveColumns = () => {
+      if (window.innerWidth < 1100) setColumnVisibility(NARROW_COLUMNS);
+      else if (window.innerWidth < 1280) setColumnVisibility(MID_COLUMNS);
+      else setColumnVisibility(DESKTOP_COLUMNS);
+    };
+    applyResponsiveColumns();
+    window.addEventListener("resize", applyResponsiveColumns);
+    return () => window.removeEventListener("resize", applyResponsiveColumns);
+  }, []);
+
   const columns = useMemo<ColumnDef<Candidate>[]>(
     () => [
       {
         id: "select",
         enableSorting: false,
         enableHiding: false,
-        meta: { width: 40, align: "center" },
+        meta: { width: SELECT_W, align: "center" },
         header: ({ table }) => (
           <Checkbox
             checked={table.getIsAllRowsSelected()}
@@ -188,14 +204,14 @@ export function PoolTable({
         accessorFn: (c) => c.name,
         header: "Candidate",
         sortingFn: "textCaseSensitive",
-        meta: { label: "Candidate", width: 320 },
+        meta: { label: "Candidate", width: 280 },
         cell: ({ row }) => <CandidateCell c={row.original} density={density} onOpen={() => openCandidate(row.original.id)} />,
       },
       {
         id: "company",
         accessorFn: (c) => c.company,
         header: "Company",
-        meta: { width: 152 },
+        meta: { width: 140 },
         cell: ({ row }) => (
           <span style={{ fontSize: 13.5, color: APP.ink2, display: "block", ...ellipsis }} title={row.original.company}>
             {row.original.company}
@@ -206,7 +222,7 @@ export function PoolTable({
         id: "location",
         accessorFn: (c) => c.locationShort,
         header: "Location",
-        meta: { width: 146 },
+        meta: { width: 122 },
         cell: ({ row }) => (
           <span style={{ fontSize: 13, color: APP.secondary, display: "block", ...ellipsis }} title={row.original.locationShort}>
             {row.original.locationShort}
@@ -218,7 +234,7 @@ export function PoolTable({
         accessorFn: (c) => expNum(c.experience),
         header: "Exp.",
         sortDescFirst: true,
-        meta: { width: 66, align: "right", mono: true },
+        meta: { width: 54, align: "right", mono: true },
         cell: ({ row }) => row.original.experience,
       },
       {
@@ -226,7 +242,7 @@ export function PoolTable({
         accessorFn: (c) => c.salaryNum,
         header: "Ask",
         sortDescFirst: true,
-        meta: { width: 92, align: "right", mono: true },
+        meta: { width: 74, align: "right", mono: true },
         cell: ({ row }) => (
           <span title={row.original.salary} style={{ fontVariantNumeric: "tabular-nums" }}>
             {compactAsk(row.original.salary)}
@@ -238,7 +254,7 @@ export function PoolTable({
         accessorFn: (c) => valueWeight(c.value?.level ?? "none"),
         header: "Strength vs ask",
         sortDescFirst: true,
-        meta: { width: 188 },
+        meta: { width: 126 },
         cell: ({ row }) => <ValueCell value={row.original.value} />,
       },
       {
@@ -246,7 +262,7 @@ export function PoolTable({
         accessorFn: (c) => fitWeight(c.answersRead.level),
         header: "Answers",
         sortDescFirst: true,
-        meta: { width: 126 },
+        meta: { width: 92 },
         cell: ({ row }) => <Dot read={row.original.answersRead} />,
       },
       {
@@ -254,14 +270,14 @@ export function PoolTable({
         accessorFn: (c) => fitWeight(c.specRead.level),
         header: "Vs. spec",
         sortDescFirst: true,
-        meta: { width: 126 },
+        meta: { width: 92 },
         cell: ({ row }) => <Dot read={row.original.specRead} />,
       },
       {
         id: "ro",
         accessorFn: (c) => c.roLevel,
         header: "RO",
-        meta: { width: 66, align: "right", mono: true },
+        meta: { width: 46, align: "right", mono: true },
         cell: ({ row }) => (
           <span title={row.original.roLevel} style={{ ...ellipsis, display: "block" }}>
             {row.original.roLevel}
@@ -273,7 +289,7 @@ export function PoolTable({
         enableSorting: false,
         enableHiding: false,
         header: "Actions",
-        meta: { width: 256, align: "right", noTruncate: true },
+        meta: { width: 224, align: "right", noTruncate: true },
         cell: ({ row }) => (
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
             <StatusSelect value={row.original.decision} onChange={(d) => onSetDecision(row.original.id, d)} />
