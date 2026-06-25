@@ -38,6 +38,7 @@ function mock(p: {
     name: p.name,
     role: p.role,
     company: p.company,
+    appliedAt: seq === 1 ? new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString() : new Date(Date.now() - seq * 86_400_000).toISOString(),
     salary: p.rawSalary,
     salaryNum: 0,
     decision: p.decision,

@@ -308,6 +308,7 @@ export interface Candidate {
   name: string;
   role: string;
   company: string;
+  appliedAt: string | null;
   salary: string;
   salaryNum: number;
   decision: Decision;

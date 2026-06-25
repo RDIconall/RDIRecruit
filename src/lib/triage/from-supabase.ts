@@ -188,6 +188,19 @@ const TRAJECTORY_LABEL: Record<string, string> = {
   regressed: "Regressed",
 };
 
+function stripRoSubletters(value: string | null | undefined): string {
+  const text = value?.trim();
+  if (!text) return "—";
+  const stripped = text.replace(/\b(VII|VI|IV|IX|V|III|II|I)[a-z]\b/gi, (m) =>
+    m.replace(/[a-z]$/i, "").toUpperCase(),
+  );
+  const parts = stripped
+    .split(/\s*(?:–|—|-|\/|\bto\b)\s*/i)
+    .filter(Boolean);
+  if (parts.length > 1 && parts.every((part) => part === parts[0])) return parts[0]!;
+  return stripped;
+}
+
 function parseSalaryNum(ask: string | null | undefined): number {
   if (!ask) return 0;
   const digits = ask.replace(/[^0-9.]/g, "");
@@ -528,16 +541,16 @@ function careerProgressionFrom(ro: RoAssessmentRow | null): CareerProgression | 
     role: (r.role ?? "").trim() || "Role",
     company: (r.company ?? "").trim() || "—",
     tenure: r.years && r.years > 0 ? `${r.years.toFixed(1)} yrs` : "—",
-    stratum: r.stratum || "—",
-    stratumRange: r.stratum_range || r.stratum || "—",
+    stratum: stripRoSubletters(r.stratum),
+    stratumRange: stripRoSubletters(r.stratum_range || r.stratum),
     verbs: strongestVerbs(r.verbs ?? { I: [], II: [], III: [] }),
   }));
   if (!steps.length) return undefined;
   return {
     hasData: true,
     steps,
-    seatStratum: ro.seat_stratum || "—",
-    currentCapability: ro.current_capability || ro.seat_stratum || "—",
+    seatStratum: stripRoSubletters(ro.seat_stratum),
+    currentCapability: stripRoSubletters(ro.current_capability || ro.seat_stratum),
     trajectory: ro.trajectory ? TRAJECTORY_LABEL[ro.trajectory] ?? ro.trajectory : "—",
     confidenceNote: ro.text_confidence ? CONFIDENCE_NOTE[ro.text_confidence] ?? "" : "",
     basis: ro.basis ?? "",
@@ -769,6 +782,7 @@ export function mapCandidate(input: MapInput): Candidate {
     name: input.candidate.name || "Unnamed candidate",
     role: roleTitle,
     company,
+    appliedAt: input.candidate.created_at,
     salary,
     salaryNum: parseSalaryNum(invest?.ask),
     decision,
@@ -783,7 +797,7 @@ export function mapCandidate(input: MapInput): Candidate {
 
     askTier,
     askNote: invest?.vector || salaryValue || "ask unstated",
-    roLevel: ro?.current_capability || ro?.seat_stratum || "—",
+    roLevel: stripRoSubletters(ro?.current_capability || ro?.seat_stratum),
     roVsPool: ro?.trajectory ? TRAJECTORY_LABEL[ro.trajectory] ?? ro.trajectory : "—",
     mismatch,
     mismatchLabel:

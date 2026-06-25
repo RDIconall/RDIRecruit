@@ -57,14 +57,11 @@ declare module "@tanstack/react-table" {
 const PAGE_SIZES = [25, 50, 100] as const;
 const ALL_ROWS = 100_000; // "All" page size sentinel — larger than any real pool
 
-// The app top bar (triage-app.tsx) is sticky at 54px tall; the table header
-// parks just beneath it when the page scrolls.
-const TOPBAR_H = 54;
 const SELECT_W = 36;
 
 type Density = "comfortable" | "compact";
-const ROW_PAD_Y: Record<Density, number> = { comfortable: 8, compact: 3 };
-const AVATAR_SIZE: Record<Density, number> = { comfortable: 30, compact: 22 };
+const ROW_PAD_Y: Record<Density, number> = { comfortable: 6, compact: 2 };
+const AVATAR_SIZE: Record<Density, number> = { comfortable: 26, compact: 20 };
 
 // Decision filter selector options (Coyle: "basic filter selectors").
 const GROUP_FILTERS: { value: string; label: string }[] = [
@@ -80,6 +77,17 @@ const NARROW_COLUMNS: VisibilityState = { company: false, answers: false, spec: 
 function expNum(s: string): number {
   const m = s.match(/\d+/);
   return m ? parseInt(m[0], 10) : -1;
+}
+
+function daysSinceApplied(appliedAt: string | null): number | null {
+  if (!appliedAt) return null;
+  const ms = Date.now() - new Date(appliedAt).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return Math.max(0, ms / 86_400_000);
+}
+
+function appliedSortValue(appliedAt: string | null): number {
+  return daysSinceApplied(appliedAt) ?? Number.POSITIVE_INFINITY;
 }
 
 const globalFilterFn: FilterFn<Candidate> = (row, _columnId, value) => {
@@ -122,7 +130,7 @@ export function PoolTable({
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(DESKTOP_COLUMNS);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: ALL_ROWS });
   const [menuOpen, setMenuOpen] = useState(false);
-  const [density, setDensity] = useState<Density>("comfortable");
+  const [density, setDensity] = useState<Density>("compact");
   const [groupFilter, setGroupFilter] = useState<string>("all");
 
   // Decision-group filter (Coyle: "basic filter selectors") — narrows the rows
@@ -201,8 +209,15 @@ export function PoolTable({
         accessorFn: (c) => c.name,
         header: "Candidate",
         sortingFn: "textCaseSensitive",
-        meta: { label: "Candidate", width: 280 },
+        meta: { label: "Candidate", width: 236 },
         cell: ({ row }) => <CandidateCell c={row.original} density={density} onOpen={() => openCandidate(row.original.id)} />,
+      },
+      {
+        id: "applied",
+        accessorFn: (c) => appliedSortValue(c.appliedAt),
+        header: "Applied",
+        meta: { width: 62, align: "right", mono: true },
+        cell: ({ row }) => <AppliedCell appliedAt={row.original.appliedAt} />,
       },
       {
         id: "company",
@@ -249,9 +264,9 @@ export function PoolTable({
       {
         id: "value",
         accessorFn: (c) => valueWeight(c.value?.level ?? "none"),
-        header: "Strength vs ask",
+        header: "Value",
         sortDescFirst: true,
-        meta: { width: 126 },
+        meta: { label: "Value", width: 88 },
         cell: ({ row }) => <ValueCell value={row.original.value} />,
       },
       {
@@ -273,8 +288,8 @@ export function PoolTable({
       {
         id: "ro",
         accessorFn: (c) => c.roLevel,
-        header: "RO",
-        meta: { width: 46, align: "right", mono: true },
+        header: "Level",
+        meta: { width: 54, align: "right", mono: true },
         cell: ({ row }) => (
           <span title={row.original.roLevel} style={{ ...ellipsis, display: "block" }}>
             {row.original.roLevel}
@@ -427,7 +442,7 @@ export function PoolTable({
                   colSpan={visibleLeaf.length}
                   style={mono({
                     textAlign: "left",
-                    padding: "16px 8px 6px",
+                    padding: "10px 8px 5px",
                     fontSize: 10.5,
                     letterSpacing: "0.06em",
                     textTransform: "uppercase",
@@ -487,10 +502,6 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
         textAlign: align,
         verticalAlign: "bottom",
         padding: "0 8px 7px",
-        // Header sticks beneath the app top bar while the page scrolls.
-        position: "sticky",
-        top: TOPBAR_H,
-        zIndex: 3,
         background: APP.surface,
         borderBottom: `1px solid ${APP.ink}`,
         fontSize: 10.5,
@@ -508,7 +519,7 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
           style={{
             display: "inline-flex",
             alignItems: "center",
-            gap: 4,
+            gap: 3,
             flexDirection: align === "right" ? "row-reverse" : "row",
             background: "transparent",
             border: "none",
@@ -530,6 +541,41 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
         <span style={{ display: "block", textAlign: align, ...ellipsis }}>{label}</span>
       )}
     </th>
+  );
+}
+
+function AppliedCell({ appliedAt }: { appliedAt: string | null }) {
+  const days = daysSinceApplied(appliedAt);
+  if (days == null) return <span style={{ color: APP.faint }}>—</span>;
+
+  const isNew = days < 1;
+  const label = isNew ? "New" : `${Math.floor(days)}d`;
+  const appliedDate = new Date(appliedAt!);
+  const title = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(appliedDate);
+
+  return (
+    <span
+      title={`Applied ${title}`}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        minWidth: isNew ? 34 : undefined,
+        color: isNew ? "#166534" : APP.secondary,
+        background: isNew ? "#DCFCE7" : "transparent",
+        border: isNew ? "1px solid #BBF7D0" : "none",
+        borderRadius: 999,
+        padding: isNew ? "1px 6px" : 0,
+        fontWeight: isNew ? 700 : 500,
+      }}
+    >
+      {label}
+    </span>
   );
 }
 
@@ -614,7 +660,7 @@ function DensityToggle({ density, setDensity }: { density: Density; setDensity: 
 
 function CandidateCell({ c, density, onOpen }: { c: Candidate; density: Density; onOpen: () => void }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
       <Avatar c={c} size={AVATAR_SIZE[density]} />
       <div style={{ minWidth: 0, flex: 1 }}>
         <button
@@ -633,7 +679,7 @@ function CandidateCell({ c, density, onOpen }: { c: Candidate; density: Density;
             margin: 0,
             cursor: "pointer",
             fontFamily: "inherit",
-            fontSize: 14,
+            fontSize: 13.5,
             fontWeight: 600,
             lineHeight: 1.2,
             color: APP.ink,
@@ -646,7 +692,7 @@ function CandidateCell({ c, density, onOpen }: { c: Candidate; density: Density;
           ) : null}
           {c.name}
         </button>
-        <div style={{ fontSize: 11.5, color: APP.muted, lineHeight: 1.2, ...ellipsis }} title={c.role}>
+        <div style={{ fontSize: 11, color: APP.muted, lineHeight: 1.15, ...ellipsis }} title={c.role}>
           {c.role}
         </div>
         <StandingLine c={c} />

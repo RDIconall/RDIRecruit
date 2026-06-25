@@ -72,7 +72,14 @@ export async function upsertJob(job: WorkableJob) {
 }
 
 export async function syncJobsFromWorkable() {
-  const jobs = await listJobs({ state: "published", limit: 100 });
+  const [jobs, archivedJobs] = await Promise.all([
+    listJobs({ state: "published", limit: 100 }),
+    listJobs({ state: "archived", limit: 100 }),
+  ]);
+
+  for (const job of archivedJobs) {
+    await upsertJob({ ...job, state: "archived" });
+  }
 
   // Which jobs already have a stored posting body? The list endpoint omits the
   // body, so re-fetching a job we already have wastes a (rate-limited) Workable
@@ -103,7 +110,7 @@ export async function syncJobsFromWorkable() {
       await upsertJob(summary);
     }
   }
-  return jobs.length;
+  return jobs.length + archivedJobs.length;
 }
 
 export async function upsertCandidateFromWorkable(

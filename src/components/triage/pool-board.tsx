@@ -154,12 +154,6 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
         </div>
       )}
 
-      {!narrow && (
-        <p style={{ margin: "22px 6px 0", fontSize: 14, lineHeight: 1.5, color: APP.faint, maxWidth: 820 }}>
-          The interview list is ranked — work it top-down (#1 first). &quot;Strength vs ask&quot; weighs the candidate against their salary target: filled accent reads strong value, hollow reads fair, red reads weak. The do-not-interview list shows the reason for each cut — tick rows to disqualify in bulk. Sort any column, search, or hide columns; the view is remembered in the URL. All reads are cached; opening a candidate never re-runs the model.
-        </p>
-      )}
-
       {disqRows.length > 0 && (
         <div style={{ marginTop: 18, borderTop: `1px solid ${APP.hair2}`, paddingTop: 12 }}>
           <button
@@ -181,7 +175,7 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
                     <span style={{ fontSize: 13.5, fontWeight: 600, textDecoration: "line-through" }}>{c.name}</span>{" "}
                     <span style={{ fontSize: 12.5, color: APP.muted }}>· {c.company}</span>
                   </div>
-                  <span style={mono({ fontSize: 12, color: APP.faint, whiteSpace: "nowrap" })}>{c.roLevel}</span>
+                  <span style={mono({ fontSize: 12, color: APP.faint, whiteSpace: "nowrap" })}>Level {c.roLevel}</span>
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -398,7 +392,7 @@ function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c
           <div style={{ fontSize: 12, color: APP.muted, lineHeight: 1.25, ...ellipsis }}>{c.role} · {c.company}</div>
           <StandingLine c={c} />
         </div>
-        <div style={mono({ fontSize: 13, color: APP.ink, flexShrink: 0 })}>{c.roLevel}</div>
+        <div style={mono({ fontSize: 13, color: APP.ink, flexShrink: 0 })}>Level {c.roLevel}</div>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", paddingLeft: 42, fontSize: 12.5, color: APP.secondary }}>
         <span style={mono({ color: APP.ink })} title={c.salary}>{compactAsk(c.salary)}</span>
