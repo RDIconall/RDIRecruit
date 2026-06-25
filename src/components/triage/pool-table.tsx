@@ -60,10 +60,7 @@ const ALL_ROWS = 100_000; // "All" page size sentinel — larger than any real p
 // The app top bar (triage-app.tsx) is sticky at 54px tall; the table header
 // parks just beneath it when the page scrolls.
 const TOPBAR_H = 54;
-// Frozen identifying columns: the checkbox + the candidate column stay pinned
-// during horizontal scroll so you never lose track of who a row is.
 const SELECT_W = 36;
-const STICKY_COLS: Record<string, number> = { select: 0, candidate: SELECT_W };
 
 type Density = "comfortable" | "compact";
 const ROW_PAD_Y: Record<Density, number> = { comfortable: 8, compact: 3 };
@@ -395,16 +392,15 @@ export function PoolTable({
         <ColumnMenu table={table} open={menuOpen} setOpen={setMenuOpen} />
       </div>
 
-      {/* Single-axis scroller: horizontal scroll lives here (freezing the
-          identifying columns), while overflow-y:clip lets the sticky header fall
-          through to the page scroll. See modern-css.com/sticky-rows-and-columns. */}
-      <div style={{ overflowX: "auto", overflowY: "clip" }}>
+      {/* The default responsive column sets are sized to fit the viewport. If a
+          user manually reveals more columns than fit, this wrapper provides a
+          normal horizontal scroll without overlaying sticky cells. */}
+      <div style={{ overflowX: "auto", overflowY: "visible" }}>
         <table
           style={{ width: "100%", minWidth: totalWidth, borderCollapse: "separate", borderSpacing: 0, tableLayout: "fixed", fontFamily: APP.sans }}
         >
           <caption style={srOnly}>
-            Candidate triage pool, grouped by decision in priority order. The header row and the candidate column stay
-            fixed while scrolling. Use the column headers to sort.
+            Candidate triage pool, grouped by decision in priority order. Use the column headers to sort.
           </caption>
           {/* Explicit colgroup drives the fixed layout so header and body columns
               always line up — and stay correct when columns are hidden. Widths are
@@ -482,8 +478,6 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
   const ariaSort = sorted === "asc" ? "ascending" : sorted === "desc" ? "descending" : canSort ? "none" : undefined;
   const align = meta?.align ?? "left";
   const label = flexRender(column.columnDef.header, header.getContext());
-  const stickyLeft = STICKY_COLS[column.id]; // undefined for non-frozen columns
-  const isFrozen = stickyLeft !== undefined;
 
   return (
     <th
@@ -493,16 +487,12 @@ function Th({ header }: { header: Header<Candidate, unknown> }) {
         textAlign: align,
         verticalAlign: "bottom",
         padding: "0 8px 7px",
-        // Header sticks beneath the app top bar (vertical) and, for the
-        // identifying columns, also to the left edge (horizontal) — the corner
-        // cells get the highest z-index so they win in both directions.
+        // Header sticks beneath the app top bar while the page scrolls.
         position: "sticky",
         top: TOPBAR_H,
-        left: isFrozen ? stickyLeft : undefined,
-        zIndex: isFrozen ? 4 : 3,
+        zIndex: 3,
         background: APP.surface,
         borderBottom: `1px solid ${APP.ink}`,
-        borderRight: column.id === "candidate" ? `1px solid ${APP.hair}` : undefined,
         fontSize: 10.5,
         letterSpacing: "0.04em",
         textTransform: "uppercase",
@@ -560,8 +550,6 @@ function DataRow({ row, density, onOpen }: { row: Row<Candidate>; density: Densi
       {row.getVisibleCells().map((cell) => {
         const meta = cell.column.columnDef.meta;
         const isRowHeader = cell.column.id === "candidate";
-        const stickyLeft = STICKY_COLS[cell.column.id];
-        const isFrozen = stickyLeft !== undefined;
         const content = flexRender(cell.column.columnDef.cell, cell.getContext());
         const style: CSSProperties = {
           padding: `${padY}px 8px`,
@@ -573,9 +561,6 @@ function DataRow({ row, density, onOpen }: { row: Row<Candidate>; density: Densi
           color: APP.ink2,
           // Row border lives on the cells (border-collapse: separate ignores <tr> borders).
           borderBottom: `1px solid ${APP.line}`,
-          ...(isFrozen
-            ? { position: "sticky", left: stickyLeft, zIndex: 1, background: rowBg }
-            : null),
           ...(cell.column.id === "candidate" ? { borderRight: `1px solid ${APP.hair}` } : null),
           ...(meta?.mono ? { fontFamily: APP.mono, fontVariantNumeric: "tabular-nums" } : null),
         };
