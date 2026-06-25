@@ -8,6 +8,7 @@ import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
 import { getWorkingFileContent } from "@/app/actions/triage";
+import { Avatar } from "./pool-shared";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
@@ -353,6 +354,18 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   const commuteText = c.assessment?.commute || c.logistics.read || c.logistics.likelihood || "";
 
   const regenerate = () => wsApi.updateAssessment(id);
+  const sectionNav = [
+    { id: "assessment", label: "Assessment", show: true },
+    { id: "answers", label: "Answers", show: c.answers.length > 0 },
+    { id: "dossier", label: "Dossier", show: true },
+    { id: "bio", label: "Bio", show: bio.length > 0 },
+    { id: "application", label: "Application", show: true },
+    { id: "commute", label: "Commute", show: !!commuteText },
+    { id: "record", label: "Record", show: record.length > 0 },
+    { id: "resume", label: "Resume", show: true },
+    { id: "notes", label: "Notes", show: true },
+    { id: "war-room", label: "War room", show: true },
+  ].filter((item) => item.show);
 
   return (
     <div style={wrap}>
@@ -379,22 +392,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           ))}
         </select>
         <button
-          onClick={() => wsApi.reanalyze(id)}
-          disabled={busy}
-          style={{
-            cursor: busy ? "default" : "pointer",
-            background: "transparent",
-            color: busy ? APP.muted : APP.accent,
-            border: `1px solid ${busy ? "#CFCFCF" : APP.accentBorder}`,
-            borderRadius: 5,
-            padding: "5px 12px",
-            fontSize: 12.5,
-            fontWeight: 500,
-          }}
-        >
-          {busy ? "Re-analyzing…" : "Re-analyze with Claude"}
-        </button>
-        <button
           onClick={() => wsApi.toggleDq(id)}
           style={{
             cursor: "pointer",
@@ -413,24 +410,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
       {/* header */}
       <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 6 }}>
-        <div
-          style={{
-            width: 46,
-            height: 46,
-            borderRadius: 9999,
-            background: c.avatarColor,
-            color: "#fff",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: APP.mono,
-            fontSize: 15,
-            fontWeight: 600,
-            flexShrink: 0,
-          }}
-        >
-          {c.initials}
-        </div>
+        <Avatar c={c} size={46} />
         <div style={{ minWidth: 0 }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", textDecoration: isDq ? "line-through" : "none" }}>{c.name}</h1>
           <div style={{ fontSize: 15, color: APP.secondary }}>
@@ -438,6 +418,42 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           </div>
         </div>
       </div>
+
+      <nav
+        aria-label="Candidate dossier sections"
+        style={{
+          position: "sticky",
+          top: 54,
+          zIndex: 20,
+          margin: "14px -2px 18px",
+          padding: "8px 2px",
+          background: "rgba(255,255,255,0.94)",
+          backdropFilter: "saturate(1.1) blur(6px)",
+          borderBottom: `1px solid ${APP.hair2}`,
+          display: "flex",
+          gap: 6,
+          overflowX: "auto",
+        }}
+      >
+        {sectionNav.map((item) => (
+          <a
+            key={item.id}
+            href={`#${item.id}`}
+            style={mono({
+              color: APP.secondary,
+              textDecoration: "none",
+              border: `1px solid ${APP.hair}`,
+              borderRadius: 999,
+              padding: "4px 9px",
+              fontSize: 11.5,
+              whiteSpace: "nowrap",
+              background: APP.surface,
+            })}
+          >
+            {item.label}
+          </a>
+        ))}
+      </nav>
 
       {/* readiness gate — no grade is made until all inputs are on file */}
       {blockedReadiness && (
@@ -499,7 +515,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
       )}
 
       {/* Claude assessment — pinned dark card */}
-      <div style={{ margin: "26px 0", background: APP.ink, color: "#fff", borderRadius: 10, padding: narrow ? "18px 16px" : "22px 24px" }}>
+      <div id="assessment" style={{ scrollMarginTop: 104, margin: "26px 0", background: APP.ink, color: "#fff", borderRadius: 10, padding: narrow ? "18px 16px" : "22px 24px" }}>
         <div style={mono({ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.5)", marginBottom: 10 })}>
           Claude&apos;s assessment
         </div>
@@ -522,6 +538,17 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         {c.caveat && <AssessRow label="Confirm first" value={c.caveat} valueColor="#f5d28a" />}
         {c.flag && <AssessRow label="Main risk" value={c.flag} />}
         {c.next && <AssessRow label="Next" value={c.next} />}
+        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
+          <div style={mono({ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 8 })}>Check the evidence</div>
+          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+            <EvidenceLink href={c.answers.length ? "#answers" : "#dossier"} label="Answers" value={c.answers.length ? c.answersRead.label : "No answers"} />
+            <EvidenceLink href="#application" label="Vs. spec" value={c.specRead.label} />
+            <EvidenceLink href={record.length ? "#record" : "#resume"} label="Record" value={record.length ? `${record.length} roles` : "No parsed record"} />
+            <EvidenceLink href="#resume" label="Resume" value={c.resume.hasResume ? "On file" : "Missing"} />
+            <EvidenceLink href="#dossier" label="Logistics" value={c.logistics.likelihood && c.logistics.likelihood !== "—" ? c.logistics.likelihood : c.locationShort || "—"} />
+            <EvidenceLink href="#notes" label="Team notes" value={activity.length ? `${activity.length} entries` : "None yet"} />
+          </div>
+        </div>
         <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
           <div style={mono({ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 6 })}>Reviewed</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -553,7 +580,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
       {/* application answers — surfaced right under the assessment (their own words) */}
       {c.answers.length > 0 && (
-        <Section title="Their answers">
+        <Section id="answers" title="Their answers">
           <p style={mono({ margin: "0 0 14px", fontSize: 12, color: APP.faint })}>
             Shown in the order answered · Claude&apos;s notes in the margin
           </p>
@@ -601,7 +628,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
       )}
 
       {/* dossier facts */}
-      <Section title="Dossier">
+      <Section id="dossier" title="Dossier">
         <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "1fr 1fr", gap: "0 40px" }}>
           {facts.map((f) => (
             <div key={f.k} style={{ display: "flex", justifyContent: "space-between", gap: 16, padding: "7px 0", borderBottom: `1px solid ${APP.line}` }}>
@@ -614,7 +641,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
       {/* bio */}
       {bio.length > 0 && (
-        <Section title="Who they are">
+        <Section id="bio" title="Who they are">
           {bio.map((p, i) => (
             <p key={i} style={{ margin: "0 0 12px", fontSize: 16, lineHeight: 1.6, color: APP.ink2 }}>
               {p}
@@ -624,7 +651,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
       )}
 
       {/* what the application says */}
-      <Section title="What the application says">
+      <Section id="application" title="What the application says">
         {appParas.length > 0 ? (
           appParas.map((p, i) => (
             <p key={i} style={{ margin: "0 0 12px", fontSize: 16, lineHeight: 1.6, color: APP.ink2 }}>
@@ -649,7 +676,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
       {/* commute */}
       {commuteText && (
-        <Section title="Commute">
+        <Section id="commute" title="Commute">
           <p style={{ margin: 0, fontSize: 16, lineHeight: 1.6, color: APP.ink2 }}>{commuteText}</p>
           <div style={{ marginTop: 10 }}>
             <FactLine k="Lives in" v={c.logistics.location || c.locationShort || "—"} />
@@ -663,7 +690,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
       {/* the record */}
       {record.length > 0 && (
-        <Section title="The record">
+        <Section id="record" title="The record">
           <div style={{ overflowX: "auto" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 640, tableLayout: "fixed" }}>
               <colgroup>
@@ -712,6 +739,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
 
       {/* résumé — embedded as the candidate sent it, with parsed highlights below */}
       <Section
+        id="resume"
         title="Résumé"
         right={
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -795,10 +823,10 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
       )}
 
       {/* add information — transcripts, Fireflies pulls, and comments (shared) */}
-      <Section title={`Add information & comments${activity.length ? ` · ${activity.length}` : ""}`}>
+      <Section id="notes" title={`Add information & comments${activity.length ? ` · ${activity.length}` : ""}`}>
         <p style={{ margin: "0 0 14px", fontSize: 13.5, lineHeight: 1.5, color: APP.muted }}>
           Add an interview transcript (paste, or pull from Fireflies), or leave a comment. Everything here is stored on the
-          candidate and visible to the team — then regenerate to fold it into Claude&apos;s assessment.
+          candidate and visible to the team. Use the assessment card above to fold new information into Claude&apos;s read.
         </p>
         {activity.length > 0 ? (
           <div style={{ marginBottom: 16 }}>
@@ -847,32 +875,11 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
             {actType === "interview" ? "Add transcript" : actType === "comment" ? "Add comment" : "Add note"}
           </button>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 16, paddingTop: 14, borderTop: `1px solid ${APP.line}`, flexWrap: "wrap" }}>
-          <span style={mono({ fontSize: 12, color: APP.muted })}>
-            Added new info? Regenerate Claude&apos;s assessment to fold it in.
-          </span>
-          <span style={{ flex: 1 }} />
-          <button
-            onClick={regenerate}
-            disabled={busy}
-            style={{
-              cursor: busy ? "default" : "pointer",
-              background: busy ? APP.hair : APP.ink,
-              color: busy ? APP.muted : "#fff",
-              border: "none",
-              borderRadius: 6,
-              padding: "8px 16px",
-              fontSize: 13.5,
-              fontWeight: 500,
-            }}
-          >
-            {busy ? "Regenerating…" : "Regenerate assessment"}
-          </button>
-        </div>
       </Section>
 
       {/* war room */}
       <Section
+        id="war-room"
         title="War room"
         right={
           chat.length > 0 ? (
@@ -883,11 +890,10 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         }
       >
         <p style={{ margin: "0 0 14px", fontSize: 13.5, lineHeight: 1.5, color: APP.muted }}>
-          Ask Claude about this candidate — it reads the cached assessment, activity log, résumé, and spec. Chat is reasoning only; use <strong style={{ color: APP.secondary }}>Update assessment</strong> to re-run the evaluator and re-persist the read.
+          Ask Claude about this candidate — it reads the cached assessment, activity log, résumé, and spec. Chat is reasoning only; use the assessment card above to re-run and persist the read.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 14 }}>
           {chat.map((m, i) => {
-            const isLastAssistant = m.role === "assistant" && i === chat.length - 1;
             return (
               <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: m.role === "user" ? "flex-end" : "flex-start" }}>
                 <div
@@ -905,15 +911,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
                 >
                   {m.content}
                 </div>
-                {isLastAssistant && (
-                  <button
-                    onClick={() => wsApi.updateAssessment(id)}
-                    disabled={busy}
-                    style={mono({ marginTop: 6, cursor: busy ? "default" : "pointer", background: "transparent", color: busy ? APP.muted : APP.accent, border: "none", padding: 0, fontSize: 12.5 })}
-                  >
-                    {busy ? "Updating assessment…" : "Update assessment →"}
-                  </button>
-                )}
               </div>
             );
           })}
@@ -937,13 +934,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
             Send
           </button>
         </div>
-        <button
-          onClick={() => wsApi.updateAssessment(id)}
-          disabled={busy}
-          style={mono({ marginTop: 12, cursor: busy ? "default" : "pointer", background: "transparent", color: busy ? APP.muted : APP.secondary, border: `1px solid ${APP.hair}`, borderRadius: 5, padding: "6px 12px", fontSize: 12.5 })}
-        >
-          {busy ? "Regenerating…" : "Regenerate assessment manually"}
-        </button>
       </Section>
 
     </div>
@@ -982,15 +972,37 @@ function primaryBtn(disabled: boolean): CSSProperties {
   };
 }
 
-function Section({ title, right, children }: { title: string; right?: React.ReactNode; children: React.ReactNode }) {
+function Section({ id, title, right, children }: { id?: string; title: string; right?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <section style={{ marginTop: 26 }}>
+    <section id={id} style={{ marginTop: 26, scrollMarginTop: 104 }}>
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 12, borderBottom: `1px solid ${APP.hair2}`, paddingBottom: 7 }}>
         <h2 style={mono({ margin: 0, fontSize: 12, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: APP.ink })}>{title}</h2>
         {right}
       </div>
       {children}
     </section>
+  );
+}
+
+function EvidenceLink({ href, label, value }: { href: string; label: string; value: string }) {
+  return (
+    <a
+      href={href}
+      style={{
+        display: "block",
+        textDecoration: "none",
+        color: "#fff",
+        border: "1px solid rgba(255,255,255,0.16)",
+        borderRadius: 8,
+        padding: "8px 10px",
+        background: "rgba(255,255,255,0.04)",
+      }}
+    >
+      <span style={mono({ display: "block", fontSize: 10.5, color: "rgba(255,255,255,0.45)", letterSpacing: "0.05em", textTransform: "uppercase" })}>
+        {label}
+      </span>
+      <span style={{ display: "block", marginTop: 2, fontSize: 13.5, lineHeight: 1.35, color: "rgba(255,255,255,0.86)" }}>{value}</span>
+    </a>
   );
 }
 

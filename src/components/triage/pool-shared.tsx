@@ -171,7 +171,7 @@ export function Avatar({ c, size = 30 }: { c: Candidate; size?: number }) {
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        fontSize: size <= 22 ? 9 : 10,
+        fontSize: Math.max(9, Math.round(size * 0.33)),
         fontWeight: 600,
         fontFamily: APP.mono,
         flexShrink: 0,

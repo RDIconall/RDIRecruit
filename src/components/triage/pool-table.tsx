@@ -31,7 +31,6 @@ import {
   Avatar,
   Checkbox,
   Dot,
-  DisqButton,
   StandingLine,
   StatusSelect,
   ValueCell,
@@ -62,12 +61,6 @@ const SELECT_W = 36;
 type Density = "comfortable" | "compact";
 const ROW_PAD_Y: Record<Density, number> = { comfortable: 6, compact: 2 };
 const AVATAR_SIZE: Record<Density, number> = { comfortable: 26, compact: 20 };
-
-// Decision filter selector options (Coyle: "basic filter selectors").
-const GROUP_FILTERS: { value: string; label: string }[] = [
-  { value: "all", label: "All groups" },
-  ...POOL_GROUPS.map((g) => ({ value: g.key, label: DECISION_LABEL[g.key] })),
-];
 
 const DESKTOP_COLUMNS: VisibilityState = {};
 const MID_COLUMNS: VisibilityState = { company: false, answers: false, ro: false };
@@ -129,7 +122,7 @@ export function PoolTable({
   const [globalFilter, setGlobalFilter] = useState("");
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>(DESKTOP_COLUMNS);
   const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: ALL_ROWS });
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [density, setDensity] = useState<Density>("compact");
   const [groupFilter, setGroupFilter] = useState<string>("all");
 
@@ -140,6 +133,11 @@ export function PoolTable({
     () => (groupFilter === "all" ? active : active.filter((c) => poolGroupOf(c.decision) === groupFilter)),
     [active, groupFilter],
   );
+  const groupCounts = useMemo(() => {
+    const counts = new Map<Decision, number>();
+    for (const c of active) counts.set(poolGroupOf(c.decision), (counts.get(poolGroupOf(c.decision)) ?? 0) + 1);
+    return counts;
+  }, [active]);
 
   // --- URL <-> state sync (opt-in). Read once on mount to avoid hydration drift,
   // then write back on change. history.replaceState keeps it client-side. -------
@@ -297,26 +295,15 @@ export function PoolTable({
         ),
       },
       {
-        id: "actions",
+        id: "status",
         enableSorting: false,
         enableHiding: false,
-        header: "Actions",
-        meta: { width: 224, align: "right", noTruncate: true },
+        header: "Status",
+        meta: { width: 150, align: "right", noTruncate: true },
         cell: ({ row }) => (
           <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8 }}>
             <StatusSelect value={row.original.decision} onChange={(d) => onSetDecision(row.original.id, d)} />
-            <a
-              href={row.original.workableUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              title="Open in Workable"
-              aria-label={`Open ${row.original.name} in Workable`}
-              style={mono({ fontSize: 13, color: APP.muted, textDecoration: "none", whiteSpace: "nowrap", padding: "0 2px" })}
-            >
-              ↗
-            </a>
-            <DisqButton onClick={() => onDisqualify(row.original.id)} />
+            <RowMoreMenu c={row.original} onDisqualify={() => onDisqualify(row.original.id)} />
           </div>
         ),
       },
@@ -368,8 +355,8 @@ export function PoolTable({
 
   return (
     <div>
-      {/* toolbar: search + decision filter + density + column visibility */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+      {/* toolbar: search + decision chips + view controls */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 10, flexWrap: "wrap" }}>
         <div style={{ position: "relative", flex: "1 1 240px", maxWidth: 340 }}>
           <input
             type="search"
@@ -390,21 +377,21 @@ export function PoolTable({
             }}
           />
         </div>
-        <select
-          value={groupFilter}
-          onChange={(e) => setGroupFilter(e.target.value)}
-          aria-label="Filter by decision group"
-          style={mono({ fontSize: 12, color: APP.ink, background: APP.surface, border: `1px solid ${APP.hair}`, borderRadius: 6, padding: "7px 8px", cursor: "pointer" })}
-        >
-          {GROUP_FILTERS.map((g) => (
-            <option key={g.value} value={g.value}>
-              {g.label}
-            </option>
-          ))}
-        </select>
         <span style={{ flex: 1 }} />
-        <DensityToggle density={density} setDensity={setDensity} />
-        <ColumnMenu table={table} open={menuOpen} setOpen={setMenuOpen} />
+        <ViewMenu table={table} open={viewOpen} setOpen={setViewOpen} density={density} setDensity={setDensity} />
+      </div>
+
+      <div role="group" aria-label="Filter by decision group" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 14, overflowX: "auto", paddingBottom: 2 }}>
+        <GroupChip label="All" count={active.length} active={groupFilter === "all"} onClick={() => setGroupFilter("all")} />
+        {POOL_GROUPS.map((g) => (
+          <GroupChip
+            key={g.key}
+            label={DECISION_LABEL[g.key]}
+            count={groupCounts.get(g.key) ?? 0}
+            active={groupFilter === g.key}
+            onClick={() => setGroupFilter(g.key)}
+          />
+        ))}
       </div>
 
       {/* The default responsive column sets are sized to fit the viewport. If a
@@ -627,37 +614,6 @@ function DataRow({ row, density, onOpen }: { row: Row<Candidate>; density: Densi
   );
 }
 
-function DensityToggle({ density, setDensity }: { density: Density; setDensity: (d: Density) => void }) {
-  const opt = (value: Density, label: string) => {
-    const on = density === value;
-    return (
-      <button
-        type="button"
-        onClick={() => setDensity(value)}
-        aria-pressed={on}
-        title={`${label} row height`}
-        style={mono({
-          cursor: "pointer",
-          background: on ? APP.ink : "transparent",
-          color: on ? "#fff" : APP.secondary,
-          border: "none",
-          borderRadius: 5,
-          padding: "5px 10px",
-          fontSize: 11.5,
-        })}
-      >
-        {label}
-      </button>
-    );
-  };
-  return (
-    <div role="group" aria-label="Row density" style={{ display: "inline-flex", gap: 2, border: `1px solid ${APP.hair}`, borderRadius: 7, padding: 2 }}>
-      {opt("comfortable", "Comfortable")}
-      {opt("compact", "Compact")}
-    </div>
-  );
-}
-
 function CandidateCell({ c, density, onOpen }: { c: Candidate; density: Density; onOpen: () => void }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
@@ -701,14 +657,50 @@ function CandidateCell({ c, density, onOpen }: { c: Candidate; density: Density;
   );
 }
 
-function ColumnMenu({
+function GroupChip({
+  label,
+  count,
+  active,
+  onClick,
+}: {
+  label: string;
+  count: number;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      style={mono({
+        cursor: "pointer",
+        background: active ? APP.ink : APP.surface,
+        color: active ? "#fff" : APP.secondary,
+        border: `1px solid ${active ? APP.ink : APP.hair}`,
+        borderRadius: 999,
+        padding: "5px 10px",
+        fontSize: 11.5,
+        whiteSpace: "nowrap",
+      })}
+    >
+      {label} <span style={{ color: active ? "rgba(255,255,255,0.7)" : APP.faint }}>{count}</span>
+    </button>
+  );
+}
+
+function ViewMenu({
   table,
   open,
   setOpen,
+  density,
+  setDensity,
 }: {
   table: ReturnType<typeof useReactTable<Candidate>>;
   open: boolean;
   setOpen: (v: boolean) => void;
+  density: Density;
+  setDensity: (d: Density) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -721,6 +713,30 @@ function ColumnMenu({
   }, [open, setOpen]);
 
   const hideable = table.getAllLeafColumns().filter((c) => c.getCanHide());
+  const densityOpt = (value: Density, label: string) => {
+    const on = density === value;
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setDensity(value);
+        }}
+        aria-pressed={on}
+        style={mono({
+          cursor: "pointer",
+          background: on ? APP.ink : "transparent",
+          color: on ? "#fff" : APP.secondary,
+          border: "none",
+          borderRadius: 5,
+          padding: "5px 10px",
+          fontSize: 11.5,
+        })}
+      >
+        {label}
+      </button>
+    );
+  };
 
   return (
     <div style={{ position: "relative" }} ref={ref}>
@@ -739,24 +755,33 @@ function ColumnMenu({
           fontSize: 12,
         })}
       >
-        Columns ⌄
+        View
       </button>
       {open && (
         <div
-          role="menu"
           style={{
             position: "absolute",
             right: 0,
             top: "calc(100% + 6px)",
             zIndex: 30,
-            minWidth: 190,
+            minWidth: 220,
             background: APP.surface,
             border: `1px solid ${APP.hair}`,
             borderRadius: 8,
             boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
-            padding: 6,
+            padding: 8,
           }}
         >
+          <div style={mono({ fontSize: 10.5, color: APP.faint, letterSpacing: "0.06em", textTransform: "uppercase", margin: "2px 4px 6px" })}>
+            Row density
+          </div>
+          <div role="group" aria-label="Row density" style={{ display: "inline-flex", gap: 2, border: `1px solid ${APP.hair}`, borderRadius: 7, padding: 2, marginBottom: 10 }}>
+            {densityOpt("comfortable", "Comfortable")}
+            {densityOpt("compact", "Compact")}
+          </div>
+          <div style={mono({ fontSize: 10.5, color: APP.faint, letterSpacing: "0.06em", textTransform: "uppercase", margin: "2px 4px 4px" })}>
+            Columns
+          </div>
           {hideable.map((column) => {
             const meta = column.columnDef.meta;
             const text = meta?.label ?? (typeof column.columnDef.header === "string" ? column.columnDef.header : column.id);
@@ -775,6 +800,91 @@ function ColumnMenu({
               </label>
             );
           })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RowMoreMenu({ c, onDisqualify }: { c: Candidate; onDisqualify: () => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  return (
+    <div ref={ref} style={{ position: "relative" }} onClick={(e) => e.stopPropagation()}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-haspopup="true"
+        aria-expanded={open}
+        aria-label={`More actions for ${c.name}`}
+        title={`More actions for ${c.name}`}
+        style={mono({
+          cursor: "pointer",
+          background: open ? APP.ink : "transparent",
+          color: open ? "#fff" : APP.secondary,
+          border: `1px solid ${open ? APP.ink : APP.hair}`,
+          borderRadius: 5,
+          padding: "3px 7px",
+          fontSize: 12,
+          lineHeight: 1.2,
+        })}
+      >
+        More
+      </button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "calc(100% + 6px)",
+            zIndex: 35,
+            minWidth: 160,
+            background: APP.surface,
+            border: `1px solid ${APP.hair}`,
+            borderRadius: 8,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            padding: 6,
+          }}
+        >
+          <a
+            href={c.workableUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ display: "block", color: APP.secondary, textDecoration: "none", padding: "7px 8px", borderRadius: 5, fontSize: 12.5 }}
+          >
+            Open in Workable
+          </a>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onDisqualify();
+            }}
+            style={{
+              width: "100%",
+              textAlign: "left",
+              cursor: "pointer",
+              background: "transparent",
+              color: APP.weak,
+              border: "none",
+              borderRadius: 5,
+              padding: "7px 8px",
+              fontSize: 12.5,
+              fontFamily: APP.sans,
+            }}
+          >
+            Disqualify
+          </button>
         </div>
       )}
     </div>
