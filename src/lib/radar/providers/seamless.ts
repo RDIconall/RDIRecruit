@@ -2,27 +2,34 @@ import "server-only";
 import { env } from "../../env";
 import type { RawContact, SearchCriteria } from "../types";
 
-// Seamless.AI contact search. Seamless's public API surface varies by plan; we
-// target the documented contact search endpoint and degrade gracefully. The key
-// is server-side only. Endpoint is overridable via SEAMLESS_API_BASE if needed.
-const SEAMLESS_BASE = process.env.SEAMLESS_API_BASE ?? "https://api.seamless.ai/v1";
+// Seamless.AI contact search. API-key auth uses the `Token` header against the
+// public client API; OAuth uses Bearer, but this app stores an API key.
+const SEAMLESS_BASE = process.env.SEAMLESS_API_BASE ?? "https://api.seamless.ai/api/client/v1";
 
 interface SeamlessContact {
+  name?: string;
   fullName?: string;
   firstName?: string;
   lastName?: string;
   title?: string;
+  seniority?: string;
+  department?: string;
   companyName?: string;
   company?: string;
+  companyDomain?: string;
   location?: string;
   city?: string;
   state?: string;
+  country?: string;
+  liUrl?: string;
   linkedInUrl?: string;
   linkedinUrl?: string;
   email?: string;
   emailStatus?: string;
+  email_status?: string;
   phone?: string;
   phoneNumber?: string;
+  searchResultId?: string;
 }
 
 function emailStatus(s?: string): RawContact["emailStatus"] {
@@ -39,17 +46,21 @@ export async function searchSeamless(criteria: SearchCriteria, limit: number): P
 
   const body: Record<string, unknown> = {
     limit: Math.min(100, Math.max(1, limit)),
-    titles: criteria.titles,
-    keywords: criteria.keywords,
-    companies: criteria.companies,
-    locations: criteria.locations,
+    locationType: "bothOR",
   };
+  if (criteria.titles.length) body.jobTitle = criteria.titles.slice(0, 10);
+  if (criteria.keywords.length) body.contactKeyword = criteria.keywords.slice(0, 10);
+  if (criteria.companies.length) {
+    body.companyName = criteria.companies.slice(0, 100);
+    body.companyNameSearchType = "related";
+  }
+  if (criteria.locations.length) body.contactCountry = criteria.locations;
 
-  const res = await fetch(`${SEAMLESS_BASE}/contacts/search`, {
+  const res = await fetch(`${SEAMLESS_BASE}/search/contacts`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
+      Token: apiKey,
     },
     body: JSON.stringify(body),
   });
@@ -60,19 +71,19 @@ export async function searchSeamless(criteria: SearchCriteria, limit: number): P
   const contacts = json.contacts ?? json.data ?? [];
 
   return contacts.slice(0, limit).map((c) => {
-    const location = c.location ?? ([c.city, c.state].filter(Boolean).join(", ") || null);
+    const location = c.location ?? ([c.city, c.state, c.country].filter(Boolean).join(", ") || null);
     return {
-      fullName: c.fullName ?? ([c.firstName, c.lastName].filter(Boolean).join(" ") || null),
+      fullName: c.fullName ?? c.name ?? ([c.firstName, c.lastName].filter(Boolean).join(" ") || null),
       firstName: c.firstName ?? null,
       lastName: c.lastName ?? null,
       title: c.title ?? null,
       company: c.companyName ?? c.company ?? null,
       location,
-      linkedinUrl: c.linkedInUrl ?? c.linkedinUrl ?? null,
+      linkedinUrl: c.liUrl ?? c.linkedInUrl ?? c.linkedinUrl ?? null,
       email: c.email ?? null,
       phone: c.phone ?? c.phoneNumber ?? null,
-      profileSummary: null,
-      emailStatus: emailStatus(c.emailStatus),
+      profileSummary: [c.seniority, c.department].filter(Boolean).join(" - ") || null,
+      emailStatus: emailStatus(c.emailStatus ?? c.email_status),
       source: "Seamless.AI",
       raw: c as unknown as Record<string, unknown>,
     } satisfies RawContact;

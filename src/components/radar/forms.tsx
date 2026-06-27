@@ -6,8 +6,9 @@ import {
   createSearchAction,
   importCsvAction,
   saveScorecardAction,
+  updateSearchAction,
 } from "@/app/actions/radar";
-import { EMPTY_CRITERIA, type Pipeline, type SearchCriteria } from "@/lib/radar/types";
+import { EMPTY_CRITERIA, type Pipeline, type RadarSearch, type SearchCriteria } from "@/lib/radar/types";
 
 function splitList(v: string): string[] {
   return v.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
@@ -27,17 +28,30 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-export function NewSearchModal({ pipeline, onClose, onDone }: { pipeline: Pipeline; onClose: () => void; onDone: (id: string) => void }) {
+export function NewSearchModal({
+  pipeline,
+  search,
+  onClose,
+  onDone,
+}: {
+  pipeline: Pipeline;
+  search?: RadarSearch | null;
+  onClose: () => void;
+  onDone: (id: string) => void;
+}) {
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
-  const [title, setTitle] = useState("");
-  const [c, setC] = useState<SearchCriteria>({ ...EMPTY_CRITERIA });
+  const [title, setTitle] = useState(search?.title ?? "");
+  const [c, setC] = useState<SearchCriteria>(search?.criteria ?? { ...EMPTY_CRITERIA });
+  const isEdit = Boolean(search);
 
   function submit() {
     setErr(null);
     if (!title.trim()) { setErr("Give the search a name."); return; }
     start(async () => {
-      const res = await createSearchAction({ title: title.trim(), pipeline, criteria: c });
+      const res = search
+        ? await updateSearchAction({ id: search.id, title: title.trim(), pipeline, criteria: c })
+        : await createSearchAction({ title: title.trim(), pipeline, criteria: c });
       if (!res.ok || !res.searchId) { setErr(res.error ?? "Failed"); return; }
       onDone(res.searchId);
     });
@@ -57,7 +71,7 @@ export function NewSearchModal({ pipeline, onClose, onDone }: { pipeline: Pipeli
   );
 
   return (
-    <Modal title={`New ${pipeline === "bd" ? "BD" : "recruiting"} search`} onClose={onClose}>
+    <Modal title={`${isEdit ? "Edit" : "New"} ${pipeline === "bd" ? "BD" : "recruiting"} search`} onClose={onClose}>
       <label style={fieldWrap}>
         <span style={fieldLabel}>Search name</span>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Clinical Ops Lead — IVD, LA" style={input} />
@@ -75,7 +89,7 @@ export function NewSearchModal({ pipeline, onClose, onDone }: { pipeline: Pipeli
       {err && <p style={errText}>{err}</p>}
       <div style={actions}>
         <button style={ghostBtn} onClick={onClose}>Cancel</button>
-        <button style={primaryBtn} disabled={pending} onClick={submit}>{pending ? "Creating…" : "Create search"}</button>
+        <button style={primaryBtn} disabled={pending} onClick={submit}>{pending ? "Saving..." : isEdit ? "Save search" : "Create search"}</button>
       </div>
     </Modal>
   );

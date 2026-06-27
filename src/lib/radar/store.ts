@@ -148,6 +148,27 @@ export async function createSearch(input: {
   return mapSearch(data);
 }
 
+export async function updateSearch(input: {
+  id: string;
+  pipeline: Pipeline;
+  title: string;
+  criteria: SearchCriteria;
+}): Promise<RadarSearch> {
+  const { data, error } = await db()
+    .from("radar_searches")
+    .update({
+      title: input.title,
+      criteria: input.criteria ?? EMPTY_CRITERIA,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.id)
+    .eq("pipeline", input.pipeline)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return mapSearch(data);
+}
+
 // ---------------------------------------------------------------------------
 // Scorecards
 // ---------------------------------------------------------------------------

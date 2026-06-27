@@ -16,7 +16,7 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
   const router = useRouter();
   const [pending, start] = useTransition();
   const [selected, setSelected] = useState<RadarContact | null>(null);
-  const [modal, setModal] = useState<null | "search" | "import" | "add" | "scorecard">(null);
+  const [modal, setModal] = useState<null | "search" | "editSearch" | "import" | "add" | "scorecard">(null);
   const [toast, setToast] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("score");
@@ -125,6 +125,7 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
           {data.searches.map((s) => <option key={s.id} value={s.id}>{s.title}</option>)}
         </select>
         <button style={ghostBtn} onClick={() => setModal("search")}>+ New search</button>
+        {activeSearch && <button style={ghostBtn} onClick={() => setModal("editSearch")}>Edit search</button>}
         <button
           style={{ ...primaryBtn, opacity: data.providers.any && activeSearch ? 1 : 0.5 }}
           disabled={pending || !data.providers.any || !activeSearch}
@@ -221,6 +222,7 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
       )}
 
       {modal === "search" && <NewSearchModal pipeline={data.pipeline} onClose={() => setModal(null)} onDone={(id) => { setModal(null); go({ search: id }); }} />}
+      {modal === "editSearch" && activeSearch && <NewSearchModal pipeline={data.pipeline} search={activeSearch} onClose={() => setModal(null)} onDone={(id) => { setModal(null); go({ search: id }); refresh(); flash("Search updated."); }} />}
       {modal === "import" && <ImportModal pipeline={data.pipeline} searchId={data.searchId} onClose={() => setModal(null)} onDone={(msg) => { setModal(null); flash(msg); refresh(); }} />}
       {modal === "add" && <AddContactModal pipeline={data.pipeline} searchId={data.searchId} onClose={() => setModal(null)} onDone={() => { setModal(null); flash("Contact added."); refresh(); }} />}
       {modal === "scorecard" && <ScorecardModal pipeline={data.pipeline} name={data.scorecard.name} content={data.scorecard.content} onClose={() => setModal(null)} onDone={() => { setModal(null); flash("Scorecard saved."); refresh(); }} />}

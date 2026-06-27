@@ -18,6 +18,7 @@ import {
   setOptOut,
   updateContactFields,
   updateOutreach,
+  updateSearch,
   upsertContact,
   upsertMany,
 } from "@/lib/radar/store";
@@ -69,6 +70,22 @@ export async function createSearchAction(input: {
     return { ok: true, searchId: search.id };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Failed to create search" };
+  }
+}
+
+export async function updateSearchAction(input: {
+  id: string;
+  title: string;
+  pipeline: Pipeline;
+  criteria: SearchCriteria;
+}): Promise<{ ok: boolean; searchId?: string; error?: string }> {
+  try {
+    await requireAuth();
+    const search = await updateSearch(input);
+    revalidate();
+    return { ok: true, searchId: search.id };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Failed to update search" };
   }
 }
 
