@@ -7,7 +7,7 @@ import { runEnrichmentAction, scoreAllAction } from "@/app/actions/radar";
 import type { RadarData } from "@/lib/radar/load";
 import { PIPELINES, type Pipeline, type RadarContact } from "@/lib/radar/types";
 import { ContactDrawer } from "./contact-drawer";
-import { AddContactModal, ImportModal, NewSearchModal, ScorecardModal } from "./forms";
+import { AddContactModal, AiSourcingModal, ImportModal, NewSearchModal, ScorecardModal } from "./forms";
 import { initials, outreachMeta, recMeta, scoreColor } from "./ui";
 
 type SortKey = "score" | "name" | "outreach";
@@ -16,7 +16,7 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
   const router = useRouter();
   const [pending, start] = useTransition();
   const [selected, setSelected] = useState<RadarContact | null>(null);
-  const [modal, setModal] = useState<null | "search" | "editSearch" | "import" | "add" | "scorecard">(null);
+  const [modal, setModal] = useState<null | "search" | "editSearch" | "aiSearch" | "import" | "add" | "scorecard">(null);
   const [toast, setToast] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("score");
@@ -52,6 +52,15 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
   }, [data.contacts, query, sort]);
 
   const unscored = data.contacts.filter((c) => !c.score).length;
+  const activeSearchBrief = activeSearch
+    ? [
+      activeSearch.title,
+      activeSearch.criteria.titles.length ? `Titles: ${activeSearch.criteria.titles.join(", ")}` : "",
+      activeSearch.criteria.keywords.length ? `Keywords: ${activeSearch.criteria.keywords.join(", ")}` : "",
+      activeSearch.criteria.mustHave.length ? `Must have: ${activeSearch.criteria.mustHave.join(", ")}` : "",
+      activeSearch.criteria.exclude.length ? `Avoid: ${activeSearch.criteria.exclude.join(", ")}` : "",
+    ].filter(Boolean).join("\n")
+    : "";
 
   function doEnrich() {
     if (!activeSearch) { flash("Select or create a search first."); return; }
@@ -133,6 +142,14 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
           title={data.providers.any ? "Query Seamless/Apollo for this search" : "No provider API keys configured"}
         >
           {pending ? "Working…" : "Run enrichment"}
+        </button>
+        <button
+          style={{ ...primaryBtn, opacity: data.hasLlm && data.providers.any ? 1 : 0.5 }}
+          disabled={!data.hasLlm || !data.providers.any}
+          onClick={() => setModal("aiSearch")}
+          title={!data.hasLlm ? "Needs ANTHROPIC_API_KEY" : !data.providers.any ? "Needs Seamless/Apollo key" : "Let Claude generate and run provider searches"}
+        >
+          Run AI search
         </button>
 
         <div style={{ flex: 1 }} />
@@ -223,6 +240,7 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
 
       {modal === "search" && <NewSearchModal pipeline={data.pipeline} onClose={() => setModal(null)} onDone={(id) => { setModal(null); go({ search: id }); }} />}
       {modal === "editSearch" && activeSearch && <NewSearchModal pipeline={data.pipeline} search={activeSearch} onClose={() => setModal(null)} onDone={(id) => { setModal(null); go({ search: id }); refresh(); flash("Search updated."); }} />}
+      {modal === "aiSearch" && <AiSourcingModal pipeline={data.pipeline} searchId={data.searchId} defaultBrief={activeSearchBrief} onClose={() => setModal(null)} onDone={(id, msg) => { setModal(null); go({ search: id }); refresh(); flash(msg); }} />}
       {modal === "import" && <ImportModal pipeline={data.pipeline} searchId={data.searchId} onClose={() => setModal(null)} onDone={(msg) => { setModal(null); flash(msg); refresh(); }} />}
       {modal === "add" && <AddContactModal pipeline={data.pipeline} searchId={data.searchId} onClose={() => setModal(null)} onDone={() => { setModal(null); flash("Contact added."); refresh(); }} />}
       {modal === "scorecard" && <ScorecardModal pipeline={data.pipeline} name={data.scorecard.name} content={data.scorecard.content} onClose={() => setModal(null)} onDone={() => { setModal(null); flash("Scorecard saved."); refresh(); }} />}

@@ -2,10 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { hasAnthropic } from "@/lib/env";
 import { csvToRawContacts } from "@/lib/radar/csv";
 import { draftOutreach, unsubscribeFooter } from "@/lib/radar/outreach";
 import { runProviders } from "@/lib/radar/providers";
 import { scoreContact } from "@/lib/radar/score";
+import { planSourcingSearches } from "@/lib/radar/sourcing";
+import { EMPTY_CRITERIA } from "@/lib/radar/types";
 import {
   createSearch,
   getActiveScorecard,
@@ -125,6 +128,117 @@ export async function runEnrichmentAction(input: {
     };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Enrichment failed" };
+  }
+}
+
+export async function runAiSourcingAction(input: {
+  pipeline: Pipeline;
+  brief: string;
+  searchId?: string | null;
+  limitPerSearch?: number;
+  scoreLimit?: number;
+}): Promise<{
+  ok: boolean;
+  searchId?: string;
+  title?: string;
+  rationale?: string;
+  searched?: number;
+  imported?: number;
+  duplicates?: number;
+  scored?: number;
+  providers?: { provider: string; configured: boolean; count: number; error?: string }[];
+  error?: string;
+}> {
+  try {
+    await requireAuth();
+    const owner = await actorLabel();
+    const scorecard = await getActiveScorecard(input.pipeline);
+    const plan = await planSourcingSearches({
+      pipeline: input.pipeline,
+      brief: input.brief,
+      scorecardMd: scorecard.content,
+    });
+
+    const searchId = input.searchId || (await createSearch({
+      title: plan.title,
+      pipeline: input.pipeline,
+      criteria: plan.searches[0]?.criteria ?? EMPTY_CRITERIA,
+      createdBy: owner,
+    })).id;
+
+    let inserted = 0;
+    let duplicates = 0;
+    const ids = new Set<string>();
+    const providerSummaries: { provider: string; configured: boolean; count: number; error?: string }[] = [];
+    const limit = input.limitPerSearch ?? 25;
+
+    for (const variant of plan.searches.slice(0, 4)) {
+      const { results, contacts } = await runProviders(variant.criteria, { limit });
+      for (const result of results) {
+        providerSummaries.push({
+          provider: `${result.provider}: ${variant.label}`,
+          configured: result.configured,
+          count: result.contacts.length,
+          error: result.error,
+        });
+      }
+      const res = await upsertMany(contacts, {
+        pipeline: input.pipeline,
+        searchId,
+        owner,
+      });
+      inserted += res.inserted;
+      duplicates += res.duplicates;
+      for (const id of res.ids) ids.add(id);
+      await recordImportBatch({
+        source: `AI sourcing: ${variant.label}`,
+        pipeline: input.pipeline,
+        rowCount: contacts.length,
+        inserted: res.inserted,
+        duplicates: res.duplicates,
+        importedBy: owner,
+      });
+    }
+
+    let scored = 0;
+    if (hasAnthropic()) {
+      const scoreTargets = Array.from(ids).slice(0, input.scoreLimit ?? 20);
+      for (const id of scoreTargets) {
+        const contact = await getContact(id);
+        if (!contact || contact.optOut) continue;
+        const result = await scoreContact(contact, input.pipeline, scorecard.content);
+        if (!result) continue;
+        await saveScore({
+          contactId: contact.id,
+          pipeline: input.pipeline,
+          scorecardName: scorecard.name,
+          dimensions: result.dimensions,
+          overall: result.overall,
+          recommendation: result.recommendation,
+          summary: result.summary,
+          strongestSignal: result.strongestSignal,
+          biggestConcern: result.biggestConcern,
+          nextAction: result.nextAction,
+          model: result.model,
+        });
+        scored++;
+      }
+    }
+
+    revalidate();
+    return {
+      ok: true,
+      searchId,
+      title: plan.title,
+      rationale: plan.rationale,
+      searched: plan.searches.length,
+      imported: inserted,
+      duplicates,
+      scored,
+      providers: providerSummaries,
+    };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "AI sourcing failed" };
   }
 }
 

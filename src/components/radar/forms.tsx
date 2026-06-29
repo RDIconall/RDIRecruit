@@ -5,6 +5,7 @@ import {
   addContactAction,
   createSearchAction,
   importCsvAction,
+  runAiSourcingAction,
   saveScorecardAction,
   updateSearchAction,
 } from "@/app/actions/radar";
@@ -90,6 +91,61 @@ export function NewSearchModal({
       <div style={actions}>
         <button style={ghostBtn} onClick={onClose}>Cancel</button>
         <button style={primaryBtn} disabled={pending} onClick={submit}>{pending ? "Saving..." : isEdit ? "Save search" : "Create search"}</button>
+      </div>
+    </Modal>
+  );
+}
+
+export function AiSourcingModal({
+  pipeline,
+  searchId,
+  defaultBrief,
+  onClose,
+  onDone,
+}: {
+  pipeline: Pipeline;
+  searchId?: string | null;
+  defaultBrief?: string;
+  onClose: () => void;
+  onDone: (searchId: string, msg: string) => void;
+}) {
+  const [pending, start] = useTransition();
+  const [err, setErr] = useState<string | null>(null);
+  const [brief, setBrief] = useState(defaultBrief ?? "");
+
+  function submit() {
+    setErr(null);
+    if (!brief.trim()) { setErr("Describe who Claude should find."); return; }
+    start(async () => {
+      const res = await runAiSourcingAction({ pipeline, searchId, brief: brief.trim() });
+      if (!res.ok || !res.searchId) { setErr(res.error ?? "AI sourcing failed"); return; }
+      const msg = `AI search: ${res.imported ?? 0} new, ${res.duplicates ?? 0} merged, ${res.scored ?? 0} scored.`;
+      onDone(res.searchId, msg);
+    });
+  }
+
+  return (
+    <Modal title="Run AI search" onClose={onClose}>
+      <p style={{ fontSize: 13, color: "rgba(22,35,53,0.65)", marginTop: 0 }}>
+        Describe the role or profile in plain English. Claude will generate concrete provider searches, import matching people, then score them against the active scorecard.
+      </p>
+      <label style={fieldWrap}>
+        <span style={fieldLabel}>Who should Claude find?</span>
+        <textarea
+          value={brief}
+          onChange={(e) => setBrief(e.target.value)}
+          rows={8}
+          placeholder="Find a hands-on Clinical Operations Lead for IVD/diagnostics studies: site startup, monitoring/query readiness, sample-heavy lab coordination, sponsor-facing, scrappy small-CRO or sponsor-side background. Avoid big-company process-only profiles."
+          style={textarea}
+        />
+      </label>
+      <p style={{ fontSize: 12, color: "rgba(22,35,53,0.52)", margin: "-4px 0 12px" }}>
+        Uses permitted provider/imported profile data only; it does not scrape LinkedIn.
+      </p>
+      {err && <p style={errText}>{err}</p>}
+      <div style={actions}>
+        <button style={ghostBtn} onClick={onClose}>Cancel</button>
+        <button style={primaryBtn} disabled={pending} onClick={submit}>{pending ? "Searching..." : "Run AI search"}</button>
       </div>
     </Modal>
   );
