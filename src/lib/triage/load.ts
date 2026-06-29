@@ -401,6 +401,8 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       resumeText: (app?.resume_text as string | null) ?? null,
       resumeStoragePath: null,
       resumeUrl: (app?.resume_url as string | null) ?? null,
+      coverLetter: (app?.cover_letter as string | null) ?? null,
+      parsedExperienceCount: Array.isArray(app?.parsed_experience) ? app!.parsed_experience.length : 0,
       jobSpec: rubric.specMd ?? "",
       rubric: rubric.rubricMd ?? "",
       methodology,

@@ -1,5 +1,26 @@
 import { hasSupabase, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
+import { upsertOverlay } from "../data/overlay";
+
+/** A Workable fetch that 404s means the candidate was deleted/merged at the source. */
+function isWorkableNotFound(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return /\b404\b/.test(message) || /not found/i.test(message);
+}
+
+/**
+ * Retire a candidate that no longer exists in Workable (our ATS of record). We
+ * archive rather than hard-delete: the overlay status drops them out of the active
+ * pool, and because a cut now outranks any stored read in deriveDecision, they
+ * stop showing as "Review blocked". Reversible — clearing the overlay restores them.
+ */
+async function retireMissingCandidate(candidateId: string): Promise<void> {
+  await upsertOverlay(
+    candidateId,
+    { status: "withdrawn", status_reason: "Removed from Workable (no longer exists at source)" },
+    "recapture (Workable 404)",
+  );
+}
 
 export interface ResumeBackfillResult {
   attempted: number;
@@ -116,6 +137,8 @@ export interface ResumeRecaptureDetail {
   /** Whether the AUTHORITATIVE Workable fetch (getCandidate) carried a résumé URL. */
   hasWorkableResume: boolean;
   ingested: boolean;
+  /** True when the candidate 404'd in Workable and was retired out of the pool. */
+  retired?: boolean;
   error?: string;
 }
 
@@ -124,6 +147,8 @@ export interface ResumeRecaptureResult {
   withWorkableResume: number;
   withoutResume: number;
   ingested: number;
+  /** Candidates retired because they no longer exist in Workable (404). */
+  retired: number;
   failed: number;
   remaining: number;
   dryRun: boolean;
@@ -158,6 +183,7 @@ export async function recaptureBlockedResumes(options?: {
     withWorkableResume: 0,
     withoutResume: 0,
     ingested: 0,
+    retired: 0,
     failed: 0,
     remaining: 0,
     dryRun: Boolean(options?.dryRun),
@@ -261,8 +287,26 @@ export async function recaptureBlockedResumes(options?: {
       }
     } catch (err) {
       detail.error = err instanceof Error ? err.message : String(err);
-      result.failed += 1;
-      console.error(`Resume recapture failed for ${candidateId}`, err);
+      // A 404 means the candidate was deleted/merged in Workable. Re-pulling will
+      // never succeed, and leaving the row stuck on "Review blocked" is the exact
+      // zombie that prompted this. Retire it out of the active pool (unless dry-run).
+      if (isWorkableNotFound(err)) {
+        if (!options?.dryRun) {
+          try {
+            await retireMissingCandidate(candidateId);
+            detail.retired = true;
+            result.retired += 1;
+          } catch (retireErr) {
+            console.error(`Failed to retire missing candidate ${candidateId}`, retireErr);
+            result.failed += 1;
+          }
+        } else {
+          detail.retired = true;
+        }
+      } else {
+        result.failed += 1;
+        console.error(`Resume recapture failed for ${candidateId}`, err);
+      }
     }
     result.details.push(detail);
     // Respect Workable's ~10 req/s ceiling with margin.

@@ -113,7 +113,11 @@ function workableUrlFor(candidate: CandidateRow, jobShortcode: string): string {
 const JOB_BASE = "Van Nuys, CA";
 
 function humanCut(input: MapInput): boolean {
-  return input.overlay?.status === "disqualified" || Boolean(input.candidate.disqualified);
+  return (
+    input.overlay?.status === "disqualified" ||
+    input.overlay?.status === "withdrawn" ||
+    Boolean(input.candidate.disqualified)
+  );
 }
 
 function hasDiscrepancy(v: VerificationPayload | null): boolean {
@@ -133,12 +137,16 @@ export function deriveDecision(input: MapInput): Decision {
   // A human's manual status wins over everything else, including the model read.
   // Legacy/stored values are normalized to the current four-action vocabulary.
   if (input.decisionOverride) return normalizeDecision(input.decisionOverride);
+
+  // A cut (disqualified in Workable / overlay, or a record retired because it was
+  // deleted at the source) is terminal: it outranks any stored read — including a
+  // stale "blocked" read — and a cut candidate is NEVER surfaced as "Review blocked".
+  if (humanCut(input)) return "reject";
+
   if (input.read?.decision) return normalizeDecision(input.read.decision);
 
   const { score, evals } = input;
   if (!evals.invest || !score) return "blocked";
-
-  if (humanCut(input)) return "reject";
 
   const integrity = (evals.dig?.integrity ?? "").toLowerCase();
   if (integrity.startsWith("material")) return "reject";

@@ -26,6 +26,10 @@ export interface GradingInputs {
   resumeText: string | null;
   resumeStoragePath: string | null;
   resumeUrl: string | null;
+  /** Cover letter text, when the candidate submitted one. Counts as gradeable material. */
+  coverLetter?: string | null;
+  /** How many parsed experience entries are on file. Counts as gradeable material. */
+  parsedExperienceCount?: number;
   /** Job role spec markdown (after the Workable-description fallback). */
   jobSpec: string;
   /** Job grading rubric markdown. */
@@ -54,7 +58,23 @@ function answersReady(answers: Record<string, string> | null): boolean {
   return Object.values(answers).some((v) => typeof v === "string" && v.trim().length > 0);
 }
 
-/** Pure readiness check over an assembled input bundle. Never throws. */
+/** Whether the candidate actually submitted non-blank screening answers. */
+function hasAnswerContent(answers: Record<string, string> | null): boolean {
+  if (!answers || typeof answers !== "object") return false;
+  return Object.values(answers).some((v) => typeof v === "string" && v.trim().length > 0);
+}
+
+/**
+ * Pure readiness check over an assembled input bundle. Never throws.
+ *
+ * A candidate is gradeable as soon as there is SOMETHING to read — a parsed
+ * résumé, non-blank screening answers, a cover letter, or parsed experience —
+ * plus the job spec and methodology (both of which self-heal from Workable /
+ * seed defaults). A missing parsed résumé ALONE is no longer a hard block: we
+ * never want a real applicant frozen on "Review blocked" when they handed us
+ * other material to evaluate. The only genuine block is having no candidate
+ * material at all (e.g. an empty record orphaned from a deleted Workable entry).
+ */
 export function computeReadiness(inputs: GradingInputs): CandidateReadiness {
   const detail: Record<ReadinessInput, boolean> = {
     answers: answersReady(inputs.answers),
@@ -62,7 +82,20 @@ export function computeReadiness(inputs: GradingInputs): CandidateReadiness {
     jobSpec: Boolean(inputs.jobSpec.trim()),
     methodology: Boolean(inputs.methodology.trim().length >= MIN_METHOD),
   };
-  const missing = (Object.keys(detail) as ReadinessInput[]).filter((k) => !detail[k]);
+
+  const hasGradableMaterial =
+    detail.resume ||
+    hasAnswerContent(inputs.answers) ||
+    Boolean(inputs.coverLetter && inputs.coverLetter.trim()) ||
+    (inputs.parsedExperienceCount ?? 0) > 0;
+
+  // Blockers are: nothing to read at all, or a missing job spec / methodology.
+  // When there IS material, a missing résumé is informational, not a block.
+  const missing: ReadinessInput[] = [];
+  if (!hasGradableMaterial) missing.push("resume");
+  if (!detail.jobSpec) missing.push("jobSpec");
+  if (!detail.methodology) missing.push("methodology");
+
   // Is there any résumé source at all to ingest? A signed URL or an already-
   // stored file both mean "a résumé exists, it just isn't parsed yet" (resync /
   // OCR can fix it). Neither present means there is genuinely no résumé on file
@@ -75,7 +108,7 @@ export function computeReadiness(inputs: GradingInputs): CandidateReadiness {
     ready: missing.length === 0,
     missing,
     detail,
-    resumeMissingFromSource: !detail.resume && !hasResumeSource,
+    resumeMissingFromSource: !hasGradableMaterial && !detail.resume && !hasResumeSource,
   };
 }
 
@@ -95,6 +128,8 @@ export async function assembleGradingInputs(
     resumeText: null,
     resumeStoragePath: null,
     resumeUrl: null,
+    coverLetter: null,
+    parsedExperienceCount: 0,
     jobSpec: "",
     rubric: "",
     methodology: "",
@@ -106,7 +141,7 @@ export async function assembleGradingInputs(
   const [appRes, rubric, methodology] = await Promise.all([
     supabase
       .from("applications")
-      .select("answers, resume_text, resume_storage_path, resume_url")
+      .select("answers, resume_text, resume_storage_path, resume_url, cover_letter, parsed_experience")
       .eq("candidate_id", candidateId)
       .maybeSingle(),
     getJobRubric(jobShortcode),
@@ -119,6 +154,8 @@ export async function assembleGradingInputs(
         resume_text: string | null;
         resume_storage_path: string | null;
         resume_url: string | null;
+        cover_letter: string | null;
+        parsed_experience: unknown[] | null;
       }
     | null;
 
@@ -128,6 +165,8 @@ export async function assembleGradingInputs(
     resumeText: app?.resume_text ?? null,
     resumeStoragePath: app?.resume_storage_path ?? null,
     resumeUrl: app?.resume_url ?? null,
+    coverLetter: app?.cover_letter ?? null,
+    parsedExperienceCount: Array.isArray(app?.parsed_experience) ? app!.parsed_experience.length : 0,
     jobSpec: rubric.specMd ?? "",
     rubric: rubric.rubricMd ?? "",
     methodology: methodology ?? "",

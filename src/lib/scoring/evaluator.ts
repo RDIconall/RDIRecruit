@@ -61,6 +61,15 @@ export interface EvaluatorOutput {
     sourceRef: string;
     quote: string;
   }>;
+
+  /**
+   * True when this read came from the deterministic heuristic fallback (no model
+   * key in scope, or the model's JSON failed to parse) rather than a real Claude
+   * evaluation. Callers MUST NOT persist a heuristic read as a candidate's review:
+   * placeholder evals leave a candidate looking "Review blocked"/unfinished even
+   * though they have full materials. Skip and retry once a real read is possible.
+   */
+  heuristic?: boolean;
 }
 
 export interface EvaluatorInput {
@@ -306,6 +315,9 @@ export async function evaluateCandidate(input: EvaluatorInput): Promise<Evaluato
   try {
     parsed = JSON.parse(match?.[0] ?? "{}") as Partial<EvaluatorOutput>;
   } catch {
+    // A truncated/malformed model response is a TRANSIENT failure, not a real
+    // read. Flag it heuristic so the scorer skips persisting and retries — never
+    // freeze a candidate on placeholder data.
     return heuristicEvaluate(input);
   }
 
@@ -474,5 +486,6 @@ function heuristicEvaluate(input: EvaluatorInput): EvaluatorOutput {
       sourceRef: `${r.company}`,
       quote: r.quote,
     })),
+    heuristic: true,
   };
 }

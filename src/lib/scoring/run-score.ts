@@ -1,4 +1,4 @@
-import { hasWorkable } from "../env";
+import { hasAnthropic, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { upsertOverlay } from "../data/overlay";
 import { buildSeatContext } from "../jobs/seat-context";
@@ -165,10 +165,10 @@ export async function scoreCandidate(
     getJobRubric(candidate.job_shortcode ?? ""),
   ]);
 
-  // Readiness gate — never grade on partial data. All four inputs must be present:
-  // screening answers, a parsed résumé, the job spec, and the methodology doc. When
-  // incomplete we SKIP scoring (we never clobber an existing read); the candidate
-  // stays "Review blocked" until the résumé backfill / re-sync fills the gap.
+  // Readiness gate — grade as soon as there is SOMETHING to read (résumé, answers,
+  // cover letter, or parsed experience) plus the job spec + methodology. A missing
+  // parsed résumé alone no longer blocks. We still SKIP (never clobbering an existing
+  // read) only when there is genuinely no candidate material at all.
   const readinessInputs: GradingInputs = {
     candidateId,
     jobShortcode: candidate.job_shortcode ?? "",
@@ -176,6 +176,10 @@ export async function scoreCandidate(
     resumeText: (application?.resume_text as string | null) ?? null,
     resumeStoragePath: (application?.resume_storage_path as string | null) ?? null,
     resumeUrl: (application?.resume_url as string | null) ?? null,
+    coverLetter: (application?.cover_letter as string | null) ?? null,
+    parsedExperienceCount: Array.isArray(application?.parsed_experience)
+      ? (application!.parsed_experience as unknown[]).length
+      : 0,
     jobSpec: jobRubric.specMd,
     rubric: jobRubric.rubricMd,
     methodology: method,
@@ -246,6 +250,19 @@ export async function scoreCandidate(
     roleCalibration: calibration.role,
     careerContext,
   });
+
+  // Guard: never persist a heuristic placeholder as a candidate's review. It comes
+  // from the no-model-key path or a transient parse failure, and writing it leaves a
+  // fully-materialed candidate (résumé + answers) looking "Review blocked"/unfinished.
+  // Skip without touching the prior score so the candidate is re-scored for real on
+  // the next pass once a model read is available.
+  if (evaluation.heuristic) {
+    gradeLog("score.heuristic.skipped", {
+      candidateId,
+      hasModelKey: hasAnthropic(),
+    });
+    return { skipped: true as const, reason: "no_model_read" as const };
+  }
 
   // Evaluation succeeded — now it is safe to clear the prior read for a replace.
   // (ro_assessments and narratives are deleted-then-inserted in place further down.)
