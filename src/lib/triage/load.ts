@@ -77,6 +77,37 @@ function emptyPool(
 
 type EvalRow = { candidate_id: string; kind: string; payload: Record<string, unknown>; created_at: string };
 
+/**
+ * Fetch ALL evaluation rows for a set of candidates, paging past PostgREST's
+ * default 1000-row response cap. A busy job (100+ candidates × ~12 eval rows
+ * each) easily exceeds 1000 rows; a single `.in(...)` select silently truncates,
+ * which drops some candidates' invest_head entirely and makes them render
+ * "Review blocked" even though they have a full score + evaluation on file.
+ * Stable ordering (candidate_id, created_at, id) keeps the pages non-overlapping.
+ */
+async function fetchEvaluationsPaged(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  ids: string[],
+): Promise<EvalRow[]> {
+  const PAGE = 1000;
+  const out: EvalRow[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from("evaluations")
+      .select("candidate_id, kind, payload, created_at, id")
+      .in("candidate_id", ids)
+      .order("candidate_id", { ascending: true })
+      .order("created_at", { ascending: true })
+      .order("id", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as EvalRow[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
   const byCandidate = new Map<string, EvalRow[]>();
   for (const row of rows) {
@@ -237,9 +268,9 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRes, evalRes, workingFiles] = await Promise.all([
+  const [appsRes, evalRows, workingFiles] = await Promise.all([
     supabase.from("applications").select("candidate_id, parsed_experience").in("candidate_id", ids),
-    supabase.from("evaluations").select("candidate_id, kind, payload, created_at").in("candidate_id", ids),
+    fetchEvaluationsPaged(supabase, ids),
     getWorkingFiles(ids),
   ]);
 
@@ -253,7 +284,7 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
       });
   }
 
-  const evalsByCandidate = groupEvaluations((evalRes.data ?? []) as EvalRow[]);
+  const evalsByCandidate = groupEvaluations(evalRows);
 
   const roster: RosterEntry[] = [];
   for (const item of board) {
@@ -308,9 +339,9 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRes, evalRes, narrRes, evidenceRes, activityRes, workingFiles] = await Promise.all([
+  const [appsRes, evalRows, narrRes, evidenceRes, activityRes, workingFiles] = await Promise.all([
     supabase.from("applications").select("candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url").in("candidate_id", ids),
-    supabase.from("evaluations").select("candidate_id, kind, payload, created_at").in("candidate_id", ids),
+    fetchEvaluationsPaged(supabase, ids),
     supabase.from("narratives").select("candidate_id, segments, generated_at").in("candidate_id", ids).order("generated_at", { ascending: false }),
     supabase.from("evidence").select("*").in("candidate_id", ids).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
     supabase.from("activity").select("id, candidate_id, type, author, body, created_at").in("candidate_id", ids).order("created_at", { ascending: true }),
@@ -336,7 +367,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       });
   }
 
-  const evalsByCandidate = groupEvaluations((evalRes.data ?? []) as EvalRow[]);
+  const evalsByCandidate = groupEvaluations(evalRows);
 
   const narrByCandidate = new Map<string, NarrativeSegment[]>();
   for (const n of (narrRes.data ?? []) as Array<{ candidate_id: string; segments: NarrativeSegment[] }>) {
