@@ -12,7 +12,7 @@ import { gradeCandidate } from "@/lib/triage/grade";
 import { prepareGradingInputs, describeMissing } from "@/lib/triage/readiness";
 import { chatWithClaude } from "@/lib/triage/chat";
 import { DM } from "@/lib/triage/theme";
-import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
+import { reviewerKindLabel, resolveReviewerLabel, reviewerKindFrom, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import type {
   ActivityEntry,
@@ -58,9 +58,10 @@ async function reviewerIdentity(): Promise<ReviewerIdentity> {
     const user = await currentUser();
     if (!user) return { kind: "other" };
     const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-    const email = user.emailAddresses?.[0]?.emailAddress;
-    const label = name || (email ? email.split("@")[0] : undefined);
-    return { id: user.id, label, kind: reviewerKindFrom(label || email) };
+    const email = user.emailAddresses?.[0]?.emailAddress ?? null;
+    const kind = reviewerKindFrom(name || email);
+    const label = resolveReviewerLabel({ name, email, kind });
+    return { id: user.id, label, kind };
   } catch {
     return { kind: "other" };
   }
@@ -224,8 +225,7 @@ export async function saveCorrection(input: {
   // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
   const ident = await reviewerIdentity();
   const kind = input.reviewerKind ?? ident.kind;
-  const label =
-    ident.label && reviewerKindFrom(ident.label) === kind ? ident.label : reviewerKindLabel(kind);
+  const label = ident.label && ident.kind === kind ? ident.label : reviewerKindLabel(kind);
   const reviewer: ReviewerIdentity = { id: ident.id, label, kind };
 
   const entry: CorrectionEntry = {
@@ -475,7 +475,7 @@ export async function logActivity(input: {
   if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
-  const author = input.author?.trim() || ident.label || "You";
+  const author = input.author?.trim() || ident.label || reviewerKindLabel("other");
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("activity")

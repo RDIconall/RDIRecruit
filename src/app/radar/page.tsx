@@ -1,6 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { RadarApp } from "@/components/radar/radar-app";
 import { loadRadar } from "@/lib/radar/load";
+import { viewerFromClerkUser } from "@/lib/triage/reviewer";
 import type { Pipeline } from "@/lib/radar/types";
 
 // Server-fed from Supabase. Auth enforced by Clerk middleware. Human edits and
@@ -25,10 +26,7 @@ export default async function RadarPage({
     currentUser().catch(() => null),
   ]);
 
-  const viewer =
-    [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() ||
-    user?.emailAddresses?.[0]?.emailAddress?.split("@")[0] ||
-    "RDI";
+  const viewer = viewerFromClerkUser(user).label;
 
   return <RadarApp key={`${pipeline}:${searchId ?? "all"}`} data={data} viewer={viewer} />;
 }

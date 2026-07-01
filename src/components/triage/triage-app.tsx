@@ -54,7 +54,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
     );
   }, []);
 
-  const wsApi = useWorkspace(pool.workspace, candidates, applyRead);
+  const wsApi = useWorkspace(pool.workspace, candidates, applyRead, viewer);
 
   const contextValue = useMemo(
     () => ({

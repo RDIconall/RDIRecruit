@@ -21,6 +21,46 @@ export function reviewerKindLabel(kind: ReviewerKind): string {
   return { conall: "Conall", lara: "Lara", other: "Other reviewer" }[kind];
 }
 
+/**
+ * Human-readable label for comments, corrections, and activity log entries.
+ * Known reviewers (Conall / Lara) always get their canonical name even when
+ * Clerk only has an email like lara@rditrials.com with no first/last name set.
+ */
+export function resolveReviewerLabel(input: {
+  name?: string | null;
+  email?: string | null;
+  kind?: ReviewerKind;
+}): string {
+  const name = input.name?.trim();
+  if (name) return name;
+  const email = input.email?.trim().toLowerCase() ?? "";
+  const kind = input.kind ?? reviewerKindFrom(email);
+  if (kind !== "other") return reviewerKindLabel(kind);
+  if (email) {
+    const local = email.split("@")[0] ?? "";
+    if (!local) return reviewerKindLabel("other");
+    return local.charAt(0).toUpperCase() + local.slice(1);
+  }
+  return reviewerKindLabel("other");
+}
+
+/** Build the signed-in viewer from a Clerk user record. */
+export function viewerFromClerkUser(
+  user: {
+    id: string;
+    firstName?: string | null;
+    lastName?: string | null;
+    emailAddresses?: { emailAddress: string }[];
+  } | null
+  | undefined,
+): Viewer {
+  if (!user) return { kind: "other", label: reviewerKindLabel("other") };
+  const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
+  const email = user.emailAddresses?.[0]?.emailAddress ?? null;
+  const kind = reviewerKindFrom(name || email);
+  return { id: user.id, label: resolveReviewerLabel({ name, email, kind }), kind };
+}
+
 export const REVIEWER_OPTIONS: { kind: ReviewerKind; label: string }[] = [
   { kind: "conall", label: "Conall" },
   { kind: "lara", label: "Lara" },
