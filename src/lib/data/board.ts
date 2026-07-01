@@ -33,6 +33,10 @@ function workableToCandidateRow(
     source: candidate.sourced ? "sourced" : "applied",
     assignee_id: null,
     raw: candidate as unknown as Record<string, unknown>,
+    photo_url:
+      typeof candidate.image_url === "string" && candidate.image_url.startsWith("http")
+        ? candidate.image_url
+        : null,
     created_at: candidate.created_at,
     synced_at: new Date().toISOString(),
   };
@@ -59,6 +63,7 @@ export const DEMO_BOARD: BoardCandidate[] = [
       source: "applied",
       assignee_id: null,
       raw: null,
+      photo_url: null,
       created_at: new Date(Date.now() - 2 * 86400000).toISOString(),
       synced_at: new Date().toISOString(),
     },
@@ -100,6 +105,7 @@ export const DEMO_BOARD: BoardCandidate[] = [
       source: "applied",
       assignee_id: null,
       raw: null,
+      photo_url: null,
       created_at: new Date(Date.now() - 20 * 86400000).toISOString(),
       synced_at: new Date().toISOString(),
     },
@@ -141,6 +147,7 @@ export const DEMO_BOARD: BoardCandidate[] = [
       source: "applied",
       assignee_id: null,
       raw: null,
+      photo_url: null,
       created_at: new Date(Date.now() - 1 * 86400000).toISOString(),
       synced_at: new Date().toISOString(),
     },

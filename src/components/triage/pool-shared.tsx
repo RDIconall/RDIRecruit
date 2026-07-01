@@ -4,13 +4,18 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import {
   APP,
   DECISION_LABEL,
+  PROCESS_STATUS_LABEL,
+  PROCESS_STATUS_OPTIONS,
+  isAdvancedStage,
+  processColor,
   valueDot,
   verdictDot,
+  workableStageLabel,
   describeMissingInputs,
 } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
 import { formatAsk } from "@/lib/triage/format";
-import type { Candidate, Decision, ValueLevel, ValueRead, VerdictRead } from "@/lib/triage/types";
+import type { Candidate, Decision, ProcessStatus, ValueLevel, ValueRead, VerdictRead } from "@/lib/triage/types";
 
 export const DECISION_OPTIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
 
@@ -209,6 +214,104 @@ export function StatusSelect({ value, onChange }: { value: Decision; onChange: (
       {DECISION_OPTIONS.map((d) => (
         <option key={d} value={d}>
           {DECISION_LABEL[d]}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * Read-only chip showing the live Workable pipeline stage, mirrored from the ATS.
+ * Only renders once a candidate has been ADVANCED (Phone screen and beyond) so the
+ * board isn't flooded with "Applied" on every row. Returns null otherwise.
+ */
+export function WorkableStageChip({ stage, compact = false }: { stage: string | undefined; compact?: boolean }) {
+  if (!isAdvancedStage(stage)) return null;
+  const label = workableStageLabel(stage);
+  if (!label) return null;
+  return (
+    <span
+      title={`Workable stage: ${label}`}
+      style={mono({
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 4,
+        fontSize: compact ? 10.5 : 11,
+        color: APP.secondary,
+        background: APP.line2,
+        border: `1px solid ${APP.hair2}`,
+        borderRadius: 4,
+        padding: compact ? "1px 6px" : "2px 7px",
+        whiteSpace: "nowrap",
+        lineHeight: 1.3,
+      })}
+    >
+      <span aria-hidden style={{ color: APP.faint }}>↳</span>
+      {label}
+    </span>
+  );
+}
+
+/** Read-only chip showing our post-decision process status. Null when unset. */
+export function ProcessChip({ status, compact = false }: { status: ProcessStatus | null | undefined; compact?: boolean }) {
+  if (!status) return null;
+  const color = processColor(status);
+  return (
+    <span
+      title={`Process: ${PROCESS_STATUS_LABEL[status]}`}
+      style={mono({
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 5,
+        fontSize: compact ? 10.5 : 11,
+        color,
+        background: APP.surface,
+        border: `1px solid ${color === APP.accent ? APP.accentBorder : APP.hair}`,
+        borderRadius: 999,
+        padding: compact ? "1px 7px" : "2px 9px",
+        whiteSpace: "nowrap",
+        lineHeight: 1.3,
+      })}
+    >
+      <span style={{ width: 6, height: 6, borderRadius: 9999, background: color, flexShrink: 0 }} />
+      {PROCESS_STATUS_LABEL[status]}
+    </span>
+  );
+}
+
+/** Editable select for the post-decision process status. Empty value clears it. */
+export function ProcessSelect({
+  value,
+  onChange,
+}: {
+  value: ProcessStatus | null | undefined;
+  onChange: (status: ProcessStatus | null) => void;
+}) {
+  return (
+    <select
+      value={value ?? ""}
+      onClick={(e) => e.stopPropagation()}
+      onChange={(e) => {
+        e.stopPropagation();
+        const v = e.target.value;
+        onChange(v ? (v as ProcessStatus) : null);
+      }}
+      aria-label="Set process status"
+      title="Where this candidate is in our hiring process"
+      style={mono({
+        fontSize: 12.5,
+        color: value ? processColor(value) : APP.muted,
+        background: APP.surface,
+        border: `1px solid ${APP.hair}`,
+        borderRadius: 5,
+        padding: "5px 10px",
+        cursor: "pointer",
+      })}
+    >
+      <option value="">Not in process</option>
+      {PROCESS_STATUS_OPTIONS.map((s) => (
+        <option key={s} value={s}>
+          {PROCESS_STATUS_LABEL[s]}
         </option>
       ))}
     </select>

@@ -3,7 +3,7 @@
 // Contract: cursor-handoff/HANDOFF-v2.md §0 + cursor-handoff/RDIRecruit (app).dc.html.
 // No brand fonts, no scores/tiers, no emoji.
 
-import type { Decision, ReadinessInput } from "./types";
+import type { Decision, ProcessStatus, ReadinessInput } from "./types";
 
 export const APP = {
   // type — system stack only
@@ -94,6 +94,52 @@ export const DECISION_LABEL: Record<Decision, string> = {
   reject: "Reject",
   blocked: "Review blocked",
 };
+
+// --- Post-decision process status (our pipeline, set in-app) ------------------
+// A separate dimension from the triage Decision: where a candidate we've decided
+// to pursue is in OUR process. Ordered as the workflow progresses.
+export const PROCESS_STATUS_OPTIONS: ProcessStatus[] = [
+  "sentToLara",
+  "interviewing",
+  "referenceChecks",
+  "offer",
+  "hired",
+  "passed",
+];
+
+export const PROCESS_STATUS_LABEL: Record<ProcessStatus, string> = {
+  sentToLara: "Sent to Lara",
+  interviewing: "Interviewing",
+  referenceChecks: "Reference checks",
+  offer: "Offer",
+  hired: "Hired",
+  passed: "Passed",
+};
+
+// Chip color for a process status: hired reads as the accent (good outcome),
+// passed reads muted (closed out), the rest are plain ink (in flight).
+export function processColor(s: ProcessStatus): string {
+  if (s === "hired") return APP.accent;
+  if (s === "passed") return APP.muted;
+  return APP.ink;
+}
+
+// --- Workable pipeline stage (mirrored read-only from the ATS) ----------------
+// Workable stages every applicant starts in (Sourced/Applied/New) are the default
+// and read as noise on the board — we only surface the chip once a candidate has
+// been ADVANCED (Phone screen and beyond), which is the signal recruiters act on.
+const DEFAULT_WORKABLE_STAGES = new Set(["", "sourced", "applied", "new", "lead", "candidate"]);
+
+export function isAdvancedStage(stage: string | null | undefined): boolean {
+  return !DEFAULT_WORKABLE_STAGES.has((stage ?? "").trim().toLowerCase());
+}
+
+/** Tidy a raw Workable stage string for display ("phone_screen" → "Phone screen"). */
+export function workableStageLabel(stage: string | null | undefined): string {
+  const raw = (stage ?? "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!raw) return "";
+  return raw.charAt(0).toUpperCase() + raw.slice(1);
+}
 
 // Neutral decision color: the accent reads "interview", red reads "reject",
 // muted reads "blocked"; backup is plain ink. One accent only.

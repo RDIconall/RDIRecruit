@@ -15,9 +15,11 @@ import {
   Checkbox,
   Dot,
   DisqButton,
+  ProcessChip,
   StandingLine,
   StatusSelect,
   ValueCell,
+  WorkableStageChip,
   compactAsk,
   ellipsis,
   mono,
@@ -32,20 +34,22 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
   const { candidates, meta, rubricMd, specMd } = useTriageData();
   const narrow = useIsNarrow();
   const dq = wsApi.ws.dq;
+  const processMap = wsApi.ws.process;
   const [sel, setSel] = useState<RowSelectionState>({});
   const [showDisq, setShowDisq] = useState(false);
 
   const isDq = (c: Candidate) => !!dq[c.id];
   // Active candidates, ordered the way the pool reads top-down (decision-group
   // priority, then pool standing within the group). The table keeps this as its
-  // default order; sorting a column overrides it per group.
+  // default order; sorting a column overrides it per group. Process status is
+  // overlaid from the live workspace so optimistic changes show without a refetch.
   const active = useMemo(
     () =>
       candidates
         .filter((c) => !isDq(c))
-        .slice()
+        .map((c) => ({ ...c, processStatus: processMap[c.id] ?? null }))
         .sort((a, b) => (a.standing?.overallRank ?? 1e9) - (b.standing?.overallRank ?? 1e9)),
-    [candidates, dq],
+    [candidates, dq, processMap],
   );
   const disqRows = useMemo(() => candidates.filter((c) => isDq(c)), [candidates, dq]);
 
@@ -391,6 +395,12 @@ function MobileRow({ c, selected, onToggle, onOpen, onDisq, onSetDecision }: { c
           </div>
           <div style={{ fontSize: 12, color: APP.muted, lineHeight: 1.25, ...ellipsis }}>{c.role} · {c.company}</div>
           <StandingLine c={c} />
+          {(c.processStatus || (c.workableStage && c.workableStage.length > 0)) && (
+            <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, flexWrap: "wrap" }}>
+              <ProcessChip status={c.processStatus} compact />
+              <WorkableStageChip stage={c.workableStage} compact />
+            </div>
+          )}
         </div>
         <div style={mono({ fontSize: 13, color: APP.ink, flexShrink: 0 })}>Level {c.roLevel}</div>
       </div>

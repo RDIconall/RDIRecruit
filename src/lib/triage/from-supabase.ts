@@ -23,7 +23,7 @@ import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
 import { cityState } from "./format";
 import { avatarColor, fitWeight, initialsOf } from "./app-theme";
-import { normalizeDecision } from "./types";
+import { normalizeDecision, normalizeProcessStatus } from "./types";
 import type {
   AnswerRow,
   Candidate,
@@ -35,6 +35,7 @@ import type {
   CutGroup,
   Decision,
   DecisionRead,
+  ProcessStatus,
   FirefliesRecording,
   Logistics,
   LogisticsSignal,
@@ -88,13 +89,21 @@ export interface MapInput {
   corrections?: CorrectionEntry[];
   /** Manual decision set by a human reviewer; wins over the model read. */
   decisionOverride?: Decision | null;
+  /** Our post-decision process status (Sent to Lara, Interviewing, …); persisted in the working file. */
+  processStatus?: ProcessStatus | null;
   rank: number;
   jobLocation: string;
   jobShortcode: string;
 }
 
-/** Pull the candidate's Workable profile photo from the raw payload, if any. */
+/**
+ * The candidate's Workable profile photo. Prefers the durable `photo_url` column
+ * (which the bulk mirror can't wipe), falling back to `raw.image_url` for rows
+ * synced before the column existed.
+ */
 function photoUrlFor(candidate: CandidateRow): string | undefined {
+  const column = candidate.photo_url;
+  if (typeof column === "string" && column.startsWith("http")) return column;
   const raw = candidate.raw;
   if (!raw || typeof raw !== "object") return undefined;
   const img = (raw as { image_url?: unknown; image?: unknown }).image_url ?? (raw as { image?: unknown }).image;
@@ -794,6 +803,8 @@ export function mapCandidate(input: MapInput): Candidate {
     salary,
     salaryNum: parseSalaryNum(invest?.ask),
     decision,
+    workableStage: (input.candidate.stage ?? "").trim() || undefined,
+    processStatus: normalizeProcessStatus(input.processStatus),
     rev: "none",
     revNote: "No human review yet — read synced from submitted materials.",
     why,

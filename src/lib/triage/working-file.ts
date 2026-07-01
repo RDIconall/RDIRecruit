@@ -1,4 +1,5 @@
 import { DM } from "./theme";
+import { PROCESS_STATUS_LABEL, workableStageLabel } from "./app-theme";
 import type { Candidate, TimelineRow, WorkspaceSlice } from "./types";
 
 // Matches the prototype's nowStamp() (en-US date + time) so the stored .md reads
@@ -54,6 +55,10 @@ export function renderWorkingFile(
     `- Salary ask: ${c.salary}\n` +
     `- RO level: ${c.roLevel}\n` +
     `- Decision: ${DM(c.decision).label}${opts.disqualified ? " (DISQUALIFIED)" : ""}\n` +
+    (c.processStatus ? `- Process status: ${PROCESS_STATUS_LABEL[c.processStatus]}\n` : "") +
+    (c.workableStage && workableStageLabel(c.workableStage)
+      ? `- Workable stage: ${workableStageLabel(c.workableStage)}\n`
+      : "") +
     (c.value && c.value.headline && c.value.headline !== "—"
       ? `- Strength vs salary: ${c.value.headline}${c.value.detail ? ` — ${c.value.detail}` : ""}\n`
       : "") +

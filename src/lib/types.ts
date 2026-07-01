@@ -38,6 +38,8 @@ export interface CandidateRow {
   source: string | null;
   assignee_id: string | null;
   raw: Record<string, unknown> | null;
+  /** Workable profile photo URL, captured durably so the mirror can't wipe it. */
+  photo_url: string | null;
   created_at: string | null;
   synced_at: string;
 }

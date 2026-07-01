@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
@@ -19,6 +19,7 @@ import {
   sendCandidateChat,
   setDecision as setDecisionAction,
   setDisqualified,
+  setProcessStatus as setProcessStatusAction,
   updateAssessment,
 } from "@/app/actions/triage";
 
@@ -39,6 +40,8 @@ export interface WorkspaceApi {
   runDeep: (id: string) => void;
   /** Manually set a candidate's decision/status (optimistic; persisted as an override). */
   setDecision: (id: string, decision: Decision) => void;
+  /** Set (or clear, with null) a candidate's post-decision process status (optimistic). */
+  setProcessStatus: (id: string, status: ProcessStatus | null) => void;
   /** Re-run Claude on current materials with the per-role rubric (clears manual override). */
   reanalyze: (id: string) => void;
   compareRubric: (id: string) => void;
@@ -175,6 +178,20 @@ export function useWorkspace(
     },
     [onRead, setBusyFor],
   );
+
+  const setProcessStatus = useCallback((id: string, status: ProcessStatus | null) => {
+    setWs((w) => {
+      const process = { ...w.process };
+      if (status) process[id] = status;
+      else delete process[id];
+      return { ...w, process };
+    });
+    void setProcessStatusAction({ candidateId: id, status })
+      .then((res) => {
+        if (!res.ok && res.message) setNotice(res.message);
+      })
+      .catch(() => setNotice("Process status change failed — please retry."));
+  }, []);
 
   const reanalyze = useCallback(
     (id: string) => {
@@ -378,6 +395,7 @@ export function useWorkspace(
     openCount,
     runDeep,
     setDecision,
+    setProcessStatus,
     reanalyze,
     compareRubric,
     resync,

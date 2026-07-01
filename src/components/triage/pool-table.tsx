@@ -31,9 +31,11 @@ import {
   Avatar,
   Checkbox,
   Dot,
+  ProcessChip,
   StandingLine,
   StatusSelect,
   ValueCell,
+  WorkableStageChip,
   compactAsk,
   ellipsis,
   mono,
@@ -652,6 +654,12 @@ function CandidateCell({ c, density, onOpen }: { c: Candidate; density: Density;
           {c.role}
         </div>
         <StandingLine c={c} />
+        {(c.processStatus || (c.workableStage && c.workableStage.length > 0)) && (
+          <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3, flexWrap: "wrap" }}>
+            <ProcessChip status={c.processStatus} compact />
+            <WorkableStageChip stage={c.workableStage} compact />
+          </div>
+        )}
       </div>
     </div>
   );

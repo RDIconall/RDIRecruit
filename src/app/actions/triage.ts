@@ -22,12 +22,22 @@ import type {
   CorrectionEntry,
   Decision,
   DecisionRead,
+  ProcessStatus,
   ReviewerKind,
   TimelineRow,
   WorkspaceSlice,
 } from "@/lib/triage/types";
+import { normalizeProcessStatus } from "@/lib/triage/types";
 
 const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
+const VALID_PROCESS_STATUS: ProcessStatus[] = [
+  "sentToLara",
+  "interviewing",
+  "referenceChecks",
+  "offer",
+  "hired",
+  "passed",
+];
 
 async function requireAuth(): Promise<string> {
   const { userId } = await auth();
@@ -263,6 +273,28 @@ export async function setDecision(input: { candidateId: string; decision: Decisi
     return { ok: false, recalculated: false, read: null, message: "Invalid decision" };
   }
   return persistAndMaybeRecalc(input.candidateId, { decisionOverride: input.decision }, { recalc: false });
+}
+
+/**
+ * Set (or clear) a candidate's post-decision process status — where they are in
+ * OUR pipeline once we've decided to pursue them (Sent to Lara, Interviewing,
+ * Reference checks, …). Orthogonal to the triage decision and untouched by Claude
+ * re-analysis. Pass null to clear it back to "not in process". Persisted on the
+ * working file workspace and reflected in the rendered .md.
+ */
+export async function setProcessStatus(input: {
+  candidateId: string;
+  status: ProcessStatus | null;
+}): Promise<RecalcResult> {
+  await requireAuth();
+  const status = input.status === null ? null : normalizeProcessStatus(input.status);
+  if (input.status !== null && status === null) {
+    return { ok: false, recalculated: false, read: null, message: "Invalid process status" };
+  }
+  if (status !== null && !VALID_PROCESS_STATUS.includes(status)) {
+    return { ok: false, recalculated: false, read: null, message: "Invalid process status" };
+  }
+  return persistAndMaybeRecalc(input.candidateId, { processStatus: status }, { recalc: false });
 }
 
 /** Re-run Claude on the current materials (with the per-role rubric). Clears any manual override. */

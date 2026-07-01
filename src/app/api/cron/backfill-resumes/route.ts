@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { backfillMissingResumes, recaptureBlockedResumes } from "@/lib/resume/backfill";
+import { backfillMissingPhotos } from "@/lib/sync/photo-backfill";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -17,6 +18,10 @@ export const maxDuration = 300;
  *   dryRun=1            only report whether Workable has a résumé (verification sample)
  *   limit=<n>           cap candidates processed
  *   ids=<id,id,...>     force re-ingest specific candidates (e.g. re-OCR a scan)
+ *
+ * `?mode=photos` backfills candidate profile photos the bulk mirror could never
+ * capture (the LIST endpoint omits `image_url`): it pulls the authoritative single
+ * candidate and writes `candidates.photo_url`. `limit=<n>` caps candidates processed.
  */
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
@@ -30,6 +35,14 @@ export async function GET(request: NextRequest) {
   const boundedLimit = Number.isFinite(limit) ? limit : undefined;
 
   try {
+    if (params.get("mode") === "photos") {
+      const result = await backfillMissingPhotos({
+        budgetMs: 240_000,
+        limit: boundedLimit,
+      });
+      return NextResponse.json({ ok: true, mode: "photos", ...result });
+    }
+
     if (params.get("mode") === "recapture") {
       const idsParam = params.get("ids");
       const ids = idsParam ? idsParam.split(",").map((s) => s.trim()).filter(Boolean) : undefined;

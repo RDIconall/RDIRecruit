@@ -165,6 +165,12 @@ export interface WorkableCandidate {
   hired_at: string | null;
   sourced: boolean;
   profile_url: string;
+  /**
+   * Candidate's profile photo URL. ONLY the single-candidate endpoint
+   * (GET /jobs/{shortcode}/candidates/{id}) returns it — the LIST endpoint omits
+   * it entirely, so the bulk mirror never carries a photo.
+   */
+  image_url?: string | null;
   address: string;
   phone: string;
   email: string;

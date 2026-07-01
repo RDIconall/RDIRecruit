@@ -1,14 +1,14 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useState } from "react";
-import { APP, DECISION_LABEL, decisionColor, verdictDot, describeMissingInputs } from "@/lib/triage/app-theme";
+import { APP, DECISION_LABEL, PROCESS_STATUS_LABEL, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
-import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, Decision, ProcessStatus, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
 import { getWorkingFileContent } from "@/app/actions/triage";
-import { Avatar } from "./pool-shared";
+import { Avatar, ProcessSelect, WorkableStageChip } from "./pool-shared";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
@@ -232,6 +232,9 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   const decisionLabel = DECISION_LABEL[c.decision];
   const decisionC = decisionColor(c.decision);
   const isDq = !!ws.dq[id];
+  // ws.process is hydrated at load and is the single source of truth for the
+  // process status (so an optimistic "clear" reflects immediately).
+  const processStatus: ProcessStatus | null = ws.process[id] ?? null;
   const activity = ws.activity[id] ?? [];
   const chat = ws.chat[id] ?? [];
   const chatThinking = !!wsApi.chatBusy[id];
@@ -330,6 +333,13 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
     { k: "Recommendation", v: <span style={{ color: decisionC, fontWeight: 600 }}>{decisionLabel}</span> },
   ];
 
+  if (isAdvancedStage(c.workableStage)) {
+    facts.push({ k: "Workable stage", v: workableStageLabel(c.workableStage) });
+  }
+  if (processStatus) {
+    facts.push({ k: "Process", v: PROCESS_STATUS_LABEL[processStatus] });
+  }
+
   const standing = standingLabel(c.standing);
   if (standing) facts.push({ k: "Pool standing", v: standing });
 
@@ -370,7 +380,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   return (
     <div style={wrap}>
       {/* top row */}
-      <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 16, rowGap: 10, marginBottom: 22, flexWrap: "wrap" }}>
         <button onClick={openPool} style={mono({ cursor: "pointer", background: "transparent", border: "none", padding: 0, fontSize: 13, color: APP.secondary })}>
           ← Pool
         </button>
@@ -391,6 +401,10 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
             <option key={d} value={d}>{DECISION_LABEL[d]}</option>
           ))}
         </select>
+        <label style={mono({ fontSize: 11, color: APP.faint, textTransform: "uppercase", letterSpacing: "0.04em" })}>
+          Process
+        </label>
+        <ProcessSelect value={processStatus} onChange={(s) => wsApi.setProcessStatus(id, s)} />
         <button
           onClick={() => wsApi.toggleDq(id)}
           style={{
@@ -413,8 +427,11 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         <Avatar c={c} size={46} />
         <div style={{ minWidth: 0 }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 700, letterSpacing: "-0.02em", textDecoration: isDq ? "line-through" : "none" }}>{c.name}</h1>
-          <div style={{ fontSize: 15, color: APP.secondary }}>
-            {c.role} · {c.company}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span style={{ fontSize: 15, color: APP.secondary }}>
+              {c.role} · {c.company}
+            </span>
+            <WorkableStageChip stage={c.workableStage} />
           </div>
         </div>
       </div>

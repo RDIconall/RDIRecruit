@@ -39,7 +39,7 @@ export interface TriagePool {
 }
 
 function emptyWorkspace(): Workspace {
-  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {}, chat: {}, activity: {}, regen: {} };
+  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {}, chat: {}, activity: {}, regen: {}, process: {} };
 }
 
 type ActivityRow = { id: string; candidate_id: string; type: string | null; author: string | null; body: string; created_at: string };
@@ -223,6 +223,7 @@ export async function loadOneCandidate(candidateId: string): Promise<OneCandidat
     read: (wf?.read as DecisionRead | null) ?? null,
     corrections: wf?.workspace?.corrections ?? [],
     decisionOverride: wf?.workspace?.decisionOverride ?? null,
+    processStatus: wf?.workspace?.processStatus ?? null,
     rank: 0,
     jobLocation: "Van Nuys, CA",
     jobShortcode,
@@ -305,6 +306,7 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
       read,
       corrections: wf?.workspace?.corrections ?? [],
       decisionOverride: wf?.workspace?.decisionOverride ?? null,
+      processStatus: wf?.workspace?.processStatus ?? null,
       rank: 0,
       jobLocation: "Van Nuys, CA",
       jobShortcode,
@@ -399,6 +401,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       read,
       corrections: wf?.workspace?.corrections ?? [],
       decisionOverride: wf?.workspace?.decisionOverride ?? null,
+      processStatus: wf?.workspace?.processStatus ?? null,
       rank: index + 1,
       jobLocation: "Van Nuys, CA",
       jobShortcode,
@@ -413,6 +416,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     if (slice.corrections) workspace.corrections[id] = slice.corrections;
     if (slice.transcript) workspace.transcripts[id] = slice.transcript;
     if (slice.deep) workspace.deep[id] = true;
+    if (slice.processStatus) workspace.process[id] = slice.processStatus;
     if (slice.chat?.length) workspace.chat[id] = slice.chat;
     const acts = activityByCandidate.get(id);
     if (acts?.length) workspace.activity[id] = acts;

@@ -33,6 +33,18 @@ function parseEducation(candidate: WorkableCandidate) {
   }));
 }
 
+/**
+ * The candidate's profile photo URL, if the payload carries a usable one. Only
+ * the single-candidate endpoint returns `image_url`; the LIST endpoint omits it,
+ * so this is null for bulk-mirrored candidates (and we carry the stored value
+ * forward instead of clobbering it).
+ */
+function resolveWorkablePhoto(candidate: WorkableCandidate): string | null {
+  const raw = candidate as unknown as { image_url?: unknown; image?: unknown };
+  const img = raw.image_url ?? raw.image;
+  return typeof img === "string" && img.startsWith("http") ? img : null;
+}
+
 function answersToRecord(candidate: WorkableCandidate): Record<string, string> {
   const answers: Record<string, string> = {};
   for (const item of candidate.answers ?? []) {
@@ -145,11 +157,17 @@ export async function upsertCandidateFromWorkable(
   const supabase = getServiceSupabase();
   const { data: existing } = await supabase
     .from("candidates")
-    .select("analysis_hash, workable_updated_at")
+    .select("analysis_hash, workable_updated_at, photo_url")
     .eq("workable_id", candidate.id)
     .maybeSingle();
 
   result.isNew = !existing;
+
+  // The LIST endpoint omits `image_url`, so a bulk mirror must NEVER null-out a
+  // photo we previously captured from a single fetch. Carry the stored value
+  // forward whenever the incoming payload has none (same rule as resume_url).
+  const existingPhotoUrl = (existing as { photo_url?: string | null } | null)?.photo_url ?? null;
+  const photoUrl = resolveWorkablePhoto(candidate) ?? existingPhotoUrl;
 
   const metadataUnchanged = existing?.workable_updated_at === candidate.updated_at;
 
@@ -174,7 +192,10 @@ export async function upsertCandidateFromWorkable(
       stage: candidate.stage,
       disqualified: candidate.disqualified,
       source: candidate.sourced ? "sourced" : "applied",
-      raw: candidate as unknown as Record<string, unknown>,
+      // Keep raw.image_url consistent with the durable photo_url so the read-side
+      // fallback never disagrees with the column even after a photo-less mirror.
+      raw: { ...(candidate as unknown as Record<string, unknown>), image_url: photoUrl },
+      photo_url: photoUrl,
       created_at: candidate.created_at,
       workable_updated_at: candidate.updated_at,
       analysis_hash: applicationFingerprint,

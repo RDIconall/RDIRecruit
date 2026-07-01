@@ -16,6 +16,18 @@ const envSchema = z.object({
   SUPABASE_DB_URL: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   CRON_SECRET: z.string().optional(),
+  // Outbound email (SMTP) for the daily applicant summary. Defaults are tuned
+  // for Google Workspace / Gmail with an app password, so the summary is sent
+  // from your own address to you + Lara — no third-party service, no domain to
+  // verify. All optional: when unset the cron still runs and skips the send.
+  SMTP_HOST: z.string().default("smtp.gmail.com"),
+  SMTP_PORT: z.string().optional(), // 465 (SSL, default) or 587 (STARTTLS)
+  SMTP_USER: z.string().optional(), // your full email address
+  SMTP_PASS: z.string().optional(), // a Google "app password" (needs 2FA on the account)
+  // Optional "from" override, e.g. "RDIRecruit <you@rditrials.com>". Defaults to SMTP_USER.
+  SUMMARY_EMAIL_FROM: z.string().optional(),
+  // Comma-separated recipient list for the daily summary (you + Lara).
+  SUMMARY_EMAIL_TO: z.string().optional(),
   VIDEOASK_API_KEY: z.string().optional(),
   VIDEOASK_WEBHOOK_SECRET: z.string().optional(),
   CALENDLY_TOKEN: z.string().optional(),
@@ -57,6 +69,19 @@ export function hasSupabase(): boolean {
 
 export function hasAnthropic(): boolean {
   return Boolean(env.ANTHROPIC_API_KEY);
+}
+
+/** Outbound email is configured when we have SMTP creds and a recipient. */
+export function hasEmail(): boolean {
+  return Boolean(env.SMTP_HOST && env.SMTP_USER && env.SMTP_PASS && env.SUMMARY_EMAIL_TO);
+}
+
+/** Parsed recipient list for the daily summary (comma-separated env var). */
+export function summaryRecipients(): string[] {
+  return (env.SUMMARY_EMAIL_TO ?? "")
+    .split(",")
+    .map((address) => address.trim())
+    .filter(Boolean);
 }
 
 export function hasGeoapify(): boolean {

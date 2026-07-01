@@ -14,6 +14,34 @@ export type Decision =
 // overrides. Mapped to the four current actions at the data boundary.
 export type LegacyDecision = "short" | "verify" | "hold" | "cut";
 
+// Where a candidate we've DECIDED to pursue is in OUR hiring process — a separate
+// dimension from the triage `Decision` (which is the recommendation) and from the
+// Workable pipeline stage (which we mirror read-only). Human-set inside the app,
+// post-decision: e.g. handing someone to Lara for an interview or reference checks.
+// Absent (undefined/null) = not yet in process.
+export type ProcessStatus =
+  | "sentToLara"
+  | "interviewing"
+  | "referenceChecks"
+  | "offer"
+  | "hired"
+  | "passed";
+
+/** Normalize any stored value to a valid ProcessStatus, or null when unset/invalid. */
+export function normalizeProcessStatus(s: string | null | undefined): ProcessStatus | null {
+  switch (s) {
+    case "sentToLara":
+    case "interviewing":
+    case "referenceChecks":
+    case "offer":
+    case "hired":
+    case "passed":
+      return s;
+    default:
+      return null;
+  }
+}
+
 /** Normalize any stored/legacy decision to the current four-action vocabulary. */
 export function normalizeDecision(d: string | null | undefined): Decision {
   switch (d) {
@@ -312,6 +340,11 @@ export interface Candidate {
   salary: string;
   salaryNum: number;
   decision: Decision;
+  // Live Workable pipeline stage, mirrored read-only from the ATS (candidates.stage).
+  // e.g. "Phone Screen", "Interview". Empty/undefined when not synced.
+  workableStage?: string;
+  // Our post-decision process status (human-set in-app). Null/undefined = not in process.
+  processStatus?: ProcessStatus | null;
   rev: ReviewerSignal;
   revNote: string;
   why: string;
@@ -423,6 +456,8 @@ export interface Workspace {
   activity: Record<string, ActivityEntry[]>;
   /** When the pinned assessment was last regenerated from the war room / activity. */
   regen: Record<string, string>;
+  /** Post-decision process status per candidate (Sent to Lara, Interviewing, …). */
+  process: Record<string, ProcessStatus>;
 }
 
 // The per-candidate slice of the workspace, as stored in
@@ -441,6 +476,12 @@ export interface WorkspaceSlice {
    * Claude re-analysis runs (re-analyze hands the call back to the model).
    */
   decisionOverride?: Decision | null;
+  /**
+   * Our post-decision process status (Sent to Lara, Interviewing, Reference
+   * checks, …). Human-set in-app and orthogonal to the triage decision. Null
+   * clears it back to "not in process". Untouched by Claude re-analysis.
+   */
+  processStatus?: ProcessStatus | null;
 }
 
 // Claude's re-derived decision read, stored in candidate_working_files.read.
