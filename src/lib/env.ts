@@ -47,6 +47,9 @@ const envSchema = z.object({
   // VERCEL_URL (auto-set on Vercel) so opt-out links resolve in every env.
   RADAR_PUBLIC_URL: z.string().optional(),
   VERCEL_URL: z.string().optional(),
+  // Comma-separated Clerk login allowlist. When unset, any authenticated user may
+  // access the app. Set in production to restrict who can use RDIRecruit.
+  APP_ALLOWED_EMAILS: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);
