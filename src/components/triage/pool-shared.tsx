@@ -98,7 +98,14 @@ export function StandingLine({ c }: { c: Candidate }) {
 
 export function ValueCell({ value }: { value: ValueRead | undefined }) {
   if (!value || value.level === "none") {
-    return <span style={mono({ fontSize: 12, color: "#C9C9C9" })}>—</span>;
+    // No read (blocked) or no stated ask (unpriced) — dash, with the reason in
+    // the tooltip so the recruiter can tell which without opening the file.
+    const tip = value ? [value.headline, value.detail].filter(Boolean).join(" — ") : "";
+    return (
+      <span style={mono({ fontSize: 12, color: "#C9C9C9" })} title={tip || undefined}>
+        —
+      </span>
+    );
   }
   const d = valueDot(value.level);
   const tip = [value.headline, value.detail].filter(Boolean).join(" — ");

@@ -129,3 +129,29 @@ export function formatAsk(raw: string | null | undefined): string {
   }
   return "—";
 }
+
+/**
+ * Sortable numeric ask in thousands, parsed with the same range/token rules as
+ * formatAsk (a range sorts by its low end): "$145,000-$160,000" → 145,
+ * "$130K" → 130, unparseable/unstated → 0.
+ */
+export function askNumK(raw: string | null | undefined): number {
+  if (!raw) return 0;
+  const cleaned = raw.replace(/\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  if (!cleaned || cleaned === "—") return 0;
+
+  const range = cleaned.match(RANGE_RE);
+  if (range) {
+    const a = tokenToK(range[1]);
+    const b = tokenToK(range[2]);
+    if (a != null && b != null) return Math.min(a, b);
+  }
+
+  const tokens = cleaned.match(SINGLE_RE) ?? [];
+  for (const t of tokens) {
+    if (looksLikeYear(t)) continue;
+    const k = tokenToK(t);
+    if (k != null && k > 0) return k;
+  }
+  return 0;
+}

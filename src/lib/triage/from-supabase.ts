@@ -21,7 +21,7 @@ import type {
 } from "../types";
 import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
-import { cityState } from "./format";
+import { askNumK, cityState } from "./format";
 import { avatarColor, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision, normalizeProcessStatus } from "./types";
 import type {
@@ -216,15 +216,6 @@ function stripRoSubletters(value: string | null | undefined): string {
     .filter(Boolean);
   if (parts.length > 1 && parts.every((part) => part === parts[0])) return parts[0]!;
   return stripped;
-}
-
-function parseSalaryNum(ask: string | null | undefined): number {
-  if (!ask) return 0;
-  const digits = ask.replace(/[^0-9.]/g, "");
-  if (!digits) return 0;
-  const n = parseFloat(digits);
-  if (!Number.isFinite(n)) return 0;
-  return n >= 1000 ? Math.round(n / 1000) : Math.round(n);
 }
 
 function firstSentence(text: string | null | undefined): string {
@@ -697,6 +688,10 @@ function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
  * The headline strength-vs-salary value read for the board + page. Prefers a
  * Claude-persisted value; otherwise derives a coarse read from the cached answer/
  * spec fit and the salary-value signal so the column is never blank. Words only.
+ *
+ * A candidate with NO stated salary is "unpriced", never "overpriced": there is
+ * no ask to weigh strength against, so the read degrades to level "none" and the
+ * caveat ("Salary expectation not stated…") carries the follow-up.
  */
 function valueReadFrom(input: MapInput, decision: Decision, answers: VerdictRead, spec: VerdictRead): ValueRead {
   if (input.read?.value) return input.read.value;
@@ -704,8 +699,17 @@ function valueReadFrom(input: MapInput, decision: Decision, answers: VerdictRead
     return { headline: "No read yet", level: "none", detail: "Materials incomplete — strength-vs-salary read pending." };
   }
 
-  const strength = fitWeight(answers.level) + fitWeight(spec.level); // 0..4
   const salaryValue = (input.score?.salary_value ?? "").toLowerCase();
+  const unpriced = !input.evals.invest?.ask || salaryValue === "unstated";
+  if (unpriced) {
+    return {
+      headline: "Ask not stated",
+      level: "none",
+      detail: "No salary expectation on file — no strength-vs-salary read until the ask is confirmed.",
+    };
+  }
+
+  const strength = fitWeight(answers.level) + fitWeight(spec.level); // 0..4
   const richAsk = salaryValue === "rich for fit" || salaryValue === "poor value";
   const goodValue = salaryValue === "great value" || salaryValue === "justified";
 
@@ -801,7 +805,7 @@ export function mapCandidate(input: MapInput): Candidate {
     company,
     appliedAt: input.candidate.created_at,
     salary,
-    salaryNum: parseSalaryNum(invest?.ask),
+    salaryNum: askNumK(invest?.ask),
     decision,
     workableStage: (input.candidate.stage ?? "").trim() || undefined,
     processStatus: normalizeProcessStatus(input.processStatus),

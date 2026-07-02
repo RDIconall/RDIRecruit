@@ -130,6 +130,9 @@ export interface VerdictRead {
 //   strong = strong candidate for the ask (good value)
 //   fair   = strength and ask line up (priced about right)
 //   weak   = not strong enough for what they want (poor value / overpriced)
+//   none   = no read possible: materials incomplete OR no salary ask on file
+//            (an unpriced candidate is NEVER "weak/overpriced" — there is no
+//            price to be over; the caveat carries the "confirm the ask" step)
 export type ValueLevel = "strong" | "fair" | "weak" | "none";
 
 export interface ValueRead {

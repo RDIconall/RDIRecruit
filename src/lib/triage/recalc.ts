@@ -25,6 +25,8 @@ There is no "short screen" and no "verify first" status. If a key claim, fact, o
 
 JUDGE STRENGTH VS SALARY. The headline judgment is the candidate's strength weighed against their salary target. Strength = the quality of the life/career choices visible on the résumé (progression, tenure, the level their biggest accomplishments imply), the substance of their answers to the application questions, and their fit to the ROLE SPEC and JOB RUBRIC. Weigh that against their stated/target salary. A strong operator at a fair ask is high value; a thin candidate at a top-of-band ask is poor value. Fill the "value" object with this read.
 
+IF THE SALARY ASK IS NOT STATED, there is no price to judge against: set value.level to "unpriced" with a headline like "Ask not stated", judge the candidate on strength alone in value.detail, and put "confirm the salary expectation" in the caveat. NEVER call an unpriced candidate overpriced or good value.
+
 Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. Integrity problems and clear contradictions are gates: they push to reject regardless of fit.
 
 When a named human reviewer (e.g. Conall or Lara) leaves a correction, treat their signal as authoritative human judgment and weight it accordingly — name them as the source of the change.
@@ -41,9 +43,9 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
   "next": "the concrete next action, e.g. Interview | Hold as backup | Reject | Re-sync",
   "caveat": "what must be confirmed before an interview (a claim, a fact, or the salary), or an empty string if nothing needs confirming",
   "value": {
-    "headline": "a short strength-vs-salary verdict, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Overpriced for the level'",
-    "level": "strong | fair | weak",
-    "detail": "1-2 sentences weighing their strength (résumé choices + answers + spec/rubric fit) against their salary target"
+    "headline": "a short strength-vs-salary verdict, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Overpriced for the level' | 'Ask not stated'",
+    "level": "strong | fair | weak | unpriced (use unpriced ONLY when no salary ask is on file)",
+    "detail": "1-2 sentences weighing their strength (résumé choices + answers + spec/rubric fit) against their salary target — or against strength alone when the ask is unstated"
   },
   "timelineNote": "one short note on what changed vs the prior read, or empty string if nothing changed",
   "careerRead": {
@@ -131,7 +133,7 @@ ${(workingFile || "(empty)").slice(0, 8000)}
 
 CANDIDATE: ${candidate.name}
 Current role on file: ${candidate.role} at ${candidate.company}
-Salary ask: ${candidate.salary}
+Salary ask: ${!candidate.salary || candidate.salary === "—" ? "NOT STATED — must be confirmed" : candidate.salary}
 RO capability (level label, NOT a score): ${candidate.roLevel}
 Lives in: ${candidate.logistics.location || "not stated"} (office to commute to: ${OFFICE})
 Logistics: ${candidate.logistics.location} — likelihood ${candidate.logistics.likelihood}
@@ -215,10 +217,16 @@ function parseValue(value: unknown): ValueRead | undefined {
   const headline = str("headline");
   const detail = str("detail");
   const rawLevel = str("level").toLowerCase();
+  // "unpriced" (no ask on file) maps to the UI's "none" level — the value column
+  // shows a dash rather than pretending a price judgment exists.
   const level: ValueRead["level"] =
     rawLevel === "strong" ? "strong" : rawLevel === "weak" ? "weak" : rawLevel === "fair" ? "fair" : "none";
   if (!headline && !detail && level === "none") return undefined;
-  return { headline: headline || "—", level: level === "none" ? "fair" : level, detail };
+  if (level === "none" && !/unpriced|none|not stated|unstated/.test(rawLevel + " " + headline.toLowerCase())) {
+    // Unrecognized level but a real headline — keep the read, default to fair.
+    return { headline: headline || "—", level: "fair", detail };
+  }
+  return { headline: headline || "—", level, detail };
 }
 
 function parseRubricFit(value: unknown): RubricFit | undefined {
