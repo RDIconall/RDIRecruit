@@ -433,11 +433,17 @@ async function runScoreUnscoredPass(options?: {
   const concurrency = options?.concurrency ?? 8;
   const supabase = getServiceSupabase();
 
-  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }] = await Promise.all([
-    supabase.from("candidates").select("workable_id, job_shortcode, created_at"),
-    supabase.from("scores").select("candidate_id, created_at, model_version"),
-    supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
-  ]);
+  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }, { data: dqOverlayRows }] =
+    await Promise.all([
+      supabase.from("candidates").select("workable_id, job_shortcode, created_at, disqualified"),
+      supabase.from("scores").select("candidate_id, created_at, model_version"),
+      supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
+      supabase.from("candidate_overlay").select("candidate_id").eq("status", "disqualified"),
+    ]);
+
+  // Disqualified candidates (Workable state or app overlay) are out of the pool —
+  // never spend an evaluation on them. Mirrors the reanalyze cron's eligibility.
+  const disqualifiedOverlay = new Set((dqOverlayRows ?? []).map((r) => r.candidate_id as string));
 
   // Latest score (timestamp + model) per candidate.
   const latestScoreAt = new Map<string, string>();
@@ -471,6 +477,7 @@ async function runScoreUnscoredPass(options?: {
   };
 
   const toScore = (candidateRows ?? [])
+    .filter((r) => !(r.disqualified as boolean | null) && !disqualifiedOverlay.has(r.workable_id as string))
     .map((r) => ({
       id: r.workable_id as string,
       jobShortcode: (r.job_shortcode as string | null) ?? null,
