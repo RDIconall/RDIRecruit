@@ -137,7 +137,10 @@ VALIDATION GATE (protect against AI-overwritten text):
 
 VERIFICATION (separate from scoring — never changes the fit number): compare application claims against the public professional profile, job-relevant only. Verdicts: CONFIRMED, DISCREPANCY (give the conflicting application vs profile lines), UNVERIFIABLE. Pull contradictions and auth-walled items to the top as things only a human can settle.
 
-ANSWER GRADING: grade on SUBSTANCE against the concept key, not fluency. OWNED = owns the method and gives the concept. SURFACE = names tools/brands instead of the concept. EVASIVE = dodges or is empty. List the specific concepts demonstrated.
+ANSWER GRADING — apply this filter order to each answer:
+1. AI FIRST: does the answer read as AI-generated (mirrors job-post language near-verbatim, generic closers, polish without lived detail, style inconsistent with the candidate's other writing)? If yes the verdict is AI — that IS the label; do not grade machine text on substance.
+2. Otherwise grade the SUBSTANCE of the core argument. Substance outweighs length and polish: a short answer that gives the right concept beats a long polished one that does not. OWNED = owns the method and gives the concept. SURFACE = names tools/brands instead of the concept. EVASIVE = dodges or is empty.
+List the specific concepts demonstrated. Ground every per-answer note ONLY in that answer's own text — you are reading ONE candidate with no visibility into any other candidate or batch, so never write comparative claims like "best of the batch", "strongest in the set", or any ranking against other people.
 
 COMPLIANCE FIREWALL (non-negotiable): job-relevant evidence only. NEVER extract, infer, or flag protected/non-job attributes (age, race, national origin, religion, gender, orientation, disability, health, family status, photos, appearance) — including from transcripts. Career span (years since graduation / first role) is a permitted EXPERIENCE/LEVEL signal for the progression-rate read — it is not age and must never become a threshold, cutoff, or stated attribute. Public/async text is self-reported and possibly AI-written — treat polish as weak evidence.
 
@@ -277,9 +280,9 @@ Return this exact JSON shape (fill every field; arrays may be empty but must be 
   "basis": "reasoning" | "role-and-tenure" | "reference",
   "aiLikelihood": 0.0,
   "roReads": [{ "role": "", "company": "", "years": 0, "stratum": "IIIa", "stratumRange": "IIIa–IVc", "verbs": {"I":[],"II":[],"III":[]}, "read": "one-sentence read of what level this role demonstrates and what burden it maps to", "level": "IIa–III", "burden": "what founder load it covers", "quote": "the résumé line the read rests on" }],
-  "digIn": { "quality": "Strong|Mixed|Surface|Thin", "mix": "e.g. '1 owned (technical) · 2 intent answers, on point'", "integrity": "Clear|Minor|Material", "integrityNote": "what to watch, or empty", "careerRead": "one-line career read · portability to RDI risk", "resolve": ["things to settle live"] },
+  "digIn": { "quality": "Good|OK|Weak|AI-generated", "mix": "e.g. '1 owned (technical) · 2 intent answers, on point'", "integrity": "Clear|Minor|Material", "integrityNote": "what to watch, or empty", "careerRead": "one-line career read · portability to RDI risk", "resolve": ["things to settle live"] },
   "verification": { "read": "Clean|Minor flags|Material discrepancy|Unverified (no profile)", "claims": [{ "category": "", "application": "what the application says", "profile": "what the profile says", "verdict": "CONFIRMED|DISCREPANCY|UNVERIFIABLE", "note": "" }], "questions": ["pinpoint questions to resolve live"], "actions": ["checks before an offer"] },
-  "answerGrades": [{ "question": "", "answer": "verbatim answer", "verdict": "OWNED|SURFACE|EVASIVE", "present": ["concepts demonstrated"], "note": "", "kind": "screen|intent" }],
+  "answerGrades": [{ "question": "", "answer": "verbatim answer", "verdict": "AI|OWNED|SURFACE|EVASIVE", "present": ["concepts demonstrated"], "note": "grounded only in this answer's own text — never a comparison to other candidates or a batch", "kind": "screen|intent" }],
   "composeQuestions": [{ "q": "tailored risk question", "why": "what it tests" }],
   "claims": [{ "category": "principal|environment|scope|writing|tenure|local", "claim": "the assertion", "sourceType": "resume|answer|application_field", "sourceRef": "where", "quote": "verbatim support" }]
 }
@@ -372,7 +375,7 @@ function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): Eva
       quote: r.quote ?? "",
     })),
     digIn: {
-      quality: parsed.digIn?.quality ?? "Mixed",
+      quality: parsed.digIn?.quality ?? "OK",
       mix: parsed.digIn?.mix ?? "",
       integrity: parsed.digIn?.integrity ?? "Clear",
       integrityNote: parsed.digIn?.integrityNote ?? "",
@@ -428,8 +431,9 @@ function heuristicEvaluate(input: EvaluatorInput): EvaluatorOutput {
 
   const answerGrades = Object.entries(input.answers).map(([question, answer]) => {
     const lower = answer.toLowerCase();
+    // Mirror the model's filter order: AI tell first, then substance.
     const verdict =
-      lower.length < 40 ? "EVASIVE" : aiTell ? "SURFACE" : lower.includes("built") || lower.includes("led") ? "OWNED" : "SURFACE";
+      aiTell ? "AI" : lower.length < 40 ? "EVASIVE" : lower.includes("built") || lower.includes("led") ? "OWNED" : "SURFACE";
     return {
       question,
       answer,
@@ -462,7 +466,7 @@ function heuristicEvaluate(input: EvaluatorInput): EvaluatorOutput {
     aiLikelihood: aiTell ? 0.8 : 0.2,
     roReads,
     digIn: {
-      quality: aiTell ? "Surface" : "Mixed",
+      quality: aiTell ? "AI-generated" : "OK",
       mix: `${answerGrades.length} answers on file`,
       integrity: aiTell ? "Minor" : "Clear",
       integrityNote: aiTell ? "Generic phrasing — verify in live conversation." : "",

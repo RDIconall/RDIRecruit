@@ -141,7 +141,8 @@ export interface CandidateOverlayRow {
   updated_at?: string | null;
 }
 
-export type AnswerVerdict = "OWNED" | "SURFACE" | "EVASIVE";
+// AI = the answer reads as AI-generated (first filter, overrides substance).
+export type AnswerVerdict = "AI" | "OWNED" | "SURFACE" | "EVASIVE";
 export type VerificationVerdict = "CONFIRMED" | "DISCREPANCY" | "UNVERIFIABLE";
 
 /** invest_head evaluation — the §2 complement read + the candidate-level summary. */

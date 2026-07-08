@@ -336,28 +336,68 @@ function coverFromApplication(coverLetter: string | null): Candidate["cover"] {
   return { hasLetter: true, lines };
 }
 
+// Tokens candidates type to skip a question without leaving it blank.
+const REFUSAL_TOKENS = new Set([
+  "na", "none", "nil", "null", "no answer", "no comment", "idk", "tbd",
+  "x", "xx", "xxx", "skip", "see resume", "see cv",
+]);
+
+/** True when an answer is a dash / placeholder rather than a real attempt. */
+function looksRefused(value: string): boolean {
+  const t = value.trim().toLowerCase();
+  if (!t) return true;
+  // Pure punctuation: "-", "--", ".", "…", "_", "*", "/", "?" and the like.
+  if (/^[\s\-–—_.*/\\?!,…]+$/.test(t)) return true;
+  const words = t.replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+  return REFUSAL_TOKENS.has(words);
+}
+
+/**
+ * "Refused to answer" — the screening questions were dash-filled or left
+ * effectively blank. True when at least half of the answers on file are
+ * placeholders; a single skipped question among real answers does NOT flag.
+ */
+export function refusedToAnswerFrom(
+  application: ApplicationLite | null,
+  grades: AnswerGradePayload[],
+): boolean {
+  const values: string[] = [];
+  const raw = application?.answers;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const v of Object.values(raw as Record<string, unknown>)) {
+      if (typeof v === "string") values.push(v);
+    }
+  }
+  if (!values.length && grades.length) values.push(...grades.map((g) => g.answer ?? ""));
+  if (!values.length) return false;
+  const refused = values.filter(looksRefused).length;
+  return refused >= Math.max(1, Math.ceil(values.length / 2));
+}
+
 function answersFrom(
   grades: AnswerGradePayload[],
   application: ApplicationLite | null,
 ): AnswerRow[] {
   if (grades.length) {
-    return grades.map((g) => ({
-      q: g.question || "Application answer",
-      a: g.answer || "—",
-      comment: g.note || undefined,
-      kind:
-        (g.verdict ?? "").toUpperCase() === "OWNED"
-          ? "good"
-          : (g.verdict ?? "").toUpperCase() === "EVASIVE"
-            ? "flag"
-            : "thin",
-    }));
+    return grades.map((g) => {
+      const v = (g.verdict ?? "").toUpperCase();
+      return {
+        q: g.question || "Application answer",
+        a: g.answer || "—",
+        comment: g.note || undefined,
+        kind: v === "AI" ? ("ai" as const) : v === "OWNED" ? ("good" as const) : v === "EVASIVE" ? ("flag" as const) : ("thin" as const),
+      };
+    });
   }
   const raw = application?.answers;
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     return Object.entries(raw as Record<string, unknown>)
       .filter(([, v]) => typeof v === "string" && (v as string).trim())
-      .map(([q, v]) => ({ q, a: String(v), kind: "neutral" as const }));
+      .map(([q, v]) => ({
+        q,
+        a: String(v),
+        kind: looksRefused(String(v)) ? ("flag" as const) : ("neutral" as const),
+      }));
   }
   return [];
 }
@@ -637,23 +677,32 @@ function implicationFor(decision: Decision): string {
 }
 
 /**
- * The cached "Answers" read for the pool board — the application answers graded
- * OWNED/SURFACE/EVASIVE, collapsed to a single verdict. Never a numeric score.
+ * The cached "Answers" read for the pool board — the per-answer grades collapsed
+ * to one plain-language verdict. Never a numeric score. Order of the read:
+ * 1. AI first: when half or more of the answers read as AI-generated, that IS
+ *    the label — substance graded on machine text is not the candidate's.
+ * 2. Otherwise substance carries the weight: a majority of owned answers is
+ *    "Good answers" even if one answer is generic or dodged; only a majority of
+ *    dodged/empty answers reads "Weak answers"; everything between is "OK".
  */
 function answersReadFrom(grades: AnswerGradePayload[]): VerdictRead {
   if (!grades.length) return { label: "—", level: "none" };
   let owned = 0,
     evasive = 0,
-    surface = 0;
+    surface = 0,
+    ai = 0;
   for (const g of grades) {
     const v = (g.verdict ?? "").toUpperCase();
-    if (v === "OWNED") owned++;
+    if (v === "AI") ai++;
+    else if (v === "OWNED") owned++;
     else if (v === "EVASIVE") evasive++;
     else surface++;
   }
-  if (evasive > 0 || surface > owned) return { label: "Thin", level: "weak" };
-  if (surface === 0) return { label: "Strong", level: "strong" };
-  return { label: "Mixed", level: "mixed" };
+  const n = grades.length;
+  if (ai >= Math.ceil(n / 2)) return { label: "AI generated", level: "weak" };
+  if (owned > surface + evasive + ai) return { label: "Good answers", level: "strong" };
+  if (evasive + ai > owned + surface) return { label: "Weak answers", level: "weak" };
+  return { label: "OK answers", level: "mixed" };
 }
 
 /**
@@ -720,7 +769,7 @@ function valueReadFrom(input: MapInput, decision: Decision, answers: VerdictRead
   else level = "fair";
 
   const askPart = richAsk ? "rich ask" : goodValue ? "good value" : "fair ask";
-  const strengthPart = strength >= 3 ? "Strong" : strength <= 1 ? "Thin" : "Solid";
+  const strengthPart = strength >= 3 ? "Strong" : strength <= 1 ? "Weak" : "Solid";
   const headline =
     decision === "reject"
       ? "Below the bar for the ask"
@@ -784,9 +833,20 @@ export function mapCandidate(input: MapInput): Candidate {
 
   const location = input.candidate.location || ((input.candidate.raw?.address as string) ?? "") || "—";
 
-  const baseRedFlags = input.read?.flags ?? redFlagsFrom(input);
+  const baseRedFlags = [...(input.read?.flags ?? redFlagsFrom(input))];
 
-  const answersRead = answersReadFrom(input.evals.answerGrades);
+  const refusedToAnswer = refusedToAnswerFrom(input.application, input.evals.answerGrades);
+  if (refusedToAnswer && !baseRedFlags.some((f) => f.flag === "Refused to answer")) {
+    baseRedFlags.push({
+      flag: "Refused to answer",
+      detail: "Screening questions dash-filled or left effectively blank — no real attempt to answer.",
+      source: "Application",
+    });
+  }
+
+  const answersRead = refusedToAnswer
+    ? { label: "Blank", level: "weak" as const }
+    : answersReadFrom(input.evals.answerGrades);
   const specRead = specReadFrom(input, decision);
   const value = valueReadFrom(input, decision, answersRead, specRead);
 
@@ -817,6 +877,7 @@ export function mapCandidate(input: MapInput): Candidate {
     survivor: decision === "interview",
     value,
     caveat,
+    refusedToAnswer,
 
     askTier,
     askNote: invest?.vector || salaryValue || "ask unstated",

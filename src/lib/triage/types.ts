@@ -362,6 +362,11 @@ export interface Candidate {
   // now a caveat flag rather than a status). Empty when there is nothing to verify.
   caveat?: string;
 
+  // True when the screening questions were dash-filled ("-", "n/a") or left
+  // effectively blank — a "refused to answer" application-care signal. Surfaced
+  // loudly in the pool + dossier because it is usually an easy disqualify.
+  refusedToAnswer?: boolean;
+
   askTier: AskTier;
   askNote: string;
   roLevel: string;

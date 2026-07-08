@@ -198,11 +198,17 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   // Signed résumé file (Supabase storage) for the embedded PDF viewer.
   const [resumeDoc, setResumeDoc] = useState<{ url: string; mime: string } | null>(null);
   const [resumeState, setResumeState] = useState<"loading" | "ready" | "none">("loading");
+  // Parsed highlights repeat what the embedded PDF already shows — keep them
+  // behind a toggle whenever the actual file is on screen.
+  const [showParsed, setShowParsed] = useState(false);
+  const [coverOpen, setCoverOpen] = useState(false);
 
   useEffect(() => {
     setChatDraft("");
     setActDraft("");
     setActType("note");
+    setShowParsed(false);
+    setCoverOpen(false);
     window.scrollTo(0, 0);
   }, [id]);
 
@@ -531,6 +537,48 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         </div>
       )}
 
+      {/* refused to answer — dash-filled / blank screening answers, easy disqualify */}
+      {c.refusedToAnswer && !isDq && (
+        <div
+          style={{
+            margin: "0 0 18px",
+            background: APP.weakSoft,
+            border: `1px solid ${APP.weakBorder}`,
+            borderRadius: 10,
+            padding: narrow ? "14px 16px" : "16px 18px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div style={mono({ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: APP.weak })}>
+            Refused to answer
+          </div>
+          <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5, color: APP.ink2 }}>
+            The screening questions were dash-filled or left effectively blank — no real attempt to
+            answer. That is an application-care failure and usually an easy disqualify; the answers
+            on file are below if you want to double-check first.
+          </p>
+          <div>
+            <button
+              onClick={() => wsApi.toggleDq(id, "Refused to answer the screening questions")}
+              style={mono({
+                cursor: "pointer",
+                background: APP.weak,
+                color: "#fff",
+                border: "none",
+                borderRadius: 5,
+                padding: "6px 14px",
+                fontSize: 12.5,
+                fontWeight: 600,
+              })}
+            >
+              Disqualify — refused to answer
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Claude assessment — pinned dark card */}
       <div id="assessment" style={{ scrollMarginTop: 104, margin: "26px 0", background: APP.ink, color: "#fff", borderRadius: 10, padding: narrow ? "18px 16px" : "22px 24px" }}>
         <div style={mono({ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.5)", marginBottom: 10 })}>
@@ -617,7 +665,7 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
                   <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
                   {a.q || "Application question"}
                 </div>
-                <p style={{ margin: "6px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2, whiteSpace: "pre-wrap" }}>{a.a}</p>
+                <ExpandableText text={a.a} />
               </div>
               <div style={{ minWidth: 0 }}>
                 {a.comment ? (
@@ -797,29 +845,50 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
           )
         )}
 
-        {/* parsed highlights (text) */}
+        {/* parsed highlights (text) — collapsed when the actual file is embedded above */}
         {c.resume.hasResume && c.resume.roles.length > 0 ? (
           <>
-            <div style={mono({ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: APP.faint, margin: "4px 0 8px" })}>
-              Parsed highlights
-            </div>
-            {c.resume.roles.map((role, i) => (
-              <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${APP.line}` }}>
-                <div style={{ fontSize: 14.5, fontWeight: 600 }}>
-                  {role.title} <span style={{ color: APP.muted, fontWeight: 400 }}>— {role.company}</span>
-                </div>
-                <div style={mono({ fontSize: 12, color: APP.faint, margin: "2px 0 6px" })}>
-                  {role.period}
-                  {role.current ? " · current" : ""}
-                </div>
-                {role.bullets.slice(0, 6).map((b, j) => (
-                  <div key={j} style={{ fontSize: 14, color: APP.ink2, lineHeight: 1.5, paddingLeft: 14, position: "relative" }}>
-                    <span style={{ position: "absolute", left: 0, color: APP.muted }}>·</span>
-                    {b}
-                  </div>
-                ))}
+            {resumeState === "ready" && resumeDoc ? (
+              <button
+                onClick={() => setShowParsed((v) => !v)}
+                aria-expanded={showParsed}
+                style={mono({
+                  cursor: "pointer",
+                  background: "transparent",
+                  border: "none",
+                  padding: 0,
+                  margin: "4px 0 8px",
+                  fontSize: 11,
+                  letterSpacing: "0.05em",
+                  textTransform: "uppercase",
+                  color: APP.secondary,
+                })}
+              >
+                {showParsed ? "▾" : "▸"} Parsed highlights · {c.resume.roles.length} roles
+              </button>
+            ) : (
+              <div style={mono({ fontSize: 11, letterSpacing: "0.05em", textTransform: "uppercase", color: APP.faint, margin: "4px 0 8px" })}>
+                Parsed highlights
               </div>
-            ))}
+            )}
+            {(showParsed || !(resumeState === "ready" && resumeDoc)) &&
+              c.resume.roles.map((role, i) => (
+                <div key={i} style={{ padding: "10px 0", borderBottom: `1px solid ${APP.line}` }}>
+                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>
+                    {role.title} <span style={{ color: APP.muted, fontWeight: 400 }}>— {role.company}</span>
+                  </div>
+                  <div style={mono({ fontSize: 12, color: APP.faint, margin: "2px 0 6px" })}>
+                    {role.period}
+                    {role.current ? " · current" : ""}
+                  </div>
+                  {role.bullets.slice(0, 6).map((b, j) => (
+                    <div key={j} style={{ fontSize: 14, color: APP.ink2, lineHeight: 1.5, paddingLeft: 14, position: "relative" }}>
+                      <span style={{ position: "absolute", left: 0, color: APP.muted }}>·</span>
+                      {b}
+                    </div>
+                  ))}
+                </div>
+              ))}
           </>
         ) : resumeState === "none" && !c.resume.hasResume ? (
           <p style={{ margin: 0, fontSize: 14, color: APP.muted }}>No résumé captured yet. Resync from Workable to pull it in.</p>
@@ -828,14 +897,23 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
         ) : null}
       </Section>
 
-      {/* cover letter */}
+      {/* cover letter — first paragraph up front, the rest behind a toggle */}
       {c.cover.hasLetter && (
         <Section title="Cover letter">
-          {c.cover.lines.map((ln, i) => (
+          {(coverOpen ? c.cover.lines : c.cover.lines.slice(0, 1)).map((ln, i) => (
             <p key={i} style={{ margin: "0 0 10px", fontSize: 15.5, lineHeight: 1.6, color: APP.ink2 }}>
               {ln.t}
             </p>
           ))}
+          {c.cover.lines.length > 1 && (
+            <button
+              onClick={() => setCoverOpen((v) => !v)}
+              aria-expanded={coverOpen}
+              style={mono({ cursor: "pointer", background: "transparent", border: "none", padding: 0, fontSize: 12.5, color: APP.accent })}
+            >
+              {coverOpen ? "Show less" : `Read the full letter · ${c.cover.lines.length} paragraphs`}
+            </button>
+          )}
         </Section>
       )}
 
@@ -1092,10 +1170,35 @@ function ActivityEvent({ e }: { e: ActivityEntry }) {
           <div style={{ fontSize: 14.5, color: APP.ink2, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>{e.body}</div>
         )}
         <div style={mono({ fontSize: 11, color: APP.faint, marginTop: 3 })}>
-          {e.author} · {stamp}
+          Logged by {e.author} · {stamp}
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * Body text that clamps past ~400 characters with a "Show more" toggle, so a
+ * page of long application answers stops reading as one uninterrupted wall.
+ * The clamp breaks on a word boundary; short text renders as a plain paragraph.
+ */
+function ExpandableText({ text, clampAt = 400 }: { text: string; clampAt?: number }) {
+  const [open, setOpen] = useState(false);
+  const needsClamp = text.length > clampAt + 120; // don't clamp for a trivial tail
+  const shown = !needsClamp || open ? text : text.slice(0, text.lastIndexOf(" ", clampAt)) + "…";
+  return (
+    <>
+      <p style={{ margin: "6px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2, whiteSpace: "pre-wrap" }}>{shown}</p>
+      {needsClamp && (
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          style={mono({ cursor: "pointer", background: "transparent", border: "none", padding: 0, marginTop: 4, fontSize: 12.5, color: APP.accent })}
+        >
+          {open ? "Show less" : "Show full answer"}
+        </button>
+      )}
+    </>
   );
 }
 

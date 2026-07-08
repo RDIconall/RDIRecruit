@@ -79,6 +79,18 @@ export function StandingLine({ c }: { c: Candidate }) {
       );
     }
   }
+  // Dash-filled / blank screening answers — an application-care failure worth
+  // seeing at a glance, because it is usually an easy disqualify.
+  if (c.refusedToAnswer) {
+    return (
+      <div
+        style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
+        title="Screening questions dash-filled or left effectively blank — no real attempt to answer"
+      >
+        Refused to answer screening questions
+      </div>
+    );
+  }
   // Surface the verify-first caveat as a short tag; full text in the tooltip.
   if (c.caveat) {
     return (

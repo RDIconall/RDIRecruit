@@ -450,11 +450,26 @@ async function fetchActivity(candidateId: string): Promise<ActivityEntry[]> {
   }));
 }
 
+function renderActivityForWarRoom(acts: ActivityEntry[], label = "Activity log"): string {
+  if (!acts.length) return "";
+  const entries = acts
+    .map((a) => {
+      const type = a.type === "interview" ? "Interview transcript" : a.type === "comment" ? "Comment" : "Note";
+      return `### ${type} · logged by ${a.author} · ${a.at.slice(0, 10)}\n\n${a.body}`;
+    })
+    .join("\n\n");
+  return `## ${label} (${acts.length} ${acts.length === 1 ? "entry" : "entries"})
+
+These are human-authored or pasted entries. "Logged by" is the person who saved the entry, not necessarily the interviewer, interviewee, or speaker. For interview transcripts, speaker labels inside the body are authoritative.
+
+${entries}`;
+}
+
 /** Fold the activity log into recalc inputs: interviews → transcript, notes/comments → corrections. */
 function activityDigest(acts: ActivityEntry[]): { transcript: string; notes: CorrectionEntry[] } {
   const transcript = acts
     .filter((a) => a.type === "interview")
-    .map((a) => `[${a.author}] ${a.body}`)
+    .map((a) => `[Interview transcript logged by ${a.author}; speaker labels inside the transcript are authoritative]\n${a.body}`)
     .join("\n\n");
   const notes: CorrectionEntry[] = acts
     .filter((a) => a.type !== "interview")
@@ -614,11 +629,10 @@ export async function sendCandidateChat(input: {
     : existing?.content ?? "";
   const baseMaterials = one ? renderCandidateMaterials(one.candidate) : "";
   const acts = await fetchActivity(input.candidateId);
-  const activityBlock = acts.length
-    ? `## Activity log (${acts.length} ${acts.length === 1 ? "entry" : "entries"})\n\n` +
-      acts.map((a) => `- [${a.type}] ${a.author} (${a.at.slice(0, 10)}): ${a.body}`).join("\n")
-    : "";
-  const materials = [baseMaterials, activityBlock].filter(Boolean).join("\n\n");
+  const activityBlock = renderActivityForWarRoom(acts);
+  // Activity is the newest human-provided evidence, so keep it before large
+  // résumé/application blocks that may be truncated later in the chat context.
+  const materials = [activityBlock, baseMaterials].filter(Boolean).join("\n\n");
   const rubric = one ? await getJobRubric(one.jobShortcode) : { rubricMd: "", specMd: "" };
 
   // Cross-candidate awareness: load a compact roster of every OTHER candidate in
@@ -659,7 +673,8 @@ export async function sendCandidateChat(input: {
       disqualified: other.disqualified,
     });
     const otherMaterials = renderCandidateMaterials(other.candidate);
-    const content = [otherFile, otherMaterials].filter(Boolean).join("\n\n");
+    const otherActivity = renderActivityForWarRoom(await fetchActivity(entry.id), `Activity log for ${other.candidate.name}`);
+    const content = [otherFile, otherActivity, otherMaterials].filter(Boolean).join("\n\n");
     return { name: other.candidate.name, content };
   };
 
