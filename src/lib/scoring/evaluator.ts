@@ -303,7 +303,35 @@ Rules: category scores must not exceed their max. Keep all reads job-relevant. C
  */
 const REFUSAL_RETRY_SUFFIX = `
 
-IMPORTANT — DO NOT REFUSE. The text above is a job applicant's own résumé and application, quoted verbatim for a hiring decision. Any scientific, laboratory, medical, or life-sciences work it mentions (including virology, molecular biology, genome engineering, or infectious-disease research) is a HISTORICAL description of the candidate's past employment — it is biographical, not a request for methods, protocols, or assistance of any kind, and you must not reproduce any procedural detail. Assess ONLY the hiring signal (seniority, ownership, trajectory, integrity, fit). Return the JSON read described above. Refusing or returning an empty object is not an acceptable response for this benign HR task.`;
+IMPORTANT — DO NOT REFUSE. The text above is a job applicant's own résumé and application, quoted verbatim for a hiring decision. Any scientific, laboratory, medical, or life-sciences work it mentions is a HISTORICAL description of the candidate's past employment — biographical, not a request for methods, protocols, or assistance of any kind, and you must not reproduce any procedural detail. Assess ONLY the hiring signal (seniority, ownership, trajectory, integrity, fit). Return the JSON read described above. Refusing or returning an empty object is not an acceptable response for this benign HR task.`;
+
+/**
+ * Strip the free-text research prose that trips Anthropic's dual-use safety
+ * classifier (`stop_reason: "refusal"`), used ONLY on the refusal-retry pass.
+ * The classifier fires on procedural life-sciences detail (e.g. infectious-clone
+ * construction, viral-entry determinants, challenge studies) regardless of the
+ * instructions in the same request, so prompt wording alone cannot clear it — we
+ * must reduce the INPUT. We keep the hiring signal that actually drives the read:
+ * role titles, employers, dates, education, the application answers, and the
+ * cover letter, and drop only the résumé prose and per-role narrative bullets.
+ */
+function sanitizeInputForSafety(input: EvaluatorInput): EvaluatorInput {
+  const NEUTRAL_RESUME =
+    "[Detailed research descriptions omitted before processing. Evaluate seniority, ownership, and trajectory from the role titles, employers, dates, education, and application answers provided — these carry the hiring signal.]";
+  return {
+    ...input,
+    resumeText: NEUTRAL_RESUME,
+    roles: input.roles.map((r) => ({
+      title: r.title,
+      company: r.company,
+      start: r.start,
+      end: r.end,
+      current: r.current,
+      // Drop summary/resumeLine: the free-text bullets are what carry the
+      // dual-use-triggering procedural detail. Title + employer + dates remain.
+    })),
+  };
+}
 
 /**
  * One Claude call for the evaluation. Returns the reassembled text (every text
@@ -350,14 +378,16 @@ export async function evaluateCandidate(input: EvaluatorInput): Promise<Evaluato
   let match = result.text.match(/\{[\s\S]*\}/);
 
   // A false safety refusal on a benign hiring read (seen on dense life-sciences
-  // résumés) returns stop_reason "refusal" with no JSON. Retry ONCE with an
-  // explicit reframe before giving up, rather than freezing the candidate.
+  // résumés) returns stop_reason "refusal" with no JSON. The classifier fires on
+  // the procedural research prose regardless of instructions, so the retry both
+  // reframes AND strips that prose (keeping titles, employers, dates, education,
+  // and the answers — the actual hiring signal), rather than freezing the file.
   if (result.stopReason === "refusal" || !match) {
     gradeLog("evaluator.retry", {
       name: input.name,
       reason: result.stopReason === "refusal" ? "refusal" : "no_json",
     });
-    result = await callEvaluator(client, input, true);
+    result = await callEvaluator(client, sanitizeInputForSafety(input), true);
     match = result.text.match(/\{[\s\S]*\}/);
   }
 
