@@ -130,6 +130,114 @@ export async function backfillMissingResumes(options?: {
   return result;
 }
 
+export interface AnswersRecaptureResult {
+  attempted: number;
+  rehydrated: number;
+  rescored: number;
+  stillEmpty: number;
+  failed: number;
+  remaining: number;
+  errors: string[];
+}
+
+/**
+ * Recapture screening answers the bulk mirror wiped. The LIST endpoint omits
+ * `answers`, and until the clobber guard the mirror overwrote stored answers
+ * with `{}` on every metadata change. For each ACTIVE candidate whose stored
+ * answers are empty: pull the authoritative single candidate (carries answers),
+ * re-upsert, and — when answers actually came back — re-score with replace so
+ * the answer grades regenerate. Sequential per candidate (Workable rate limit +
+ * no concurrent-eval races); time-budgeted; returns `remaining` for looping.
+ */
+export async function recaptureMissingAnswers(options?: {
+  budgetMs?: number;
+  limit?: number;
+}): Promise<AnswersRecaptureResult> {
+  const result: AnswersRecaptureResult = {
+    attempted: 0,
+    rehydrated: 0,
+    rescored: 0,
+    stillEmpty: 0,
+    failed: 0,
+    remaining: 0,
+    errors: [],
+  };
+  if (!hasSupabase() || !hasWorkable()) return result;
+
+  const supabase = getServiceSupabase();
+
+  // Active candidates (not Workable- or overlay-disqualified) whose stored answers are empty.
+  const [{ data: candidates }, { data: apps }, { data: overlays }] = await Promise.all([
+    supabase.from("candidates").select("workable_id, job_shortcode, disqualified"),
+    supabase.from("applications").select("candidate_id, answers"),
+    supabase.from("candidate_overlay").select("candidate_id, status"),
+  ]);
+  const disqualified = new Set(
+    (overlays ?? []).filter((o) => o.status === "disqualified").map((o) => o.candidate_id as string),
+  );
+  const emptyAnswers = new Set(
+    (apps ?? [])
+      .filter((a) => {
+        const v = a.answers as Record<string, unknown> | null;
+        return !v || Object.keys(v).length === 0;
+      })
+      .map((a) => a.candidate_id as string),
+  );
+  const queue = (candidates ?? [])
+    .filter(
+      (c) =>
+        !(c.disqualified as boolean | null) &&
+        !disqualified.has(c.workable_id as string) &&
+        emptyAnswers.has(c.workable_id as string) &&
+        c.job_shortcode,
+    )
+    .map((c) => ({ id: c.workable_id as string, shortcode: c.job_shortcode as string }))
+    .slice(0, options?.limit ?? Infinity);
+
+  if (!queue.length) return result;
+
+  const { getCandidate } = await import("../workable/client");
+  const { upsertCandidateFromWorkable } = await import("../sync/workable-sync");
+  const { scoreCandidate } = await import("../scoring/run-score");
+
+  const budgetMs = options?.budgetMs ?? 240_000;
+  const start = Date.now();
+  let processed = 0;
+
+  for (const entry of queue) {
+    if (Date.now() - start > budgetMs) break;
+    processed += 1;
+    result.attempted += 1;
+    try {
+      const candidate = await getCandidate(entry.shortcode, entry.id);
+      const hasAnswers = (candidate.answers ?? []).length > 0;
+      if (!hasAnswers) {
+        // Workable genuinely has no screening answers for this candidate.
+        result.stillEmpty += 1;
+        continue;
+      }
+      await upsertCandidateFromWorkable(candidate, entry.shortcode, {
+        analyze: false,
+        syncComments: false,
+        hydrate: true,
+      });
+      result.rehydrated += 1;
+      await scoreCandidate(entry.id, { replace: true });
+      result.rescored += 1;
+    } catch (err) {
+      result.failed += 1;
+      const message = err instanceof Error ? err.message : String(err);
+      if (result.errors.length < 10) result.errors.push(`${entry.id}: ${message}`);
+      console.error(`Answers recapture failed for ${entry.id}`, err);
+    }
+    // Respect Workable's ~10 req/s ceiling with margin.
+    await new Promise((r) => setTimeout(r, 1100));
+  }
+
+  result.remaining = Math.max(0, queue.length - processed);
+  return result;
+}
+
 export interface ResumeRecaptureDetail {
   candidateId: string;
   name: string;
