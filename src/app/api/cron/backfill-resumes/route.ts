@@ -52,8 +52,11 @@ export async function GET(request: NextRequest) {
     }
 
     if (params.get("mode") === "answers") {
+      // Tighter budget than the other modes: each rehydrated candidate also runs
+      // a full Claude re-score (~2 min), and one starting near the budget edge
+      // must still finish inside the function's 300s maxDuration.
       const result = await recaptureMissingAnswers({
-        budgetMs: 240_000,
+        budgetMs: 130_000,
         limit: boundedLimit,
       });
       return NextResponse.json({ ok: true, mode: "answers", ...result });
