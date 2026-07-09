@@ -101,7 +101,7 @@ Use this when the candidate has relevant experience but one or two areas need cl
 
 Candidate has some useful signal but is missing important evidence or has unresolved concerns.
 
-Use this when the pipeline is thin or the candidate may be useful as a backup.
+Use this when the pipeline is limited or the candidate may be useful as a backup.
 
 ### Reject
 
@@ -422,7 +422,7 @@ The right candidate is not star-struck, status-conscious, delicate, or seeking g
 
 ### 3 - Mixed
 
-- Says the right things but examples are thin
+- Says the right things but examples are limited
 - May be fine but needs pressure-testing
 - Could be more polished than gritty
 

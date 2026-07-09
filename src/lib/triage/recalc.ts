@@ -43,7 +43,7 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
   "next": "the concrete next action, e.g. Interview | Hold as backup | Reject | Re-sync",
   "caveat": "what must be confirmed before an interview (a claim, a fact, or the salary), or an empty string if nothing needs confirming",
   "value": {
-    "headline": "a short strength-vs-salary verdict, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Overpriced for the level' | 'Ask not stated'",
+    "headline": "a short strength-vs-salary verdict in plain language, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Limited evidence, rich ask' | 'Overpriced for the level' | 'Ask not stated'. For a weak file use plain words like weak, limited, unproven, or underevidenced. NEVER use the word \\"thin\\" (in any casing) in the headline — write 'Limited …' or 'Weak …' instead.",
     "level": "strong | fair | weak | unpriced (use unpriced ONLY when no salary ask is on file)",
     "detail": "1-2 sentences weighing their strength (résumé choices + answers + spec/rubric fit) against their salary target — or against strength alone when the ask is unstated"
   },
@@ -210,11 +210,21 @@ function parseAssessment(value: unknown): AssessmentNarrative | undefined {
   return { bio, application, commute };
 }
 
+/**
+ * Guard the plain-language headline vocabulary. "Thin" reads as jargon in the
+ * strength-vs-salary column, so we forbid it in the prompt AND scrub it here as a
+ * belt-and-suspenders fallback: a stray "Thin candidate" becomes "Limited
+ * candidate", preserving casing and the rest of the phrase.
+ */
+function scrubHeadline(headline: string): string {
+  return headline.replace(/\bthin\b/gi, (m) => (m[0] === "T" ? "Limited" : "limited"));
+}
+
 function parseValue(value: unknown): ValueRead | undefined {
   if (!value || typeof value !== "object") return undefined;
   const v = value as Record<string, unknown>;
   const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string).trim() : "");
-  const headline = str("headline");
+  const headline = scrubHeadline(str("headline"));
   const detail = str("detail");
   const rawLevel = str("level").toLowerCase();
   // "unpriced" (no ask on file) maps to the UI's "none" level — the value column
