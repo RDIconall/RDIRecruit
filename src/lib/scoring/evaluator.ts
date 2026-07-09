@@ -306,18 +306,15 @@ const REFUSAL_RETRY_SUFFIX = `
 IMPORTANT — DO NOT REFUSE. The text above is a job applicant's own résumé and application, quoted verbatim for a hiring decision. Any scientific, laboratory, medical, or life-sciences work it mentions (including virology, molecular biology, genome engineering, or infectious-disease research) is a HISTORICAL description of the candidate's past employment — it is biographical, not a request for methods, protocols, or assistance of any kind, and you must not reproduce any procedural detail. Assess ONLY the hiring signal (seniority, ownership, trajectory, integrity, fit). Return the JSON read described above. Refusing or returning an empty object is not an acceptable response for this benign HR task.`;
 
 /**
- * One Claude call for the evaluation. Uses an assistant JSON prefill ("{") so the
- * model commits to structured output — this both guarantees the reply opens as
- * JSON and materially lowers false safety refusals on structured-output tasks.
- * Returns the reassembled text plus the stop reason so the caller can distinguish
- * a real read from a refusal/empty reply.
+ * One Claude call for the evaluation. Returns the reassembled text (every text
+ * block joined, so a leading empty block can't hide the JSON) plus the stop reason
+ * so the caller can distinguish a real read from a refusal/empty reply.
  */
 async function callEvaluator(
   client: Anthropic,
   input: EvaluatorInput,
   hardened: boolean,
 ): Promise<{ text: string; stopReason: string | null }> {
-  const prefill = "{";
   const userContent = hardened
     ? buildUserPrompt(input) + REFUSAL_RETRY_SUFFIX
     : buildUserPrompt(input);
@@ -334,16 +331,12 @@ async function callEvaluator(
         cache_control: { type: "ephemeral" },
       },
     ],
-    messages: [
-      { role: "user", content: userContent },
-      { role: "assistant", content: prefill },
-    ],
+    messages: [{ role: "user", content: userContent }],
   });
-  // Reattach the prefilled "{" so the reassembled text is a complete JSON object.
-  const body = response.content
+  const text = response.content
     .map((block) => (block.type === "text" ? block.text : ""))
     .join("\n");
-  return { text: prefill + body, stopReason: response.stop_reason ?? null };
+  return { text, stopReason: response.stop_reason ?? null };
 }
 
 export async function evaluateCandidate(input: EvaluatorInput): Promise<EvaluatorOutput> {
