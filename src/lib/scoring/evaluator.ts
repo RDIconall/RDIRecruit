@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env, hasAnthropic } from "../env";
+import { gradeLog } from "../triage/grade-log";
 import type { SeatContext } from "../jobs/seat-context";
 import type {
   AnswerGradePayload,
@@ -156,7 +157,9 @@ You are the evaluation engine for RDI Trials' hiring layer. Run the reads above 
 
 THE SUMMARY MUST JUSTIFY THE CALL: the "summary" field is the written read a human sees next to the score and verdict. It must read as an evidence-based JUSTIFICATION of the verdict the total implies (see VERDICT BANDS in the user message), grounded explicitly in the How-We-Evaluate method and this seat's rubric criteria. Decide the category scores first; then write a summary whose tone and conclusion MATCH that score. Never praise or sell a candidate the score denies or holds — for a Deny/Hold, lead with the decisive gap against the rubric and method; for an Advance, lead with what clears the bar. Every claim cites the action, omission, or rubric criterion it rests on.
 
-COMPLIANCE FIREWALL (non-negotiable): job-relevant evidence only — never extract, infer, or flag protected/non-job attributes (age, race, national origin, religion, gender, orientation, disability, health, family status, photos, appearance). Return JSON only, no prose outside the JSON, in the exact shape requested below.`;
+COMPLIANCE FIREWALL (non-negotiable): job-relevant evidence only — never extract, infer, or flag protected/non-job attributes (age, race, national origin, religion, gender, orientation, disability, health, family status, photos, appearance). Return JSON only, no prose outside the JSON, in the exact shape requested below.
+
+SCOPE OF THIS TASK — READ CAREFULLY: You are assessing ONE job applicant's professional and academic history to make a HIRING decision. The résumé and answers may describe prior scientific, technical, medical, laboratory, biosecurity, or life-sciences research the candidate performed in academic or industry settings (e.g. virology, molecular biology, genome engineering, infectious-disease work). Those lines are HISTORICAL descriptions of the person's own past employment, supplied only so you can gauge their capability, seniority, and trajectory. They are NOT a request for protocols, instructions, methods, or assistance of any kind, and nothing you output should reproduce procedural detail. Evaluate the hiring signal only. Never refuse, never return an empty object, and never emit a safety disclaimer — always return the full JSON read in the shape below.`;
 
 /** System prompt = the live "How We Evaluate" method doc + the output contract. */
 function buildSystemPrompt(method?: string | null): string {
@@ -312,19 +315,73 @@ export async function evaluateCandidate(input: EvaluatorInput): Promise<Evaluato
     messages: [{ role: "user", content: buildUserPrompt(input) }],
   });
 
-  const text = response.content[0]?.type === "text" ? response.content[0].text : "{}";
+  // Concatenate every text block (not just content[0]) so a leading empty/thinking
+  // block can't hide the JSON, then look for the model's JSON object.
+  const text = response.content
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("\n");
   const match = text.match(/\{[\s\S]*\}/);
+
+  // Surface the failure modes that previously produced a SILENT empty batch: a
+  // hard refusal (`stop_reason: "refusal"`), a reply with no JSON at all (a safety
+  // decline or prose-only answer — the old code fell back to "{}" and persisted an
+  // all-defaults read), or a max_tokens truncation. In every case flag the read
+  // heuristic so scoreCandidate SKIPS persisting and retries next pass rather than
+  // freezing the candidate on an empty evaluation.
+  if (response.stop_reason === "refusal" || !match) {
+    gradeLog("evaluator.no_read", {
+      name: input.name,
+      reason: response.stop_reason === "refusal" ? "refusal" : "no_json",
+      stopReason: response.stop_reason ?? null,
+      sample: text.trim().slice(0, 240),
+    });
+    return heuristicEvaluate(input);
+  }
+
   let parsed: Partial<EvaluatorOutput>;
   try {
-    parsed = JSON.parse(match?.[0] ?? "{}") as Partial<EvaluatorOutput>;
+    parsed = JSON.parse(match[0]) as Partial<EvaluatorOutput>;
   } catch {
     // A truncated/malformed model response is a TRANSIENT failure, not a real
     // read. Flag it heuristic so the scorer skips persisting and retries — never
     // freeze a candidate on placeholder data.
+    gradeLog("evaluator.parse_failed", {
+      name: input.name,
+      stopReason: response.stop_reason ?? null,
+    });
+    return heuristicEvaluate(input);
+  }
+
+  // A parsed-but-empty object (e.g. the model returned "{}" or a stub with none of
+  // the required reads) would normalize into an all-defaults evaluation: total 0,
+  // no answer grades, "Investment read pending fuller evidence." — exactly the
+  // degenerate batch we must never persist. Treat it as a transient miss and retry.
+  if (!isUsableEvaluation(parsed)) {
+    gradeLog("evaluator.degenerate", {
+      name: input.name,
+      stopReason: response.stop_reason ?? null,
+      keys: Object.keys(parsed ?? {}).length,
+    });
     return heuristicEvaluate(input);
   }
 
   return normalize(parsed, input);
+}
+
+/**
+ * A model read is only usable if it actually carries the scoring payload. The
+ * degenerate cases we must reject (rather than persist as an empty batch) are an
+ * object with no category scores AND no answer grades — the shape produced when a
+ * refusal/empty reply gets JSON-parsed to `{}`.
+ */
+function isUsableEvaluation(parsed: Partial<EvaluatorOutput> | null | undefined): boolean {
+  if (!parsed || typeof parsed !== "object") return false;
+  const hasScores =
+    !!parsed.categoryScores &&
+    typeof parsed.categoryScores === "object" &&
+    Object.keys(parsed.categoryScores).length > 0;
+  const hasGrades = Array.isArray(parsed.answerGrades) && parsed.answerGrades.length > 0;
+  return hasScores || hasGrades;
 }
 
 function clampCategories(
