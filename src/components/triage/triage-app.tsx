@@ -14,13 +14,32 @@ import { CandidateDossier } from "./candidate-dossier";
 
 type View = "pool" | "candidate";
 
-export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }) {
+export function TriageApp({
+  pool,
+  viewer,
+  initialCandidateId = null,
+  unreadHires = 0,
+}: {
+  pool: TriagePool;
+  viewer: Viewer;
+  /** Deep-link from the New Hires inbox (`/?job=&c=`). */
+  initialCandidateId?: string | null;
+  /** Unread count for the New Hires nav affordance. */
+  unreadHires?: number;
+}) {
   const router = useRouter();
   const narrow = useIsNarrow();
   const [isPending, startTransition] = useTransition();
   const [candidates, setCandidates] = useState<Candidate[]>(pool.candidates);
-  const [view, setView] = useState<View>("pool");
-  const [activeId, setActiveId] = useState<string>(pool.candidates[0]?.id ?? "");
+  const initialInPool = initialCandidateId
+    ? pool.candidates.some((c) => c.id === initialCandidateId)
+    : false;
+  const [view, setView] = useState<View>(initialInPool ? "candidate" : "pool");
+  const [activeId, setActiveId] = useState<string>(
+    initialInPool && initialCandidateId
+      ? initialCandidateId
+      : (pool.candidates[0]?.id ?? ""),
+  );
 
   const findCandidate = useCallback(
     (id: string) => candidates.find((c) => c.id === id),
@@ -127,6 +146,19 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             title="Talent Radar — sourcing, enrichment, scoring & outreach"
           >
             Talent Radar
+          </a>
+          <a
+            href="/hires"
+            style={{
+              fontSize: 13,
+              color: unreadHires > 0 ? APP.ink : APP.secondary,
+              fontWeight: unreadHires > 0 ? 600 : 400,
+              textDecoration: "none",
+              flexShrink: 0,
+            }}
+            title="New Hires — cross-job hire inbox"
+          >
+            New Hires{unreadHires > 0 ? ` (${unreadHires})` : ""}
           </a>
           <div style={{ width: 1, height: 18, background: APP.hair }} />
 
