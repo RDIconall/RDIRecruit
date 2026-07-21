@@ -29,11 +29,13 @@ export default clerkMiddleware(async (auth, request) => {
       const claimEmail =
         (sessionClaims?.email as string | undefined) ??
         (sessionClaims?.primary_email_address as string | undefined);
-      let email = claimEmail;
-      if (!isEmailAllowed(email)) {
-        email = await primaryEmailForUser(userId);
+      // The session token may not carry the email claim — fall back to the
+      // Clerk API before denying, so a valid invitee is never bounced.
+      let allowed = await isEmailAllowed(claimEmail);
+      if (!allowed) {
+        allowed = await isEmailAllowed(await primaryEmailForUser(userId));
       }
-      if (!isEmailAllowed(email)) {
+      if (!allowed) {
         return NextResponse.redirect(new URL("/access-denied", request.url));
       }
     }

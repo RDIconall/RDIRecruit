@@ -6,8 +6,9 @@ export default function AccessDeniedPage() {
       <div className="max-w-md rounded-lg border border-navy/10 bg-white p-8 shadow-lg">
         <h1 className="text-xl font-semibold text-navy">Access not granted</h1>
         <p className="mt-3 text-sm leading-relaxed text-navy/70">
-          Your account is signed in, but it is not on the RDIRecruit allowlist yet. Ask an admin to
-          add your email, then sign out and back in.
+          Your account is signed in, but it has not been invited to RDIRecruit yet. Ask a teammate
+          to invite you from the app (the Invite button in the top bar), then reload — no need to
+          sign out.
         </p>
         <div className="mt-6 flex flex-wrap gap-3">
           <Link

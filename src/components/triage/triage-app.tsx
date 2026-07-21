@@ -11,6 +11,7 @@ import { useWorkspace } from "./use-workspace";
 import { useIsNarrow } from "./use-media-query";
 import { PoolBoard } from "./pool-board";
 import { CandidateDossier } from "./candidate-dossier";
+import { InviteButton } from "./invite-button";
 
 type View = "pool" | "candidate";
 
@@ -160,6 +161,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             </div>
           )}
           <div style={{ flex: 1 }} />
+          <InviteButton />
         </div>
 
         {wsApi.notice && (
