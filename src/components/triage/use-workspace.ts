@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { Viewer } from "@/lib/triage/reviewer";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
@@ -73,6 +74,7 @@ export function useWorkspace(
   initial: Workspace,
   candidates: Candidate[],
   onRead: (id: string, read: DecisionRead) => void,
+  viewer: Viewer,
 ): WorkspaceApi {
   const router = useRouter();
   const [ws, setWs] = useState<Workspace>(initial);
@@ -302,13 +304,14 @@ export function useWorkspace(
       const optimistic = {
         ts: nowStamp(),
         text: v,
-        ...(reviewerKind ? { reviewerKind, reviewerLabel: reviewerKindLabel(reviewerKind) } : {}),
+        reviewerKind: reviewerKind ?? viewer.kind,
+        reviewerLabel: reviewerKind ? reviewerKindLabel(reviewerKind) : viewer.label,
       };
       const log = [...(wsRef.current.corrections[id] || []), optimistic];
       setWs((w) => ({ ...w, corrections: { ...w.corrections, [id]: log } }));
       void handleRecalc(id, () => saveCorrection({ candidateId: id, text: v, reviewerKind }));
     },
-    [handleRecalc],
+    [handleRecalc, viewer.kind, viewer.label],
   );
 
   const sendChat = useCallback((id: string, text: string) => {
@@ -316,7 +319,12 @@ export function useWorkspace(
     if (!v) return;
     // Optimistic: show the human's turn immediately; the server returns the
     // authoritative thread (with Claude's reply) which we then swap in.
-    const optimistic: ChatMessage = { role: "user", content: v, ts: new Date().toISOString() };
+    const optimistic: ChatMessage = {
+      role: "user",
+      content: v,
+      ts: new Date().toISOString(),
+      author: viewer.label,
+    };
     const log = [...(wsRef.current.chat[id] || []), optimistic];
     setWs((w) => ({ ...w, chat: { ...w.chat, [id]: log } }));
     setChatBusy((b) => ({ ...b, [id]: true }));
@@ -329,7 +337,7 @@ export function useWorkspace(
       })
       .catch(() => setNotice("Chat failed — please retry."))
       .finally(() => setChatBusy((b) => ({ ...b, [id]: false })));
-  }, []);
+  }, [viewer.label]);
 
   const clearChat = useCallback((id: string) => {
     setWs((w) => ({ ...w, chat: { ...w.chat, [id]: [] } }));
@@ -342,7 +350,7 @@ export function useWorkspace(
     const optimistic: ActivityEntry = {
       id: `tmp-${Date.now()}`,
       type,
-      author: "You",
+      author: viewer.label,
       body: v,
       at: new Date().toISOString(),
     };
@@ -364,7 +372,7 @@ export function useWorkspace(
         }
       })
       .catch(() => setNotice("Couldn't save to the activity log — please retry."));
-  }, []);
+  }, [viewer.label]);
 
   const updateAssessmentCb = useCallback(
     (id: string) => {

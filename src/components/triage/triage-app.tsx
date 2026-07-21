@@ -11,6 +11,7 @@ import { useWorkspace } from "./use-workspace";
 import { useIsNarrow } from "./use-media-query";
 import { PoolBoard } from "./pool-board";
 import { CandidateDossier } from "./candidate-dossier";
+import { InviteButton } from "./invite-button";
 
 type View = "pool" | "candidate";
 
@@ -54,7 +55,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
     );
   }, []);
 
-  const wsApi = useWorkspace(pool.workspace, candidates, applyRead);
+  const wsApi = useWorkspace(pool.workspace, candidates, applyRead, viewer);
 
   const contextValue = useMemo(
     () => ({
@@ -160,6 +161,7 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             </div>
           )}
           <div style={{ flex: 1 }} />
+          <InviteButton />
         </div>
 
         {wsApi.notice && (

@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "node scripts/apply-migrations.mjs"
+    "db:migrate": "node scripts/apply-migrations.mjs",
+    "invite:user": "node scripts/invite-clerk-user.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.54.0",
