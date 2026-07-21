@@ -33,7 +33,8 @@ export interface WorkspaceApi {
   clearNotice: () => void;
   sendChat: (id: string, text: string) => void;
   clearChat: (id: string) => void;
-  toggleDq: (id: string) => void;
+  /** Flip disqualified; the optional reason is stored on the overlay + pushed to Workable. */
+  toggleDq: (id: string, reason?: string) => void;
   bulkDq: () => void;
   /** Force a set of candidates to (un)disqualified — drives the board's selection bulk bar. */
   setDqMany: (ids: string[], value: boolean) => void;
@@ -108,10 +109,10 @@ export function useWorkspace(
     [onRead, setBusyFor],
   );
 
-  const toggleDq = useCallback((id: string) => {
+  const toggleDq = useCallback((id: string, reason?: string) => {
     const next = !wsRef.current.dq[id];
     setWs((w) => ({ ...w, dq: { ...w.dq, [id]: next } }));
-    void setDisqualified({ candidateId: id, disqualified: next }).then((res) => {
+    void setDisqualified({ candidateId: id, disqualified: next, reason: next ? reason : undefined }).then((res) => {
       if (res?.workable === "disqualified") setNotice("Disqualified in Workable too.");
       else if (res?.workable === "reinstated") setNotice("Reinstated in Workable too.");
       else if (res?.workable === "failed")

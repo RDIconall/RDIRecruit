@@ -130,6 +130,9 @@ export interface VerdictRead {
 //   strong = strong candidate for the ask (good value)
 //   fair   = strength and ask line up (priced about right)
 //   weak   = not strong enough for what they want (poor value / overpriced)
+//   none   = no read possible: materials incomplete OR no salary ask on file
+//            (an unpriced candidate is NEVER "weak/overpriced" — there is no
+//            price to be over; the caveat carries the "confirm the ask" step)
 export type ValueLevel = "strong" | "fair" | "weak" | "none";
 
 export interface ValueRead {
@@ -358,6 +361,11 @@ export interface Candidate {
   // What must be confirmed before booking an interview (the old "verify first",
   // now a caveat flag rather than a status). Empty when there is nothing to verify.
   caveat?: string;
+
+  // True when the screening questions were dash-filled ("-", "n/a") or left
+  // effectively blank — a "refused to answer" application-care signal. Surfaced
+  // loudly in the pool + dossier because it is usually an easy disqualify.
+  refusedToAnswer?: boolean;
 
   askTier: AskTier;
   askNote: string;

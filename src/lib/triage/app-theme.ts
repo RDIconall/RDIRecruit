@@ -166,8 +166,10 @@ export function valueDot(level: "strong" | "fair" | "weak" | "none"): { fill: st
 }
 
 // Numeric weight for ordering the interview list by value (strong first).
+// "none" (no read yet / ask not stated) sits ABOVE "weak": an unknown ask is
+// still a better bet than a known-overpriced one.
 export function valueWeight(level: "strong" | "fair" | "weak" | "none"): number {
-  return level === "strong" ? 2 : level === "fair" ? 1 : 0;
+  return level === "strong" ? 3 : level === "fair" ? 2 : level === "none" ? 1 : 0;
 }
 
 // Deterministic, stable avatar tint from a candidate id/name — muted neutrals

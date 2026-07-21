@@ -79,6 +79,18 @@ export function StandingLine({ c }: { c: Candidate }) {
       );
     }
   }
+  // Dash-filled / blank screening answers — an application-care failure worth
+  // seeing at a glance, because it is usually an easy disqualify.
+  if (c.refusedToAnswer) {
+    return (
+      <div
+        style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
+        title="Screening questions dash-filled or left effectively blank — no real attempt to answer"
+      >
+        Refused to answer screening questions
+      </div>
+    );
+  }
   // Surface the verify-first caveat as a short tag; full text in the tooltip.
   if (c.caveat) {
     return (
@@ -98,7 +110,14 @@ export function StandingLine({ c }: { c: Candidate }) {
 
 export function ValueCell({ value }: { value: ValueRead | undefined }) {
   if (!value || value.level === "none") {
-    return <span style={mono({ fontSize: 12, color: "#C9C9C9" })}>—</span>;
+    // No read (blocked) or no stated ask (unpriced) — dash, with the reason in
+    // the tooltip so the recruiter can tell which without opening the file.
+    const tip = value ? [value.headline, value.detail].filter(Boolean).join(" — ") : "";
+    return (
+      <span style={mono({ fontSize: 12, color: "#C9C9C9" })} title={tip || undefined}>
+        —
+      </span>
+    );
   }
   const d = valueDot(value.level);
   const tip = [value.headline, value.detail].filter(Boolean).join(" — ");

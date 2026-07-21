@@ -23,7 +23,9 @@ OUTPUT IS A DECISION, NOT A SCORE. You must NEVER produce, mention, or imply a n
 - "blocked"   = Review blocked. Materials incomplete / failed to parse — no read possible until re-sync.
 There is no "short screen" and no "verify first" status. If a key claim, fact, or salary needs confirming before booking, the candidate can still be "interview" or "backup" — put what must be confirmed in the "caveat" field.
 
-JUDGE STRENGTH VS SALARY. The headline judgment is the candidate's strength weighed against their salary target. Strength = the quality of the life/career choices visible on the résumé (progression, tenure, the level their biggest accomplishments imply), the substance of their answers to the application questions, and their fit to the ROLE SPEC and JOB RUBRIC. Weigh that against their stated/target salary. A strong operator at a fair ask is high value; a thin candidate at a top-of-band ask is poor value. Fill the "value" object with this read.
+JUDGE STRENGTH VS SALARY. The headline judgment is the candidate's strength weighed against their salary target. Strength = the quality of the life/career choices visible on the résumé (progression, tenure, the level their biggest accomplishments imply), the substance of their answers to the application questions, and their fit to the ROLE SPEC and JOB RUBRIC. Weigh that against their stated/target salary. A strong operator at a fair ask is high value; a weak candidate at a top-of-band ask is poor value. Fill the "value" object with this read.
+
+IF THE SALARY ASK IS NOT STATED, there is no price to judge against: set value.level to "unpriced" with a headline like "Ask not stated", judge the candidate on strength alone in value.detail, and put "confirm the salary expectation" in the caveat. NEVER call an unpriced candidate overpriced or good value.
 
 Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. Integrity problems and clear contradictions are gates: they push to reject regardless of fit.
 
@@ -41,9 +43,9 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
   "next": "the concrete next action, e.g. Interview | Hold as backup | Reject | Re-sync",
   "caveat": "what must be confirmed before an interview (a claim, a fact, or the salary), or an empty string if nothing needs confirming",
   "value": {
-    "headline": "a short strength-vs-salary verdict, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Overpriced for the level'",
-    "level": "strong | fair | weak",
-    "detail": "1-2 sentences weighing their strength (résumé choices + answers + spec/rubric fit) against their salary target"
+    "headline": "a short strength-vs-salary verdict in plain language, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Limited evidence, rich ask' | 'Overpriced for the level' | 'Ask not stated'. For a weak file use plain words like weak, limited, unproven, or underevidenced. NEVER use the word \\"thin\\" (in any casing) in the headline — write 'Limited …' or 'Weak …' instead.",
+    "level": "strong | fair | weak | unpriced (use unpriced ONLY when no salary ask is on file)",
+    "detail": "1-2 sentences weighing their strength (résumé choices + answers + spec/rubric fit) against their salary target — or against strength alone when the ask is unstated"
   },
   "timelineNote": "one short note on what changed vs the prior read, or empty string if nothing changed",
   "careerRead": {
@@ -60,7 +62,7 @@ Return JSON only, no prose outside the JSON, in exactly this shape:
   },
   "assessment": {
     "bio": "A COMPLETE written biography in flowing prose (2-4 short paragraphs, separated by a blank line). Tell their story end to end: where they went to school and what they studied (include GPA only if it is actually stated in the materials), early roles, any graduate study, then the progression of roles with the organizations and how long at each, what kind of career track this is typical of, and finally — based on their most recent/most senior position — their single biggest accomplishment and the capability level (RO stratum) that accomplishment indicates. Write it the way a sharp recruiter briefs a hiring partner: specific, grounded in the résumé, no filler, no numeric scores. Never invent facts that are not in the materials; if something (like GPA or a degree) is not stated, simply omit it rather than guessing.",
-    "application": "A summary of the application reviewed AGAINST THE SPEC, in 1-2 short paragraphs. Cover: the candidate's stated/target salary and whether it fits; the quality of their answers to the application questions (well thought out and detailed vs thin), how strongly the answers are backed by the experience and education on their résumé, and your read on how likely the answers are AI-generated (low/medium/high signs of AI use, with the tell); whether the cover letter is well written and shows genuine research into the role; and whether the writing STYLE is consistent across the résumé, cover letter, and application answers (consistency is a positive authenticity signal; a sharp mismatch is a flag).",
+    "application": "A summary of the application reviewed AGAINST THE SPEC, in 1-2 short paragraphs. Read the answers in this order: FIRST ask whether each answer sounds AI-generated (mirrors the job post near-verbatim, generic closers, polish without lived detail) — if so, say so, that is the read for that answer; OTHERWISE judge the substance of the core argument, where substance outweighs length and polish (a short answer that gives the right concept beats a long polished one that does not). Also cover: the candidate's stated/target salary and whether it fits; how strongly the answers are backed by the experience and education on their résumé; whether the cover letter is well written and shows genuine research into the role; and whether the writing STYLE is consistent across the résumé, cover letter, and application answers (consistency is a positive authenticity signal; a sharp mismatch is a flag). Ground every claim about an answer ONLY in that answer's own text — never in a comparison to other candidates or a 'batch'.",
     "commute": "One or two sentences: state where the candidate currently lives, then estimate the typical driving commute time (in minutes) from there to ${OFFICE}. Use your geographic knowledge to give a realistic door-to-door drive-time estimate (e.g. 'about 25-35 minutes in normal traffic'). If the location is far (another state/country) say so plainly and note relocation would be required. If no location is on file, say it is not stated and must be confirmed."
   }
 }
@@ -131,7 +133,7 @@ ${(workingFile || "(empty)").slice(0, 8000)}
 
 CANDIDATE: ${candidate.name}
 Current role on file: ${candidate.role} at ${candidate.company}
-Salary ask: ${candidate.salary}
+Salary ask: ${!candidate.salary || candidate.salary === "—" ? "NOT STATED — must be confirmed" : candidate.salary}
 RO capability (level label, NOT a score): ${candidate.roLevel}
 Lives in: ${candidate.logistics.location || "not stated"} (office to commute to: ${OFFICE})
 Logistics: ${candidate.logistics.location} — likelihood ${candidate.logistics.likelihood}
@@ -150,7 +152,7 @@ ${cover}
 
 APPLICATION ANSWERS:
 ${answers || "none on file"}
-
+${candidate.refusedToAnswer ? "\nREFUSED TO ANSWER: the screening answers above are dash-filled or effectively blank — no real attempt was made. Treat this as an application-care failure that ordinarily pushes to reject, unless a human correction or transcript says otherwise.\n" : ""}
 HUMAN CORRECTIONS (authoritative — these override the AI's earlier parse):
 ${corr}
 
@@ -208,17 +210,33 @@ function parseAssessment(value: unknown): AssessmentNarrative | undefined {
   return { bio, application, commute };
 }
 
+/**
+ * Guard the plain-language headline vocabulary. "Thin" reads as jargon in the
+ * strength-vs-salary column, so we forbid it in the prompt AND scrub it here as a
+ * belt-and-suspenders fallback: a stray "Thin candidate" becomes "Limited
+ * candidate", preserving casing and the rest of the phrase.
+ */
+function scrubHeadline(headline: string): string {
+  return headline.replace(/\bthin\b/gi, (m) => (m[0] === "T" ? "Limited" : "limited"));
+}
+
 function parseValue(value: unknown): ValueRead | undefined {
   if (!value || typeof value !== "object") return undefined;
   const v = value as Record<string, unknown>;
   const str = (k: string) => (typeof v[k] === "string" ? (v[k] as string).trim() : "");
-  const headline = str("headline");
+  const headline = scrubHeadline(str("headline"));
   const detail = str("detail");
   const rawLevel = str("level").toLowerCase();
+  // "unpriced" (no ask on file) maps to the UI's "none" level — the value column
+  // shows a dash rather than pretending a price judgment exists.
   const level: ValueRead["level"] =
     rawLevel === "strong" ? "strong" : rawLevel === "weak" ? "weak" : rawLevel === "fair" ? "fair" : "none";
   if (!headline && !detail && level === "none") return undefined;
-  return { headline: headline || "—", level: level === "none" ? "fair" : level, detail };
+  if (level === "none" && !/unpriced|none|not stated|unstated/.test(rawLevel + " " + headline.toLowerCase())) {
+    // Unrecognized level but a real headline — keep the read, default to fair.
+    return { headline: headline || "—", level: "fair", detail };
+  }
+  return { headline: headline || "—", level, detail };
 }
 
 function parseRubricFit(value: unknown): RubricFit | undefined {

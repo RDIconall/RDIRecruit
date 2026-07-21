@@ -122,18 +122,26 @@ function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
       list
         .filter((r) => r.kind === kind)
         .sort((a, b) => (b.created_at ?? "").localeCompare(a.created_at ?? ""))[0]?.payload ?? null;
-    const all = (kind: string) =>
-      list
-        .filter((r) => r.kind === kind)
-        .sort((a, b) => (a.created_at ?? "").localeCompare(b.created_at ?? ""))
-        .map((r) => r.payload);
+    // Multi-row kinds (role_read, answer_grade) are inserted as one batch per
+    // scoring run, so every row in a run shares a single created_at. Overlapping
+    // runs can leave several batches behind; concatenating them repeats every
+    // question/role in the UI. Keep only the newest batch.
+    const latestBatch = (kind: string) => {
+      const rows = list.filter((r) => r.kind === kind);
+      if (!rows.length) return [];
+      const newest = rows.reduce(
+        (max, r) => ((r.created_at ?? "") > max ? (r.created_at ?? "") : max),
+        "",
+      );
+      return rows.filter((r) => (r.created_at ?? "") === newest).map((r) => r.payload);
+    };
 
     result.set(id, {
       invest: latest("invest_head") as unknown as InvestPayload | null,
       dig: latest("dig_in") as unknown as DigInPayload | null,
       verification: latest("verification") as unknown as VerificationPayload | null,
-      roleReads: all("role_read") as unknown as RoleReadPayload[],
-      answerGrades: all("answer_grade") as unknown as AnswerGradePayload[],
+      roleReads: latestBatch("role_read") as unknown as RoleReadPayload[],
+      answerGrades: latestBatch("answer_grade") as unknown as AnswerGradePayload[],
     });
   }
   return result;
@@ -148,7 +156,7 @@ function deriveMeta(candidates: Candidate[], jobShortcode: string, title: string
   let healthState: string;
   if (interview > 0) healthState = "Has people to interview";
   else if (backup > 0) healthState = "Backups only, no clear interview";
-  else healthState = "Thin";
+  else healthState = "No one to interview yet";
 
   const healthRead =
     candidates.length === 0

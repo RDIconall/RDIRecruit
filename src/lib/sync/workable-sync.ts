@@ -212,23 +212,28 @@ export async function upsertCandidateFromWorkable(
 
   const { data: existingApp } = await supabase
     .from("applications")
-    .select("id, resume_url")
+    .select("id, resume_url, answers, cover_letter")
     .eq("candidate_id", candidate.id)
     .maybeSingle();
 
-  // The single-candidate endpoint (getCandidate) returns `resume_url`, but the
-  // bulk LIST endpoint (listAllCandidates → the mirror) OMITS it. Writing
-  // `candidate.resume_url ?? null` therefore NULLED OUT a previously-captured
-  // résumé URL every time the mirror ran on a metadata change (stage move, etc.)
-  // — which is exactly how candidates ended up "Review blocked" with no URL on
-  // file. Never overwrite a stored non-null résumé URL with null: only update it
-  // when the authoritative fetch actually carries one.
-  const existingResumeUrl = (existingApp as { resume_url?: string | null } | null)?.resume_url ?? null;
+  // The single-candidate endpoint (getCandidate) returns `resume_url`, screening
+  // `answers`, and `cover_letter`, but the bulk LIST endpoint (listAllCandidates
+  // → the mirror) OMITS them. Writing the incoming value blindly therefore WIPED
+  // previously-captured data every time the mirror ran on a metadata change
+  // (stage move, etc.) — the bug class already fixed for resume_url and
+  // photo_url. Never overwrite stored answers / cover letter / résumé URL with
+  // an empty value: only update when the authoritative fetch actually carries one.
+  const prior = existingApp as {
+    resume_url?: string | null;
+    answers?: Record<string, string> | null;
+    cover_letter?: string | null;
+  } | null;
+  const incomingAnswers = answersToRecord(candidate);
   const applicationPayload = {
     candidate_id: candidate.id,
-    answers: answersToRecord(candidate),
-    cover_letter: candidate.cover_letter ?? null,
-    resume_url: candidate.resume_url ?? existingResumeUrl,
+    answers: Object.keys(incomingAnswers).length ? incomingAnswers : prior?.answers ?? {},
+    cover_letter: candidate.cover_letter ?? prior?.cover_letter ?? null,
+    resume_url: candidate.resume_url ?? prior?.resume_url ?? null,
     parsed_experience: parseExperience(candidate),
     parsed_education: parseEducation(candidate),
   };
@@ -433,11 +438,17 @@ async function runScoreUnscoredPass(options?: {
   const concurrency = options?.concurrency ?? 8;
   const supabase = getServiceSupabase();
 
-  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }] = await Promise.all([
-    supabase.from("candidates").select("workable_id, job_shortcode, created_at"),
-    supabase.from("scores").select("candidate_id, created_at, model_version"),
-    supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
-  ]);
+  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }, { data: dqOverlayRows }] =
+    await Promise.all([
+      supabase.from("candidates").select("workable_id, job_shortcode, created_at, disqualified"),
+      supabase.from("scores").select("candidate_id, created_at, model_version"),
+      supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
+      supabase.from("candidate_overlay").select("candidate_id").eq("status", "disqualified"),
+    ]);
+
+  // Disqualified candidates (Workable state or app overlay) are out of the pool —
+  // never spend an evaluation on them. Mirrors the reanalyze cron's eligibility.
+  const disqualifiedOverlay = new Set((dqOverlayRows ?? []).map((r) => r.candidate_id as string));
 
   // Latest score (timestamp + model) per candidate.
   const latestScoreAt = new Map<string, string>();
@@ -471,6 +482,7 @@ async function runScoreUnscoredPass(options?: {
   };
 
   const toScore = (candidateRows ?? [])
+    .filter((r) => !(r.disqualified as boolean | null) && !disqualifiedOverlay.has(r.workable_id as string))
     .map((r) => ({
       id: r.workable_id as string,
       jobShortcode: (r.job_shortcode as string | null) ?? null,

@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { backfillMissingResumes, recaptureBlockedResumes } from "@/lib/resume/backfill";
+import {
+  backfillMissingResumes,
+  recaptureBlockedResumes,
+  recaptureMissingAnswers,
+} from "@/lib/resume/backfill";
 import { backfillMissingPhotos } from "@/lib/sync/photo-backfill";
 
 export const runtime = "nodejs";
@@ -22,6 +26,10 @@ export const maxDuration = 300;
  * `?mode=photos` backfills candidate profile photos the bulk mirror could never
  * capture (the LIST endpoint omits `image_url`): it pulls the authoritative single
  * candidate and writes `candidates.photo_url`. `limit=<n>` caps candidates processed.
+ *
+ * `?mode=answers` recaptures screening answers the mirror wiped (LIST omits
+ * `answers`; pre-guard mirrors overwrote them with {}), then re-scores each
+ * rehydrated candidate so answer grades regenerate. `limit=<n>` caps processed.
  */
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
@@ -41,6 +49,17 @@ export async function GET(request: NextRequest) {
         limit: boundedLimit,
       });
       return NextResponse.json({ ok: true, mode: "photos", ...result });
+    }
+
+    if (params.get("mode") === "answers") {
+      // Tighter budget than the other modes: each rehydrated candidate also runs
+      // a full Claude re-score (~2 min), and one starting near the budget edge
+      // must still finish inside the function's 300s maxDuration.
+      const result = await recaptureMissingAnswers({
+        budgetMs: 130_000,
+        limit: boundedLimit,
+      });
+      return NextResponse.json({ ok: true, mode: "answers", ...result });
     }
 
     if (params.get("mode") === "recapture") {
