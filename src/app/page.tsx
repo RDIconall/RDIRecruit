@@ -1,5 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { TriageApp } from "@/components/triage/triage-app";
+import { getUnreadHireCount } from "@/lib/hires/load";
 import { loadTriagePool, DEFAULT_JOB_SHORTCODE } from "@/lib/triage/load";
 import { reviewerKindFrom, reviewerKindLabel, type Viewer } from "@/lib/triage/reviewer";
 
@@ -25,12 +26,25 @@ async function resolveViewer(): Promise<Viewer> {
 export default async function HomePage({
   searchParams,
 }: {
-  searchParams: Promise<{ job?: string }>;
+  searchParams: Promise<{ job?: string; c?: string }>;
 }) {
   const params = await searchParams;
   const job = params.job || DEFAULT_JOB_SHORTCODE;
-  const [pool, viewer] = await Promise.all([loadTriagePool(job), resolveViewer()]);
+  const initialCandidateId = params.c?.trim() || null;
+  const [pool, viewer, unreadHires] = await Promise.all([
+    loadTriagePool(job),
+    resolveViewer(),
+    getUnreadHireCount(),
+  ]);
 
   // key on the job so switching jobs fully resets client state.
-  return <TriageApp key={pool.meta.jobShortcode} pool={pool} viewer={viewer} />;
+  return (
+    <TriageApp
+      key={pool.meta.jobShortcode}
+      pool={pool}
+      viewer={viewer}
+      initialCandidateId={initialCandidateId}
+      unreadHires={unreadHires}
+    />
+  );
 }

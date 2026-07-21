@@ -97,6 +97,7 @@ export function RadarApp({ data, viewer }: { data: RadarData; viewer: string }) 
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <Link href="/" style={navLink}>← Triage</Link>
+          <Link href="/hires" style={navLink}>New Hires</Link>
           <span style={{ fontSize: 12.5, color: "rgba(22,35,53,0.55)" }}>{viewer}</span>
         </div>
       </header>

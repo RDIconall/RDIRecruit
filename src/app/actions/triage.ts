@@ -28,6 +28,7 @@ import type {
   WorkspaceSlice,
 } from "@/lib/triage/types";
 import { normalizeProcessStatus } from "@/lib/triage/types";
+import { removeHireInbox, upsertHireInbox } from "@/lib/hires/store";
 
 const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
 const VALID_PROCESS_STATUS: ProcessStatus[] = [
@@ -294,7 +295,24 @@ export async function setProcessStatus(input: {
   if (status !== null && !VALID_PROCESS_STATUS.includes(status)) {
     return { ok: false, recalculated: false, read: null, message: "Invalid process status" };
   }
-  return persistAndMaybeRecalc(input.candidateId, { processStatus: status }, { recalc: false });
+  const result = await persistAndMaybeRecalc(
+    input.candidateId,
+    { processStatus: status },
+    { recalc: false },
+  );
+  // Keep the cross-job New Hires inbox in sync (best-effort; never blocks persist).
+  try {
+    if (status === "hired") {
+      const job = await jobShortcodeFor(input.candidateId);
+      if (job) await upsertHireInbox({ candidateId: input.candidateId, jobShortcode: job });
+    } else {
+      await removeHireInbox(input.candidateId);
+    }
+    revalidatePath("/hires");
+  } catch (err) {
+    console.error("setProcessStatus hire_inbox sync", err);
+  }
+  return result;
 }
 
 /** Re-run Claude on the current materials (with the per-role rubric). Clears any manual override. */
