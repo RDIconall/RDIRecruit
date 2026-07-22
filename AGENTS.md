@@ -77,3 +77,12 @@ Supabase agent skills (`.agents/skills/`):
 ## Auth
 
 All app routes require Clerk login. Webhooks (`/api/hooks/*`) and cron (`/api/cron/*`) stay public with their own secrets.
+
+## Cursor Cloud specific instructions
+
+- Node 22 + npm; install with `npm install`. Standard commands live in `package.json`: `npm run dev` (Next 16 + Turbopack on `http://localhost:3000`), `npm run build`, `npm run typecheck`, `npm run lint`, `npm run db:migrate`.
+- No secrets are needed to boot the app. `src/lib/env.ts` makes every env var optional/defaulted, and Clerk runs in **keyless mode** in dev when `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`/`CLERK_SECRET_KEY` are unset (a "You are running in keyless mode" line prints in the dev log). Supabase, Anthropic, and Workable are all feature-gated (`hasSupabase()`, `hasAnthropic()`, `hasWorkable()`) and degrade gracefully — no crash when unset.
+- Without Clerk keys, protected routes are not usable (auth-gated `/` returns 404 in keyless mode, not a redirect). To verify/develop UI without any secrets, use the **public preview harness**: `/preview/pool` renders the real `PoolTable` component with synthetic mock data (search, decision filter pills, row selection, column sorting all work), and `/preview/workflow` embeds a static pipeline mock. `GET /api/health` (public) reports integration status.
+- To develop against real data you need Clerk keys (to log in) **and** Supabase (`SUPABASE_URL` + `SUPABASE_SERVICE_KEY`) with migrations applied via `npm run db:migrate` (needs `DATABASE_URL`/`SUPABASE_DB_URL`); add `ANTHROPIC_API_KEY` to exercise the Claude re-derive. With Clerk but no Supabase, the pool loads empty with a "Not connected" health state.
+- `typecheck` is the reliable type gate. `npm run lint` currently crashes with `TypeError: Converting circular structure to JSON` from `FlatCompat` in `eslint.config.mjs` (an `eslint-config-next@16` / ESLint 9 flat-config-compat incompatibility) — this is pre-existing and unrelated to app code.
+- The `middleware` file convention logs a deprecation warning (Next 16 prefers `proxy`); harmless.
