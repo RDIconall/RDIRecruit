@@ -1,0 +1,894 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RDIRecruit — Workable-aligned mock</title>
+<style>
+  :root {
+    --ink: #1f2933;
+    --ink2: #3e4c59;
+    --muted: #7b8794;
+    --hair: #e4e7eb;
+    --bg: #f5f7f9;
+    --surface: #ffffff;
+    --green: #0b8f6a;
+    --green-soft: #e6f5f0;
+    --green-hover: #09775a;
+    --blue: #2563eb;
+    --blue-soft: #eff4ff;
+    --red: #c0392b;
+    --red-soft: #fbecea;
+    --amber: #b45309;
+    --amber-soft: #fff7ed;
+    --radius: 8px;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: var(--font);
+    color: var(--ink);
+    background: var(--bg);
+    -webkit-font-smoothing: antialiased;
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  button, input, select, textarea { font: inherit; }
+  button { cursor: pointer; }
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+
+  /* Workable-ish top bar */
+  .top {
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--hair);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 0 20px;
+    position: sticky;
+    top: 0;
+    z-index: 20;
+  }
+  .brand {
+    display: flex; align-items: center; gap: 10px;
+    font-weight: 700; letter-spacing: -0.02em; font-size: 15px;
+  }
+  .brand-mark {
+    width: 22px; height: 22px; border-radius: 6px;
+    background: var(--green); color: #fff;
+    display: grid; place-items: center; font-size: 11px; font-weight: 800;
+  }
+  .job {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 10px; border: 1px solid var(--hair); border-radius: 6px;
+    background: #fff; color: var(--ink2); font-size: 13px;
+  }
+  .job select { border: 0; outline: 0; background: transparent; color: var(--ink); font-weight: 600; }
+  .modes {
+    display: flex; gap: 4px; margin-left: 8px;
+    background: var(--bg); padding: 3px; border-radius: 8px; border: 1px solid var(--hair);
+  }
+  .mode {
+    border: 0; background: transparent; color: var(--ink2);
+    padding: 6px 12px; border-radius: 6px; font-weight: 600; font-size: 13px;
+  }
+  .mode.active { background: #fff; color: var(--ink); box-shadow: var(--shadow); }
+  .top-spacer { flex: 1; }
+  .hint {
+    color: var(--muted); font-size: 12px; max-width: 340px; text-align: right;
+  }
+  .linkish {
+    border: 0; background: transparent; color: var(--green); font-weight: 600; font-size: 13px;
+  }
+
+  .body { flex: 1; display: flex; min-height: 0; }
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+
+  /* Toolbar under modes */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px;
+    padding: 12px 20px 0;
+  }
+  .search {
+    height: 34px; border: 1px solid var(--hair); border-radius: 6px;
+    padding: 0 10px; width: 240px; background: #fff;
+  }
+  .pill {
+    height: 28px; padding: 0 10px; border-radius: 999px;
+    border: 1px solid var(--hair); background: #fff; color: var(--ink2); font-size: 12px; font-weight: 600;
+  }
+  .pill.on { background: var(--green-soft); border-color: #b7e2d4; color: var(--green); }
+  .btn {
+    height: 34px; padding: 0 12px; border-radius: 6px; border: 1px solid var(--hair);
+    background: #fff; color: var(--ink); font-weight: 600; font-size: 13px;
+  }
+  .btn.primary { background: var(--green); border-color: var(--green); color: #fff; }
+  .btn.primary:hover { background: var(--green-hover); }
+  .btn.danger { color: var(--red); border-color: #e3c9c4; background: var(--red-soft); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .toolbar .grow { flex: 1; }
+  .count { color: var(--muted); font-size: 12px; font-weight: 600; }
+
+  /* TRIAGE TABLE */
+  .panel { padding: 12px 20px 24px; }
+  .table-wrap {
+    background: #fff; border: 1px solid var(--hair); border-radius: 10px; overflow: hidden;
+    box-shadow: var(--shadow);
+  }
+  table.triage { width: 100%; border-collapse: collapse; }
+  table.triage th {
+    text-align: left; font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--muted); font-weight: 700; padding: 10px 12px; border-bottom: 1px solid var(--hair);
+    background: #fafbfc; white-space: nowrap;
+  }
+  table.triage td {
+    padding: 10px 12px; border-bottom: 1px solid var(--hair); vertical-align: middle;
+  }
+  table.triage tr:last-child td { border-bottom: 0; }
+  table.triage tr:hover td { background: #f8fafb; }
+  table.triage tr.selected td { background: var(--green-soft); }
+  .cand {
+    display: flex; align-items: center; gap: 10px; min-width: 180px;
+  }
+  .av {
+    width: 30px; height: 30px; border-radius: 50%;
+    display: grid; place-items: center; color: #fff; font-size: 11px; font-weight: 700; flex-shrink: 0;
+  }
+  .cand-name { font-weight: 650; color: var(--ink); }
+  .cand-sub { font-size: 12px; color: var(--muted); }
+  .why { color: var(--ink2); font-size: 13px; max-width: 320px; }
+  .flag {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+  }
+  .flag.refuse { background: var(--red-soft); color: var(--red); }
+  .flag.integrity { background: var(--red-soft); color: var(--red); }
+  .flag.ai { background: var(--amber-soft); color: var(--amber); }
+  .flag.blocked { background: #eef2f6; color: var(--muted); }
+  .decision {
+    appearance: none; border: 1px solid var(--hair); border-radius: 6px;
+    padding: 5px 8px; background: #fff; font-weight: 650; font-size: 12px;
+  }
+  .decision.interview { color: var(--green); border-color: #b7e2d4; background: var(--green-soft); }
+  .decision.backup { color: var(--amber); border-color: #f5d7ae; background: var(--amber-soft); }
+  .decision.reject { color: var(--red); border-color: #e3c9c4; background: var(--red-soft); }
+  .decision.blocked { color: var(--muted); }
+  .row-actions { display: flex; gap: 6px; justify-content: flex-end; white-space: nowrap; }
+  .bulk {
+    display: none; align-items: center; gap: 10px;
+    margin: 0 20px 10px; padding: 10px 12px; border-radius: 8px;
+    background: var(--ink); color: #fff;
+  }
+  .bulk.show { display: flex; }
+  .bulk .btn { height: 30px; }
+
+  /* KANBAN */
+  .board {
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(240px, 1fr);
+    gap: 12px;
+    padding: 12px 20px 28px;
+    overflow-x: auto;
+    align-items: start;
+    min-height: calc(100vh - 120px);
+  }
+  .col {
+    background: #eef2f5;
+    border-radius: 10px;
+    border: 1px solid #e1e6eb;
+    min-height: 420px;
+    display: flex; flex-direction: column;
+  }
+  .col.dq { background: #f7efef; border-color: #ecdada; }
+  .col-h {
+    padding: 12px 12px 8px; display: flex; align-items: center; gap: 8px;
+    position: sticky; top: 52px; background: inherit; border-radius: 10px 10px 0 0;
+  }
+  .col-title { font-weight: 750; font-size: 13px; }
+  .col-count {
+    margin-left: auto; font-size: 11px; font-weight: 700; color: var(--muted);
+    background: #fff; border: 1px solid var(--hair); border-radius: 999px; padding: 1px 7px;
+  }
+  .col-sub { padding: 0 12px 10px; font-size: 11px; color: var(--muted); }
+  .col-body { padding: 0 8px 10px; display: flex; flex-direction: column; gap: 8px; min-height: 80px; }
+  .col.drag-over { outline: 2px dashed var(--green); outline-offset: -4px; }
+
+  .card {
+    background: #fff; border: 1px solid var(--hair); border-radius: 8px;
+    padding: 10px; box-shadow: var(--shadow); cursor: grab;
+  }
+  .card:active { cursor: grabbing; }
+  .card.dragging { opacity: .45; }
+  .card-top { display: flex; gap: 8px; align-items: flex-start; }
+  .card-name { font-weight: 700; font-size: 13px; }
+  .card-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .card-why { font-size: 12px; color: var(--ink2); margin-top: 8px; line-height: 1.4; }
+  .card-foot {
+    display: flex; align-items: center; gap: 6px; margin-top: 10px; flex-wrap: wrap;
+  }
+  .badge {
+    font-size: 10px; font-weight: 750; letter-spacing: .02em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 4px; border: 1px solid var(--hair);
+  }
+  .badge.interview { background: var(--green-soft); color: var(--green); border-color: #b7e2d4; }
+  .badge.backup { background: var(--amber-soft); color: var(--amber); border-color: #f5d7ae; }
+  .badge.reject { background: var(--red-soft); color: var(--red); border-color: #e3c9c4; }
+  .badge.blocked { background: #eef2f6; color: var(--muted); }
+  .card-open {
+    margin-left: auto; border: 0; background: transparent; color: var(--green);
+    font-weight: 700; font-size: 12px; padding: 0;
+  }
+
+  /* DEEP DIVE */
+  .deep {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
+    gap: 16px;
+    padding: 12px 20px 28px;
+  }
+  @media (max-width: 980px) {
+    .deep { grid-template-columns: 1fr; }
+  }
+  .deep-left, .deep-right {
+    background: #fff; border: 1px solid var(--hair); border-radius: 10px;
+    box-shadow: var(--shadow); min-height: 520px;
+  }
+  .deep-head {
+    padding: 16px 18px 12px; border-bottom: 1px solid var(--hair);
+    display: flex; gap: 12px; align-items: flex-start;
+  }
+  .deep-head h1 { margin: 0; font-size: 20px; letter-spacing: -0.02em; }
+  .deep-head .meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+  .deep-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .call-card {
+    margin: 14px 18px; padding: 14px; border-radius: 8px;
+    background: #0f1720; color: #f5f7fa;
+  }
+  .call-card .kicker { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #9fb0c3; font-weight: 700; }
+  .call-card .verdict { font-size: 16px; font-weight: 700; margin: 6px 0 8px; }
+  .call-card p { margin: 0; color: #d5dde8; font-size: 13px; }
+  .call-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px;
+  }
+  .call-grid div {
+    background: rgba(255,255,255,.06); border-radius: 6px; padding: 8px 10px;
+  }
+  .call-grid .l { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #9fb0c3; font-weight: 700; }
+  .call-grid .v { font-size: 13px; margin-top: 2px; }
+  .tabs {
+    display: flex; gap: 2px; padding: 0 18px; border-bottom: 1px solid var(--hair); margin-top: 4px;
+  }
+  .tab {
+    border: 0; background: transparent; padding: 10px 12px; color: var(--muted); font-weight: 700; font-size: 13px;
+    border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab.active { color: var(--ink); border-bottom-color: var(--green); }
+  .tab-body { padding: 16px 18px 20px; }
+  .doc {
+    white-space: pre-wrap; font-size: 13px; color: var(--ink2); line-height: 1.55;
+    background: var(--bg); border: 1px solid var(--hair); border-radius: 8px; padding: 14px;
+    max-height: 360px; overflow: auto;
+  }
+  .qa { margin-bottom: 14px; }
+  .qa .q { font-weight: 700; margin-bottom: 4px; }
+  .qa .a { color: var(--ink2); background: var(--bg); border-radius: 6px; padding: 10px; border: 1px solid var(--hair); }
+  .qa .note { margin-top: 6px; font-size: 12px; color: var(--muted); }
+  .ro {
+    margin: 0 18px 18px; padding: 12px 14px; border: 1px solid var(--hair); border-radius: 8px; background: #fafbfc;
+  }
+  .ro h3 { margin: 0 0 6px; font-size: 13px; }
+  .ro p { margin: 0; color: var(--ink2); font-size: 13px; }
+  .ro .src { margin-top: 8px; font-size: 11px; color: var(--green); font-weight: 700; }
+
+  .composer {
+    padding: 14px 18px 18px; border-top: 1px solid var(--hair);
+  }
+  .composer label { display: block; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 6px; }
+  .composer textarea {
+    width: 100%; min-height: 90px; border: 1px solid var(--hair); border-radius: 8px;
+    padding: 10px; resize: vertical;
+  }
+  .composer-row { display: flex; gap: 8px; margin-top: 8px; align-items: center; }
+  .toast {
+    position: fixed; bottom: 18px; right: 18px; background: var(--ink); color: #fff;
+    padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 600;
+    opacity: 0; transform: translateY(8px); transition: .2s ease; pointer-events: none; z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: none; }
+  .empty {
+    padding: 28px; text-align: center; color: var(--muted); font-size: 13px;
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand"><span class="brand-mark">R</span> RDIRecruit</div>
+    <div class="job">
+      Job
+      <select id="jobSelect">
+        <option>Clinical Data Manager — Data Integrity</option>
+        <option>Director, Research &amp; Science</option>
+        <option>Senior Controller</option>
+      </select>
+    </div>
+    <nav class="modes" aria-label="Modes">
+      <button class="mode active" data-mode="triage">Triage</button>
+      <button class="mode" data-mode="pipeline">Pipeline</button>
+      <button class="mode" data-mode="deep" id="deepModeBtn" disabled>Deep dive</button>
+    </nav>
+    <div class="top-spacer"></div>
+    <div class="hint" id="modeHint">Inbox of new applicants. Confirm AI cuts — Workable stage stays Applied until you move them.</div>
+    <button class="linkish" type="button" title="Mock only">Open in Workable ↗</button>
+  </header>
+
+  <div class="body">
+    <div class="main">
+      <!-- TRIAGE -->
+      <section id="view-triage">
+        <div class="toolbar">
+          <input class="search" id="triageSearch" placeholder="Search candidates" />
+          <button class="pill on" data-filter="all">All new</button>
+          <button class="pill" data-filter="reject">Suggested reject</button>
+          <button class="pill" data-filter="interview">Suggested interview</button>
+          <button class="pill" data-filter="blocked">Blocked</button>
+          <div class="grow"></div>
+          <span class="count" id="triageCount"></span>
+        </div>
+        <div class="bulk" id="bulkBar">
+          <span id="bulkCount">0 selected</span>
+          <button class="btn danger" id="bulkDq">Disqualify in Workable</button>
+          <button class="btn" id="bulkClear">Clear</button>
+        </div>
+        <div class="panel">
+          <div class="table-wrap">
+            <table class="triage">
+              <thead>
+                <tr>
+                  <th style="width:36px"><input type="checkbox" id="selectAll" /></th>
+                  <th>Candidate</th>
+                  <th>AI call</th>
+                  <th>Why</th>
+                  <th>Flags</th>
+                  <th>Workable</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="triageBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- PIPELINE KANBAN -->
+      <section id="view-pipeline" hidden>
+        <div class="toolbar">
+          <input class="search" id="pipeSearch" placeholder="Search pipeline" />
+          <span class="count">Drag a card to move stage → writes to Workable</span>
+          <div class="grow"></div>
+          <span class="count" id="pipeCount"></span>
+        </div>
+        <div class="board" id="board"></div>
+      </section>
+
+      <!-- DEEP DIVE -->
+      <section id="view-deep" hidden>
+        <div class="toolbar">
+          <button class="btn" id="backBtn">← Back</button>
+          <div class="grow"></div>
+          <button class="btn" id="advanceBtn">Advance in Workable</button>
+          <button class="btn danger" id="deepDqBtn">Disqualify</button>
+        </div>
+        <div class="deep" id="deepRoot"></div>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const STAGES = [
+  { id: "applied", label: "Applied", hint: "Triage inbox · no process yet", triage: true },
+  { id: "phone", label: "Phone screen", hint: "Pending call", pending: true },
+  { id: "interview", label: "Interview", hint: "Pending call", pending: true },
+  { id: "offer", label: "Offer", hint: "Workable stage" },
+  { id: "hired", label: "Hired", hint: "Workable stage" },
+  { id: "disqualified", label: "Disqualified", hint: "Workable disposition", dq: true },
+];
+
+const AV_COLORS = ["#0b8f6a","#2563eb","#7c3aed","#b45309","#0f766e","#be123c","#1d4ed8"];
+
+const seed = [
+  {
+    id: "c1", name: "Maya Chen", role: "CDM, Oncology", company: "Roche",
+    stage: "applied", decision: "interview",
+    why: "Owned answers on query resolution; priced ask fits; strong vs pool.",
+    flags: [], salary: "$128k", location: "San Diego, CA",
+    value: "Strong for ask",
+    resume: "MAYA CHEN\nClinical Data Manager — Oncology\nSan Diego, CA · maya@example.com\n\nEXPERIENCE\nRoche Molecular · CDM · 2021–present\n- Led SDTM/ADaM reconciliation for 3 Phase II studies\n- Cut query backlog 40% by rewriting site guidance\n\nIQVIA · Data Coordinator · 2018–2021\n- EDC build support; SAE reconciliation\n\nEDUCATION\nUCSD · BS Biology",
+    cover: "I'm writing about the Clinical Data Manager role because the integrity-first framing matches how I already run query cycles at Roche…",
+    answers: [
+      { q: "Describe a time you caught a data integrity issue.", a: "On Study X we saw visit windows drifting after a mid-study amendment. I pulled the audit trail, found the CRF version mismatch, and wrote the site note before first patient in…", note: "OWNED — specific study, action, consequence." },
+      { q: "Target compensation?", a: "$125–130k base, open on bonus.", note: "Priced · mid of band." },
+    ],
+    ro: { text: "Steady IIa→IIb progression: coordinator → CDM owning study-level integrity. Biggest accomplishment is query-system rewrite that reduced site rework.", source: "From RO assessment · solid" },
+    assessment: {
+      verdict: "Interview",
+      why: "Application care is real; answers are owned, not brand-name hiding. Ask is priced and in band.",
+      caveat: "Confirm oncology depth vs general CDM in screen.",
+      next: "30-min screen on query ops + amendment handling.",
+    },
+  },
+  {
+    id: "c2", name: "Jordan Blake", role: "Sr. CDM", company: "PPD",
+    stage: "applied", decision: "reject",
+    why: "Material integrity: LinkedIn tenure conflicts with résumé by 18 months.",
+    flags: ["integrity"], salary: "$145k", location: "Remote — Austin, TX",
+    value: "Weak — integrity gate",
+    resume: "JORDAN BLAKE\n…", cover: "…", answers: [{ q: "Integrity example", a: "I always prioritize quality.", note: "SURFACE" }],
+    ro: null,
+    assessment: { verdict: "Reject", why: "Integrity discrepancy is a hard gate.", caveat: "—", next: "Disqualify with reason: evidence conflict." },
+  },
+  {
+    id: "c3", name: "Sam Ortiz", role: "Data Manager", company: "Labcorp",
+    stage: "applied", decision: "reject",
+    why: "Refused screening — half the answers are dashes.",
+    flags: ["refuse"], salary: "—", location: "Phoenix, AZ",
+    value: "No read",
+    resume: "SAM ORTIZ\n…", cover: "", answers: [{ q: "Integrity example", a: "—", note: "REFUSED" }],
+    ro: null,
+    assessment: { verdict: "Reject", why: "Application-care failure.", caveat: "—", next: "DQ — refused to answer." },
+  },
+  {
+    id: "c4", name: "Priya Nair", role: "CDM", company: "Moderna",
+    stage: "applied", decision: "backup",
+    why: "Competent CDM; salary unstated and mid-pack vs shortlist.",
+    flags: [], salary: "Open", location: "Boston, MA",
+    value: "Fair — unpriced",
+    resume: "PRIYA NAIR\n…", cover: "Excited to join…", answers: [{ q: "Integrity example", a: "At Moderna I owned reconciliation for a vaccine study…", note: "OWNED" }],
+    ro: { text: "Solid IIa operator. Less evidence of redesigning the system others work in.", source: "From RO assessment · solid" },
+    assessment: { verdict: "Backup", why: "Good operator; not first call vs Maya.", caveat: "Get a number before scheduling.", next: "Hold until shortlist thins." },
+  },
+  {
+    id: "c5", name: "Alex Kim", role: "CDM Lead", company: "Icon",
+    stage: "applied", decision: "blocked",
+    why: "No résumé on file in Workable yet.",
+    flags: ["blocked"], salary: "—", location: "—",
+    value: "No read",
+    resume: "", cover: "", answers: [],
+    ro: null,
+    assessment: { verdict: "Review blocked", why: "Waiting on résumé sync.", caveat: "—", next: "Resync from Workable." },
+  },
+  {
+    id: "c6", name: "Elena Voss", role: "Principal CDM", company: "Amgen",
+    stage: "phone", decision: "interview",
+    why: "Screen booked — confirm RO headroom vs seat.",
+    flags: [], salary: "$138k", location: "Thousand Oaks, CA",
+    value: "Strong for ask",
+    resume: "ELENA VOSS\nPrincipal CDM · Amgen\n…", cover: "…",
+    answers: [{ q: "Integrity example", a: "Led CAPA after an audit finding…", note: "OWNED" }],
+    ro: { text: "IIb–III signals on CAPA ownership; seat may be slightly below current level — discuss motivation.", source: "From RO assessment · solid" },
+    assessment: { verdict: "Interview", why: "Strong; screen for level fit and commute/onsite.", caveat: "May be overqualified.", next: "Phone screen Thursday." },
+  },
+  {
+    id: "c7", name: "Chris Adeyemi", role: "CDM", company: "Pfizer",
+    stage: "interview", decision: "interview",
+    why: "On-site loop next week. Transcript from Lara screen attached.",
+    flags: [], salary: "$132k", location: "New York, NY",
+    value: "Strong",
+    resume: "CHRIS ADEYEMI\n…", cover: "…",
+    answers: [{ q: "Integrity example", a: "…", note: "OWNED" }],
+    ro: { text: "Clear IIb. Good complement profile.", source: "From RO assessment · solid" },
+    assessment: { verdict: "Interview", why: "Lara screen was strong on humility + specifics.", caveat: "Relo to Van Nuys needs a plan.", next: "On-site; pressure-test relo." },
+    transcript: "Lara: Walk me through a query you refused to close.\nChris: We had a site pushing an out-of-window visit… I kept it open, escalated with the evidence pack…",
+  },
+  {
+    id: "c8", name: "Riley Quinn", role: "Data Coord.", company: "Temp agency",
+    stage: "disqualified", decision: "reject",
+    why: "DQ'd — majority AI-generated answers.",
+    flags: ["ai"], salary: "$95k", location: "Remote",
+    value: "Weak",
+    resume: "…", cover: "…", answers: [],
+    ro: null,
+    assessment: { verdict: "Reject", why: "AI-generated application answers.", caveat: "—", next: "—" },
+  },
+];
+
+let candidates = structuredClone(seed);
+let mode = "triage";
+let selected = new Set();
+let triageFilter = "all";
+let focusId = null;
+let deepTab = "resume";
+let lastView = "triage";
+
+function initials(name) {
+  return name.split(/\s+/).slice(0,2).map(p => p[0]).join("").toUpperCase();
+}
+function avColor(id) {
+  const n = Number(id.replace(/\D/g,"")) || 1;
+  return AV_COLORS[n % AV_COLORS.length];
+}
+function stageLabel(id) {
+  return STAGES.find(s => s.id === id)?.label ?? id;
+}
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => el.classList.remove("show"), 2200);
+}
+
+function setMode(next, { skipFocus } = {}) {
+  mode = next;
+  document.querySelectorAll(".mode").forEach(b => {
+    b.classList.toggle("active", b.dataset.mode === next);
+  });
+  document.getElementById("view-triage").hidden = next !== "triage";
+  document.getElementById("view-pipeline").hidden = next !== "pipeline";
+  document.getElementById("view-deep").hidden = next !== "deep";
+  const deepBtn = document.getElementById("deepModeBtn");
+  deepBtn.disabled = !focusId;
+  const hints = {
+    triage: "Inbox of new applicants. Confirm AI cuts — Workable stage stays Applied until you move them.",
+    pipeline: "Kanban = Workable stages. Drag to move. Decision badge is app-only.",
+    deep: "Evidence desk. Stage changes write to Workable; notes re-grade the assessment.",
+  };
+  document.getElementById("modeHint").textContent = hints[next];
+  if (next === "triage") renderTriage();
+  if (next === "pipeline") renderBoard();
+  if (next === "deep") renderDeep();
+  if (!skipFocus && next !== "deep") lastView = next;
+}
+
+function openDeep(id) {
+  focusId = id;
+  deepTab = "resume";
+  document.getElementById("deepModeBtn").disabled = false;
+  setMode("deep");
+}
+
+function triageCandidates() {
+  const q = document.getElementById("triageSearch").value.trim().toLowerCase();
+  return candidates.filter(c => {
+    if (c.stage !== "applied" && c.stage !== "disqualified") return false;
+    if (c.stage === "disqualified") return false; // inbox only
+    if (triageFilter !== "all" && c.decision !== triageFilter) return false;
+    if (q && !(`${c.name} ${c.company} ${c.why}`.toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+function renderTriage() {
+  const rows = triageCandidates();
+  document.getElementById("triageCount").textContent = `${rows.length} in inbox`;
+  const body = document.getElementById("triageBody");
+  body.innerHTML = rows.map(c => {
+    const flags = c.flags.map(f => {
+      const label = f === "refuse" ? "Refused answers" : f === "integrity" ? "Integrity" : f === "ai" ? "AI answers" : "Blocked";
+      return `<span class="flag ${f}">${label}</span>`;
+    }).join(" ") || "—";
+    return `<tr data-id="${c.id}" class="${selected.has(c.id) ? "selected" : ""}">
+      <td><input type="checkbox" class="row-check" data-id="${c.id}" ${selected.has(c.id) ? "checked" : ""} /></td>
+      <td>
+        <div class="cand">
+          <div class="av" style="background:${avColor(c.id)}">${initials(c.name)}</div>
+          <div>
+            <div class="cand-name">${c.name}</div>
+            <div class="cand-sub">${c.role} · ${c.company}</div>
+          </div>
+        </div>
+      </td>
+      <td>
+        <select class="decision ${c.decision}" data-act="decision" data-id="${c.id}">
+          <option value="interview" ${c.decision==="interview"?"selected":""}>Interview</option>
+          <option value="backup" ${c.decision==="backup"?"selected":""}>Backup</option>
+          <option value="reject" ${c.decision==="reject"?"selected":""}>Reject</option>
+          <option value="blocked" ${c.decision==="blocked"?"selected":""}>Blocked</option>
+        </select>
+      </td>
+      <td><div class="why">${c.why}</div></td>
+      <td>${flags}</td>
+      <td><span class="cand-sub">${stageLabel(c.stage)}</span></td>
+      <td>
+        <div class="row-actions">
+          <button class="btn" data-act="open" data-id="${c.id}">Open</button>
+          ${c.decision === "interview" ? `<button class="btn primary" data-act="to-phone" data-id="${c.id}">Send to screen</button>` : ""}
+          <button class="btn danger" data-act="dq" data-id="${c.id}">DQ</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join("") || `<tr><td colspan="7"><div class="empty">Inbox clear — switch to Pipeline for pending calls.</div></td></tr>`;
+
+  const bulk = document.getElementById("bulkBar");
+  bulk.classList.toggle("show", selected.size > 0);
+  document.getElementById("bulkCount").textContent = `${selected.size} selected`;
+}
+
+function renderBoard() {
+  const q = document.getElementById("pipeSearch").value.trim().toLowerCase();
+  const board = document.getElementById("board");
+  let total = 0;
+  board.innerHTML = STAGES.map(stage => {
+    const cards = candidates.filter(c => {
+      if (c.stage !== stage.id) return false;
+      if (q && !(`${c.name} ${c.company} ${c.why}`.toLowerCase().includes(q))) return false;
+      return true;
+    });
+    total += cards.length;
+    return `<div class="col ${stage.dq ? "dq" : ""}" data-stage="${stage.id}">
+      <div class="col-h">
+        <div class="col-title">${stage.label}</div>
+        <div class="col-count">${cards.length}</div>
+      </div>
+      <div class="col-sub">${stage.hint}</div>
+      <div class="col-body" data-stage="${stage.id}">
+        ${cards.map(c => `
+          <article class="card" draggable="true" data-id="${c.id}">
+            <div class="card-top">
+              <div class="av" style="background:${avColor(c.id)}">${initials(c.name)}</div>
+              <div>
+                <div class="card-name">${c.name}</div>
+                <div class="card-meta">${c.role} · ${c.company}</div>
+              </div>
+            </div>
+            <div class="card-why">${c.why}</div>
+            <div class="card-foot">
+              <span class="badge ${c.decision}">${c.decision}</span>
+              ${c.flags.includes("refuse") ? `<span class="flag refuse">Refused</span>` : ""}
+              ${c.flags.includes("integrity") ? `<span class="flag integrity">Integrity</span>` : ""}
+              <button class="card-open" data-act="open" data-id="${c.id}">Open</button>
+            </div>
+          </article>
+        `).join("") || `<div class="empty">No candidates</div>`}
+      </div>
+    </div>`;
+  }).join("");
+  document.getElementById("pipeCount").textContent = `${total} in pipeline`;
+  wireDrag();
+}
+
+function wireDrag() {
+  let dragId = null;
+  document.querySelectorAll(".card").forEach(card => {
+    card.addEventListener("dragstart", () => {
+      dragId = card.dataset.id;
+      card.classList.add("dragging");
+    });
+    card.addEventListener("dragend", () => card.classList.remove("dragging"));
+  });
+  document.querySelectorAll(".col-body").forEach(col => {
+    col.addEventListener("dragover", e => {
+      e.preventDefault();
+      col.parentElement.classList.add("drag-over");
+    });
+    col.addEventListener("dragleave", () => col.parentElement.classList.remove("drag-over"));
+    col.addEventListener("drop", e => {
+      e.preventDefault();
+      col.parentElement.classList.remove("drag-over");
+      if (!dragId) return;
+      moveToStage(dragId, col.dataset.stage);
+      dragId = null;
+    });
+  });
+}
+
+function moveToStage(id, stage) {
+  const c = candidates.find(x => x.id === id);
+  if (!c || c.stage === stage) return;
+  const from = c.stage;
+  c.stage = stage;
+  if (stage === "disqualified") c.decision = "reject";
+  if (stage === "phone" || stage === "interview") {
+    if (c.decision === "reject" || c.decision === "blocked") c.decision = "interview";
+  }
+  toast(`Workable move: ${c.name} · ${stageLabel(from)} → ${stageLabel(stage)}`);
+  if (mode === "pipeline") renderBoard();
+  if (mode === "triage") renderTriage();
+  if (mode === "deep" && focusId === id) renderDeep();
+}
+
+function setDecision(id, decision) {
+  const c = candidates.find(x => x.id === id);
+  if (!c) return;
+  c.decision = decision;
+  toast(`Decision saved (app only) — Workable stage unchanged`);
+  renderTriage();
+}
+
+function disqualify(id) {
+  moveToStage(id, "disqualified");
+}
+
+function renderDeep() {
+  const c = candidates.find(x => x.id === focusId);
+  const root = document.getElementById("deepRoot");
+  if (!c) {
+    root.innerHTML = `<div class="empty">Select a candidate</div>`;
+    return;
+  }
+  const tabBody = (() => {
+    if (deepTab === "resume") {
+      return c.resume
+        ? `<div class="doc">${escapeHtml(c.resume)}</div>`
+        : `<div class="empty">No résumé — resync from Workable</div>`;
+    }
+    if (deepTab === "answers") {
+      if (!c.answers?.length) return `<div class="empty">No screening answers</div>`;
+      return c.answers.map(a => `
+        <div class="qa">
+          <div class="q">${escapeHtml(a.q)}</div>
+          <div class="a">${escapeHtml(a.a)}</div>
+          <div class="note">${escapeHtml(a.note || "")}</div>
+        </div>`).join("");
+    }
+    return c.cover
+      ? `<div class="doc">${escapeHtml(c.cover)}</div>`
+      : `<div class="empty">No cover letter</div>`;
+  })();
+
+  root.innerHTML = `
+    <div class="deep-left">
+      <div class="deep-head">
+        <div class="av" style="width:40px;height:40px;background:${avColor(c.id)};font-size:13px">${initials(c.name)}</div>
+        <div>
+          <h1>${escapeHtml(c.name)}</h1>
+          <div class="meta">${escapeHtml(c.role)} · ${escapeHtml(c.company)} · ${escapeHtml(c.location)} · ${escapeHtml(c.salary)}</div>
+          <div class="meta" style="margin-top:4px">Workable stage: <strong>${stageLabel(c.stage)}</strong> · AI call: <strong>${c.decision}</strong></div>
+        </div>
+        <div class="deep-actions">
+          <button class="btn primary" data-act="agree">Agree</button>
+          <select class="decision ${c.decision}" id="deepDecision">
+            <option value="interview" ${c.decision==="interview"?"selected":""}>Interview</option>
+            <option value="backup" ${c.decision==="backup"?"selected":""}>Backup</option>
+            <option value="reject" ${c.decision==="reject"?"selected":""}>Reject</option>
+            <option value="blocked" ${c.decision==="blocked"?"selected":""}>Blocked</option>
+          </select>
+        </div>
+      </div>
+      <div class="call-card">
+        <div class="kicker">Standing assessment</div>
+        <div class="verdict">${escapeHtml(c.assessment.verdict)}</div>
+        <p>${escapeHtml(c.assessment.why)}</p>
+        <div class="call-grid">
+          <div><div class="l">Caveat</div><div class="v">${escapeHtml(c.assessment.caveat)}</div></div>
+          <div><div class="l">Next</div><div class="v">${escapeHtml(c.assessment.next)}</div></div>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab ${deepTab==="resume"?"active":""}" data-tab="resume">Résumé</button>
+        <button class="tab ${deepTab==="answers"?"active":""}" data-tab="answers">Answers</button>
+        <button class="tab ${deepTab==="cover"?"active":""}" data-tab="cover">Cover letter</button>
+      </div>
+      <div class="tab-body">${tabBody}</div>
+      ${c.ro ? `<div class="ro"><h3>RO analysis</h3><p>${escapeHtml(c.ro.text)}</p><div class="src">${escapeHtml(c.ro.source)}</div></div>` : ""}
+    </div>
+    <div class="deep-right">
+      <div class="deep-head">
+        <div>
+          <h1 style="font-size:16px">Human input</h1>
+          <div class="meta">Notes & transcripts re-grade the assessment. Chat/MCP is counsel only.</div>
+        </div>
+      </div>
+      <div class="tab-body">
+        ${c.transcript ? `<div class="qa"><div class="q">Existing transcript</div><div class="a" style="white-space:pre-wrap">${escapeHtml(c.transcript)}</div></div>` : `<div class="empty" style="padding:12px 0">No transcript yet</div>`}
+      </div>
+      <div class="composer">
+        <label>Add interview transcript or note</label>
+        <textarea id="noteInput" placeholder="Paste Fireflies / screen notes…"></textarea>
+        <div class="composer-row">
+          <button class="btn primary" id="updateAssessment">Save & update assessment</button>
+          <button class="btn" id="askCounsel">Ask counsel (MCP)</button>
+        </div>
+      </div>
+    </div>
+  `;
+
+  root.querySelectorAll("[data-tab]").forEach(btn => {
+    btn.addEventListener("click", () => { deepTab = btn.dataset.tab; renderDeep(); });
+  });
+  document.getElementById("deepDecision").addEventListener("change", e => {
+    setDecision(c.id, e.target.value);
+    renderDeep();
+  });
+  root.querySelector('[data-act="agree"]').addEventListener("click", () => toast("Agreed — decision kept"));
+  document.getElementById("updateAssessment").addEventListener("click", () => {
+    const note = document.getElementById("noteInput").value.trim();
+    if (note) {
+      c.transcript = (c.transcript ? c.transcript + "\n\n" : "") + note;
+      c.assessment.why = "Updated with human transcript/note. " + c.assessment.why;
+      c.assessment.next = "Re-read complete — confirm next step.";
+    }
+    toast("Assessment updated from human input");
+    renderDeep();
+  });
+  document.getElementById("askCounsel").addEventListener("click", () => {
+    toast("Opens MCP / chat with this candidate + pool context (mock)");
+  });
+}
+
+function escapeHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g, ch => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  })[ch]);
+}
+
+function advanceFocus() {
+  const c = candidates.find(x => x.id === focusId);
+  if (!c) return;
+  const order = ["applied","phone","interview","offer","hired"];
+  const i = order.indexOf(c.stage);
+  if (i < 0 || i === order.length - 1) {
+    toast("Already at end of pipeline (or DQ’d)");
+    return;
+  }
+  moveToStage(c.id, order[i + 1]);
+}
+
+// events
+document.querySelectorAll(".mode").forEach(btn => {
+  btn.addEventListener("click", () => {
+    if (btn.disabled) return;
+    setMode(btn.dataset.mode);
+  });
+});
+document.querySelectorAll("[data-filter]").forEach(btn => {
+  btn.addEventListener("click", () => {
+    triageFilter = btn.dataset.filter;
+    document.querySelectorAll("[data-filter]").forEach(b => b.classList.toggle("on", b === btn));
+    selected.clear();
+    renderTriage();
+  });
+});
+document.getElementById("triageSearch").addEventListener("input", renderTriage);
+document.getElementById("pipeSearch").addEventListener("input", renderBoard);
+document.getElementById("triageBody").addEventListener("click", e => {
+  const t = e.target.closest("[data-act]");
+  if (!t) return;
+  const id = t.dataset.id;
+  if (t.dataset.act === "open") openDeep(id);
+  if (t.dataset.act === "dq") disqualify(id);
+  if (t.dataset.act === "to-phone") {
+    moveToStage(id, "phone");
+    setMode("pipeline");
+  }
+});
+document.getElementById("triageBody").addEventListener("change", e => {
+  const t = e.target;
+  if (t.classList.contains("row-check")) {
+    if (t.checked) selected.add(t.dataset.id); else selected.delete(t.dataset.id);
+    renderTriage();
+  }
+  if (t.dataset.act === "decision") setDecision(t.dataset.id, t.value);
+});
+document.getElementById("selectAll").addEventListener("change", e => {
+  const rows = triageCandidates();
+  if (e.target.checked) rows.forEach(c => selected.add(c.id));
+  else selected.clear();
+  renderTriage();
+});
+document.getElementById("bulkClear").addEventListener("click", () => { selected.clear(); renderTriage(); });
+document.getElementById("bulkDq").addEventListener("click", () => {
+  [...selected].forEach(disqualify);
+  selected.clear();
+  toast("Bulk disqualify → Workable");
+  renderTriage();
+});
+document.getElementById("board").addEventListener("click", e => {
+  const t = e.target.closest("[data-act=open]");
+  if (t) openDeep(t.dataset.id);
+});
+document.getElementById("backBtn").addEventListener("click", () => setMode(lastView || "pipeline"));
+document.getElementById("advanceBtn").addEventListener("click", advanceFocus);
+document.getElementById("deepDqBtn").addEventListener("click", () => { if (focusId) disqualify(focusId); });
+
+setMode("triage");
+</script>
+</body>
+</html>
