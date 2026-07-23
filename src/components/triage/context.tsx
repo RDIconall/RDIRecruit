@@ -3,6 +3,7 @@
 import { createContext, useContext } from "react";
 import type { Candidate, JobOption, PoolMeta } from "@/lib/triage/types";
 import type { Viewer } from "@/lib/triage/reviewer";
+import type { StageColumn } from "@/lib/triage/stages";
 
 export interface TriageData {
   candidates: Candidate[];
@@ -14,6 +15,8 @@ export interface TriageData {
   rubricMd: string;
   /** The active job's role spec / description (markdown). */
   specMd: string;
+  /** Workable pipeline stages for the kanban. */
+  stages: StageColumn[];
   findCandidate: (id: string) => Candidate | undefined;
 }
 

@@ -9,6 +9,7 @@ import {
   clearCandidateChat,
   compareToRubric,
   logActivity as logActivityAction,
+  moveCandidateToStage,
   reanalyze as reanalyzeAction,
   resyncCandidate,
   runDeepAnalysis,
@@ -43,6 +44,8 @@ export interface WorkspaceApi {
   setDecision: (id: string, decision: Decision) => void;
   /** Set (or clear, with null) a candidate's post-decision process status (optimistic). */
   setProcessStatus: (id: string, status: ProcessStatus | null) => void;
+  /** Move candidate to a Workable stage (optimistic local stage + SPI write). */
+  moveStage: (id: string, targetStage: string) => void;
   /** Re-run Claude on current materials with the per-role rubric (clears manual override). */
   reanalyze: (id: string) => void;
   compareRubric: (id: string) => void;
@@ -73,6 +76,10 @@ export function useWorkspace(
   initial: Workspace,
   candidates: Candidate[],
   onRead: (id: string, read: DecisionRead) => void,
+  opts?: {
+    jobShortcode?: string;
+    onStageChange?: (id: string, stage: string) => void;
+  },
 ): WorkspaceApi {
   const router = useRouter();
   const [ws, setWs] = useState<Workspace>(initial);
@@ -193,6 +200,38 @@ export function useWorkspace(
       })
       .catch(() => setNotice("Process status change failed — please retry."));
   }, []);
+
+  const moveStage = useCallback(
+    (id: string, targetStage: string) => {
+      const jobShortcode = opts?.jobShortcode;
+      if (!jobShortcode) {
+        setNotice("No job context — cannot move stage.");
+        return;
+      }
+      opts?.onStageChange?.(id, targetStage);
+      setBusyFor(id, true);
+      void moveCandidateToStage({ jobShortcode, candidateId: id, targetStage })
+        .then((res) => {
+          if (!res.ok) {
+            setNotice(res.error || "Workable move failed — please retry.");
+            router.refresh();
+            return;
+          }
+          if (res.workable === "skipped") {
+            setNotice("Stage updated locally — Workable write skipped (check WORKABLE_MEMBER_ID).");
+          } else {
+            setNotice(`Moved to ${targetStage} in Workable.`);
+          }
+          router.refresh();
+        })
+        .catch(() => {
+          setNotice("Workable move failed — please retry.");
+          router.refresh();
+        })
+        .finally(() => setBusyFor(id, false));
+    },
+    [opts, router, setBusyFor],
+  );
 
   const reanalyze = useCallback(
     (id: string) => {
@@ -397,6 +436,7 @@ export function useWorkspace(
     runDeep,
     setDecision,
     setProcessStatus,
+    moveStage,
     reanalyze,
     compareRubric,
     resync,

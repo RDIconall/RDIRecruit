@@ -1,5 +1,5 @@
 import "server-only";
-import { hasSupabase } from "../env";
+import { hasSupabase, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { getBoardFromSupabase } from "../data/board-queries";
 import { getPublishedJobs, getJobByShortcode } from "../jobs/service";
@@ -23,6 +23,7 @@ import { assignPoolStanding } from "./ranking";
 import { computeReadiness, type GradingInputs } from "./readiness";
 import { getMethodDoc } from "../evaluation/method";
 import type { Decision } from "./types";
+import { buildStageColumns, FALLBACK_STAGES, type StageColumn } from "./stages";
 
 export const DEFAULT_JOB_SHORTCODE = "379AA16E8F"; // Clinical Data Manager — Data Integrity & Investigation
 
@@ -36,6 +37,8 @@ export interface TriagePool {
   rubricMd: string;
   /** The job's role spec / description (markdown) — seeded from Workable when empty. */
   specMd: string;
+  /** Workable pipeline stages for this job (kanban columns). */
+  stages: StageColumn[];
 }
 
 function emptyWorkspace(): Workspace {
@@ -49,11 +52,25 @@ function toActivityEntry(r: ActivityRow): ActivityEntry {
   return { id: r.id, type, author: r.author || "—", body: r.body, at: r.created_at };
 }
 
+async function loadJobStages(jobShortcode: string): Promise<StageColumn[]> {
+  if (!hasWorkable()) return FALLBACK_STAGES;
+  try {
+    const { listStages } = await import("../workable/client");
+    const stages = await listStages(jobShortcode);
+    if (!stages?.length) return FALLBACK_STAGES;
+    return buildStageColumns(stages);
+  } catch (error) {
+    console.warn(`Failed to load Workable stages for ${jobShortcode}`, error);
+    return FALLBACK_STAGES;
+  }
+}
+
 function emptyPool(
   jobShortcode: string,
   jobs: JobOption[],
   title: string,
   rubric: { rubricMd: string; specMd: string } = { rubricMd: "", specMd: "" },
+  stages: StageColumn[] = FALLBACK_STAGES,
 ): TriagePool {
   return {
     candidates: [],
@@ -62,6 +79,7 @@ function emptyPool(
     configured: hasSupabase(),
     rubricMd: rubric.rubricMd,
     specMd: rubric.specMd,
+    stages,
     meta: {
       title,
       jobShortcode,
@@ -339,12 +357,16 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const jobs: JobOption[] = jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title }));
   const jobMeta = await getJobByShortcode(jobShortcode);
   const title = jobMeta?.title ?? jobShortcode;
-  const [rubric, methodology] = await Promise.all([getJobRubric(jobShortcode), getMethodDoc()]);
+  const [rubric, methodology, stages] = await Promise.all([
+    getJobRubric(jobShortcode),
+    getMethodDoc(),
+    loadJobStages(jobShortcode),
+  ]);
 
-  if (!hasSupabase()) return emptyPool(jobShortcode, jobs, title, rubric);
+  if (!hasSupabase()) return emptyPool(jobShortcode, jobs, title, rubric, stages);
 
   const board = await getBoardFromSupabase(jobShortcode);
-  if (!board?.length) return emptyPool(jobShortcode, jobs, title, rubric);
+  if (!board?.length) return emptyPool(jobShortcode, jobs, title, rubric, stages);
 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
@@ -461,6 +483,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     configured: true,
     rubricMd: rubric.rubricMd,
     specMd: rubric.specMd,
+    stages,
     meta: deriveMeta(candidates, jobShortcode, title),
   };
 }

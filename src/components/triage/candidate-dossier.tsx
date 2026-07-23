@@ -1,14 +1,15 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useState } from "react";
-import { APP, DECISION_LABEL, PROCESS_STATUS_LABEL, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
+import { APP, DECISION_LABEL, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
-import type { ActivityEntry, ActivityType, Candidate, Decision, ProcessStatus, VerdictRead } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
 import { getWorkingFileContent } from "@/app/actions/triage";
-import { Avatar, ProcessSelect, WorkableStageChip } from "./pool-shared";
+import { Avatar, WorkableStageChip } from "./pool-shared";
+import { nextStageSlug, type StageColumn } from "@/lib/triage/stages";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
@@ -25,6 +26,7 @@ interface Props {
   wsApi: WorkspaceApi;
   activeId: string;
   openPool: () => void;
+  stages: StageColumn[];
 }
 
 // ---------- small derivations (all from cached data — never Claude on render) ----------
@@ -185,7 +187,7 @@ function buildRecord(c: Candidate): RecordRow[] {
 
 // ---------------------------------- component ----------------------------------
 
-export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
+export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   const { findCandidate } = useTriageData();
   const ws = wsApi.ws;
   const id = activeId;
@@ -238,14 +240,12 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   const decisionLabel = DECISION_LABEL[c.decision];
   const decisionC = decisionColor(c.decision);
   const isDq = !!ws.dq[id];
-  // ws.process is hydrated at load and is the single source of truth for the
-  // process status (so an optimistic "clear" reflects immediately).
-  const processStatus: ProcessStatus | null = ws.process[id] ?? null;
   const activity = ws.activity[id] ?? [];
   const chat = ws.chat[id] ?? [];
   const chatThinking = !!wsApi.chatBusy[id];
   const busy = !!wsApi.busy[id];
   const regenAt = ws.regen[id];
+  const advanceSlug = nextStageSlug(c.workableStage, stages);
 
   const steps = c.careerProgression?.steps ?? [];
   const record = useMemo(() => buildRecord(c), [c]);
@@ -342,9 +342,6 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
   if (isAdvancedStage(c.workableStage)) {
     facts.push({ k: "Workable stage", v: workableStageLabel(c.workableStage) });
   }
-  if (processStatus) {
-    facts.push({ k: "Process", v: PROCESS_STATUS_LABEL[processStatus] });
-  }
 
   const standing = standingLabel(c.standing);
   if (standing) facts.push({ k: "Pool standing", v: standing });
@@ -388,14 +385,14 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
       {/* top row */}
       <div style={{ display: "flex", alignItems: "center", gap: 16, rowGap: 10, marginBottom: 22, flexWrap: "wrap" }}>
         <button onClick={openPool} style={mono({ cursor: "pointer", background: "transparent", border: "none", padding: 0, fontSize: 13, color: APP.secondary })}>
-          ← Pool
+          ← Back
         </button>
         <a href={c.workableUrl} target="_blank" rel="noopener noreferrer" style={mono({ fontSize: 13, color: APP.accent, textDecoration: "none" })}>
           Open in Workable ↗
         </a>
         <span style={{ flex: 1 }} />
         <label style={mono({ fontSize: 11, color: APP.faint, textTransform: "uppercase", letterSpacing: "0.04em" })}>
-          Status
+          AI call
         </label>
         <select
           value={c.decision}
@@ -407,10 +404,24 @@ export function CandidateDossier({ wsApi, activeId, openPool }: Props) {
             <option key={d} value={d}>{DECISION_LABEL[d]}</option>
           ))}
         </select>
-        <label style={mono({ fontSize: 11, color: APP.faint, textTransform: "uppercase", letterSpacing: "0.04em" })}>
-          Process
-        </label>
-        <ProcessSelect value={processStatus} onChange={(s) => wsApi.setProcessStatus(id, s)} />
+        {advanceSlug && (
+          <button
+            onClick={() => wsApi.moveStage(id, advanceSlug)}
+            disabled={busy}
+            style={{
+              cursor: busy ? "wait" : "pointer",
+              background: APP.accent,
+              color: "#fff",
+              border: `1px solid ${APP.accent}`,
+              borderRadius: 5,
+              padding: "5px 12px",
+              fontSize: 12.5,
+              fontWeight: 600,
+            }}
+          >
+            Advance in Workable
+          </button>
+        )}
         <button
           onClick={() => wsApi.toggleDq(id)}
           style={{

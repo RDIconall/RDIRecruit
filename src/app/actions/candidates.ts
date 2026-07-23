@@ -74,6 +74,7 @@ export async function advanceCandidate(input: {
   }
 
   revalidatePath("/board");
+  revalidatePath("/");
   revalidatePath(`/candidates/${input.candidateId}`);
   return { ok: true, stage: nextStage };
 }

@@ -812,3 +812,45 @@ export async function getWorkingFileContent(input: { candidateId: string }): Pro
   });
   return { content };
 }
+
+/**
+ * Move a candidate to a Workable pipeline stage (kanban drag / Send to screen /
+ * Advance). Mirrors the updated candidate back into Supabase and revalidates `/`.
+ */
+export async function moveCandidateToStage(input: {
+  jobShortcode: string;
+  candidateId: string;
+  targetStage: string;
+}): Promise<{ ok: boolean; stage?: string; error?: string; workable?: "moved" | "skipped" | "failed" }> {
+  await requireAuth();
+  const target = input.targetStage?.trim();
+  if (!target) return { ok: false, error: "No target stage" };
+  if (target === "disqualified") {
+    return { ok: false, error: "Use Disqualify for Workable disposition" };
+  }
+  if (!hasWorkable()) return { ok: false, error: "Workable not configured", workable: "skipped" };
+
+  try {
+    const { enqueueWorkableWrite } = await import("@/lib/workable/write-queue");
+    const { moveCandidateStage, addCandidateNote, getCandidate } = await import("@/lib/workable/client");
+    let skipped = false;
+    await enqueueWorkableWrite(async () => {
+      const result = await moveCandidateStage(input.candidateId, target);
+      if (result && typeof result === "object" && "skipped" in result && result.skipped) {
+        skipped = true;
+        return;
+      }
+      await addCandidateNote(input.candidateId, `Moved to ${target} via RDIRecruit`);
+      if (hasSupabase()) {
+        const updated = await getCandidate(input.jobShortcode, input.candidateId);
+        const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
+        await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
+      }
+    });
+    revalidatePath("/");
+    return { ok: true, stage: target, workable: skipped ? "skipped" : "moved" };
+  } catch (error) {
+    console.error(`Workable move failed for ${input.candidateId} → ${target}`, error);
+    return { ok: false, error: "Workable move failed", workable: "failed" };
+  }
+}
