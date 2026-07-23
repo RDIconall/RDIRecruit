@@ -74,40 +74,7 @@ export async function fetchBoardExtras(
   return map;
 }
 
-export async function getBoardFromSupabase(jobShortcode: string): Promise<BoardCandidate[] | null> {
-  if (!hasSupabase()) return null;
-
-  const supabase = getServiceSupabase();
-  const { data: candidates } = await supabase
-    .from("candidates")
-    .select("*")
-    .eq("job_shortcode", jobShortcode);
-
-  if (!candidates?.length) return null;
-
-  const ids = candidates.map((c) => c.workable_id as string);
-  const [scoreMap, overlayMap, extrasMap] = await Promise.all([
-    fetchScoresForCandidates(ids),
-    fetchOverlays(ids),
-    fetchBoardExtras(ids),
-  ]);
-
-  const board = (candidates as CandidateRow[]).map((candidate) => {
-    const overlay = overlayMap.get(candidate.workable_id) ?? null;
-    const extras = extrasMap.get(candidate.workable_id);
-    const ro = scoreMap.get(candidate.workable_id)?.ro ?? null;
-    return {
-      candidate,
-      score: scoreMap.get(candidate.workable_id)?.score ?? null,
-      ro,
-      overlay,
-      why: extras?.why ?? null,
-      ask: extras?.ask ?? null,
-      sources: ro?.per_role?.length ?? 0,
-      assignee: overlay?.updated_by ?? null,
-    };
-  });
-
+function sortBoard(board: BoardCandidate[]): BoardCandidate[] {
   return board.sort((a, b) => {
     const aActive = !(
       a.overlay?.status === "disqualified" ||
@@ -122,6 +89,60 @@ export async function getBoardFromSupabase(jobShortcode: string): Promise<BoardC
     if (aActive !== bActive) return aActive ? -1 : 1;
     return (b.score?.total ?? -1) - (a.score?.total ?? -1);
   });
+}
+
+async function hydrateBoard(candidates: CandidateRow[]): Promise<BoardCandidate[]> {
+  const ids = candidates.map((c) => c.workable_id as string);
+  const [scoreMap, overlayMap, extrasMap] = await Promise.all([
+    fetchScoresForCandidates(ids),
+    fetchOverlays(ids),
+    fetchBoardExtras(ids),
+  ]);
+
+  return candidates.map((candidate) => {
+    const overlay = overlayMap.get(candidate.workable_id) ?? null;
+    const extras = extrasMap.get(candidate.workable_id);
+    const ro = scoreMap.get(candidate.workable_id)?.ro ?? null;
+    return {
+      candidate,
+      score: scoreMap.get(candidate.workable_id)?.score ?? null,
+      ro,
+      overlay,
+      why: extras?.why ?? null,
+      ask: extras?.ask ?? null,
+      sources: ro?.per_role?.length ?? 0,
+      assignee: overlay?.updated_by ?? null,
+    };
+  });
+}
+
+export async function getBoardFromSupabase(jobShortcode: string): Promise<BoardCandidate[] | null> {
+  if (!hasSupabase()) return null;
+
+  const supabase = getServiceSupabase();
+  const { data: candidates } = await supabase
+    .from("candidates")
+    .select("*")
+    .eq("job_shortcode", jobShortcode);
+
+  if (!candidates?.length) return null;
+  return sortBoard(await hydrateBoard(candidates as CandidateRow[]));
+}
+
+/** Same hydrate as single-job board, but across many published job shortcodes. */
+export async function getBoardFromSupabaseForJobs(
+  jobShortcodes: string[],
+): Promise<BoardCandidate[] | null> {
+  if (!hasSupabase() || !jobShortcodes.length) return null;
+
+  const supabase = getServiceSupabase();
+  const { data: candidates } = await supabase
+    .from("candidates")
+    .select("*")
+    .in("job_shortcode", jobShortcodes);
+
+  if (!candidates?.length) return null;
+  return sortBoard(await hydrateBoard(candidates as CandidateRow[]));
 }
 
 export async function getPoolStatsForJob(jobShortcode: string) {

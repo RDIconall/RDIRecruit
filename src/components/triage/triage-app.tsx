@@ -100,9 +100,10 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
   const active = findCandidate(activeId);
   const isDeep = mode === "deep" && !!active;
 
+  const crossRole = !!pool.crossRole;
   const modes: { id: Mode; label: string; disabled?: boolean }[] = [
-    { id: "triage", label: "Triage" },
-    { id: "pipeline", label: "Pipeline" },
+    { id: "triage", label: crossRole ? "Across roles" : "Triage" },
+    { id: "pipeline", label: "Pipeline", disabled: crossRole },
     { id: "deep", label: "Deep dive", disabled: !activeId },
   ];
 
@@ -212,14 +213,18 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             </div>
           )}
           <div style={{ flex: 1 }} />
-          <a
-            href={pool.meta.jobUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ fontSize: 13, color: APP.accent, textDecoration: "none", fontWeight: 600, flexShrink: 0 }}
-          >
-            Open in Workable ↗
-          </a>
+          {pool.meta.jobUrl ? (
+            <a
+              href={pool.meta.jobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ fontSize: 13, color: APP.accent, textDecoration: "none", fontWeight: 600, flexShrink: 0 }}
+            >
+              Open in Workable ↗
+            </a>
+          ) : (
+            <span style={{ fontSize: 12, color: APP.muted, flexShrink: 0 }}>Cross-role inbox</span>
+          )}
         </div>
 
         {wsApi.notice && (
@@ -251,15 +256,21 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             openCandidate={openCandidate}
             stages={pool.stages}
             onStageChange={(id, stage) => wsApi.moveStage(id, stage)}
+            crossRole={crossRole}
           />
         )}
-        {!isDeep && mode === "pipeline" && (
+        {!isDeep && mode === "pipeline" && !crossRole && (
           <PipelineBoard
             wsApi={wsApi}
             openCandidate={openCandidate}
             stages={pool.stages}
             onStageChange={(id, stage) => wsApi.moveStage(id, stage)}
           />
+        )}
+        {!isDeep && mode === "pipeline" && crossRole && (
+          <div style={{ padding: 28, color: APP.muted, fontSize: 14 }}>
+            Pipeline kanban is per-job. Pick a specific role in the job switcher to advance stages.
+          </div>
         )}
         {isDeep && active && (
           <CandidateDossier

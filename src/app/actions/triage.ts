@@ -854,3 +854,30 @@ export async function moveCandidateToStage(input: {
     return { ok: false, error: "Workable move failed", workable: "failed" };
   }
 }
+
+/**
+ * Resolve the job's Phone Screen / Interview stage and move the candidate there.
+ * Safe for cross-role inbox where the client doesn't have per-job stage lists.
+ */
+export async function sendCandidateToScreen(input: {
+  jobShortcode: string;
+  candidateId: string;
+}): Promise<{ ok: boolean; stage?: string; error?: string; workable?: "moved" | "skipped" | "failed" }> {
+  await requireAuth();
+  if (!hasWorkable()) return { ok: false, error: "Workable not configured", workable: "skipped" };
+  try {
+    const { listStages } = await import("@/lib/workable/client");
+    const { buildStageColumns, phoneScreenSlug } = await import("@/lib/triage/stages");
+    const stages = await listStages(input.jobShortcode);
+    const slug = phoneScreenSlug(buildStageColumns(stages));
+    if (!slug) return { ok: false, error: "No screen stage on this job" };
+    return moveCandidateToStage({
+      jobShortcode: input.jobShortcode,
+      candidateId: input.candidateId,
+      targetStage: slug,
+    });
+  } catch (error) {
+    console.error(`sendCandidateToScreen failed for ${input.candidateId}`, error);
+    return { ok: false, error: "Could not resolve screen stage", workable: "failed" };
+  }
+}

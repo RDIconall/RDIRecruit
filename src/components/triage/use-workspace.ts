@@ -10,6 +10,7 @@ import {
   compareToRubric,
   logActivity as logActivityAction,
   moveCandidateToStage,
+  sendCandidateToScreen,
   reanalyze as reanalyzeAction,
   resyncCandidate,
   runDeepAnalysis,
@@ -46,6 +47,8 @@ export interface WorkspaceApi {
   setProcessStatus: (id: string, status: ProcessStatus | null) => void;
   /** Move candidate to a Workable stage (optimistic local stage + SPI write). */
   moveStage: (id: string, targetStage: string) => void;
+  /** Resolve Phone Screen for the candidate's job and move them (cross-role safe). */
+  sendToScreen: (id: string) => void;
   /** Re-run Claude on current materials with the per-role rubric (clears manual override). */
   reanalyze: (id: string) => void;
   compareRubric: (id: string) => void;
@@ -203,8 +206,9 @@ export function useWorkspace(
 
   const moveStage = useCallback(
     (id: string, targetStage: string) => {
-      const jobShortcode = opts?.jobShortcode;
-      if (!jobShortcode) {
+      const c = candidates.find((x) => x.id === id);
+      const jobShortcode = c?.jobShortcode || opts?.jobShortcode;
+      if (!jobShortcode || jobShortcode === "all") {
         setNotice("No job context — cannot move stage.");
         return;
       }
@@ -230,7 +234,41 @@ export function useWorkspace(
         })
         .finally(() => setBusyFor(id, false));
     },
-    [opts, router, setBusyFor],
+    [candidates, opts, router, setBusyFor],
+  );
+
+  const sendToScreen = useCallback(
+    (id: string) => {
+      const c = candidates.find((x) => x.id === id);
+      const jobShortcode = c?.jobShortcode || opts?.jobShortcode;
+      if (!jobShortcode || jobShortcode === "all") {
+        setNotice("No job on this candidate — open a single-job view to advance.");
+        return;
+      }
+      opts?.onStageChange?.(id, "Phone Screen");
+      setBusyFor(id, true);
+      void sendCandidateToScreen({ jobShortcode, candidateId: id })
+        .then((res) => {
+          if (!res.ok) {
+            setNotice(res.error || "Send to screen failed — please retry.");
+            router.refresh();
+            return;
+          }
+          if (res.stage) opts?.onStageChange?.(id, res.stage);
+          if (res.workable === "skipped") {
+            setNotice("Screen stage set locally — Workable write skipped (check WORKABLE_MEMBER_ID).");
+          } else {
+            setNotice(`Sent to ${res.stage || "screen"} in Workable.`);
+          }
+          router.refresh();
+        })
+        .catch(() => {
+          setNotice("Send to screen failed — please retry.");
+          router.refresh();
+        })
+        .finally(() => setBusyFor(id, false));
+    },
+    [candidates, opts, router, setBusyFor],
   );
 
   const reanalyze = useCallback(
@@ -437,6 +475,7 @@ export function useWorkspace(
     setDecision,
     setProcessStatus,
     moveStage,
+    sendToScreen,
     reanalyze,
     compareRubric,
     resync,

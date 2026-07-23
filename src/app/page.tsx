@@ -1,6 +1,6 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { TriageApp } from "@/components/triage/triage-app";
-import { loadTriagePool, DEFAULT_JOB_SHORTCODE } from "@/lib/triage/load";
+import { loadTriagePool, CROSS_ROLE_SHORTCODE } from "@/lib/triage/load";
 import { reviewerKindFrom, reviewerKindLabel, type Viewer } from "@/lib/triage/reviewer";
 
 // Server-fed from Supabase (candidates + evaluations + working files). Auth is
@@ -28,7 +28,8 @@ export default async function HomePage({
   searchParams: Promise<{ job?: string }>;
 }) {
   const params = await searchParams;
-  const job = params.job || DEFAULT_JOB_SHORTCODE;
+  // Default to cross-role inbox: "who's the best new applicant?"
+  const job = params.job || CROSS_ROLE_SHORTCODE;
   const [pool, viewer] = await Promise.all([loadTriagePool(job), resolveViewer()]);
 
   // key on the job so switching jobs fully resets client state.

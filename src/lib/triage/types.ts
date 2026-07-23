@@ -243,6 +243,10 @@ export interface AnswerRow {
   a: string;
   comment?: string;
   kind: CommentKind;
+  /** Concepts the grader says this answer demonstrated (from answer_grade.present). */
+  present?: string[];
+  /** Raw evaluator verdict when available (OWNED / SURFACE / EVASIVE / AI). */
+  verdict?: "AI" | "OWNED" | "SURFACE" | "EVASIVE";
 }
 
 export interface LogisticsSignal {
@@ -339,6 +343,10 @@ export interface Candidate {
   name: string;
   role: string;
   company: string;
+  /** Workable job shortcode this application belongs to. */
+  jobShortcode?: string;
+  /** Published job title — set especially for cross-role views. */
+  jobTitle?: string;
   appliedAt: string | null;
   salary: string;
   salaryNum: number;

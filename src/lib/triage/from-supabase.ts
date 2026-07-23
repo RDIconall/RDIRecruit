@@ -94,6 +94,8 @@ export interface MapInput {
   rank: number;
   jobLocation: string;
   jobShortcode: string;
+  /** Published job title — for cross-role views. */
+  jobTitle?: string;
 }
 
 /**
@@ -374,18 +376,36 @@ export function refusedToAnswerFrom(
   return refused >= Math.max(1, Math.ceil(values.length / 2));
 }
 
+function verdictOf(raw: string | undefined): AnswerRow["verdict"] | undefined {
+  const v = (raw ?? "").toUpperCase();
+  if (v === "AI" || v === "OWNED" || v === "SURFACE" || v === "EVASIVE") return v;
+  return undefined;
+}
+
 function answersFrom(
   grades: AnswerGradePayload[],
   application: ApplicationLite | null,
 ): AnswerRow[] {
   if (grades.length) {
     return grades.map((g) => {
-      const v = (g.verdict ?? "").toUpperCase();
+      const verdict = verdictOf(g.verdict);
+      const present = Array.isArray(g.present)
+        ? g.present.map((p) => String(p).trim()).filter(Boolean)
+        : undefined;
       return {
         q: g.question || "Application answer",
         a: g.answer || "—",
         comment: g.note || undefined,
-        kind: v === "AI" ? ("ai" as const) : v === "OWNED" ? ("good" as const) : v === "EVASIVE" ? ("flag" as const) : ("thin" as const),
+        present: present?.length ? present : undefined,
+        verdict,
+        kind:
+          verdict === "AI"
+            ? ("ai" as const)
+            : verdict === "OWNED"
+              ? ("good" as const)
+              : verdict === "EVASIVE"
+                ? ("flag" as const)
+                : ("thin" as const),
       };
     });
   }
@@ -397,6 +417,7 @@ function answersFrom(
         q,
         a: String(v),
         kind: looksRefused(String(v)) ? ("flag" as const) : ("neutral" as const),
+        verdict: looksRefused(String(v)) ? ("EVASIVE" as const) : undefined,
       }));
   }
   return [];
@@ -691,18 +712,33 @@ function answersReadFrom(grades: AnswerGradePayload[]): VerdictRead {
     evasive = 0,
     surface = 0,
     ai = 0;
+  let concepts = 0;
   for (const g of grades) {
     const v = (g.verdict ?? "").toUpperCase();
     if (v === "AI") ai++;
     else if (v === "OWNED") owned++;
     else if (v === "EVASIVE") evasive++;
     else surface++;
+    if (Array.isArray(g.present)) concepts += g.present.filter(Boolean).length;
   }
   const n = grades.length;
-  if (ai >= Math.ceil(n / 2)) return { label: "AI generated", level: "weak" };
-  if (owned > surface + evasive + ai) return { label: "Good answers", level: "strong" };
-  if (evasive + ai > owned + surface) return { label: "Weak answers", level: "weak" };
-  return { label: "OK answers", level: "mixed" };
+  const mix = [
+    owned ? `${owned} owned` : "",
+    surface ? `${surface} surface` : "",
+    evasive ? `${evasive} evasive` : "",
+    ai ? `${ai} AI` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  const conceptBit = concepts ? ` · ${concepts} concepts` : "";
+  if (ai >= Math.ceil(n / 2)) return { label: `AI-heavy (${mix})`, level: "weak" };
+  if (owned > surface + evasive + ai) {
+    return { label: `Strong answers (${mix}${conceptBit})`, level: "strong" };
+  }
+  if (evasive + ai > owned + surface) {
+    return { label: `Weak answers (${mix})`, level: "weak" };
+  }
+  return { label: `Mixed answers (${mix}${conceptBit})`, level: "mixed" };
 }
 
 /**
@@ -863,6 +899,8 @@ export function mapCandidate(input: MapInput): Candidate {
     name: input.candidate.name || "Unnamed candidate",
     role: roleTitle,
     company,
+    jobShortcode: input.jobShortcode,
+    jobTitle: input.jobTitle,
     appliedAt: input.candidate.created_at,
     salary,
     salaryNum: askNumK(invest?.ask),

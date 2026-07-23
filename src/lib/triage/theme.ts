@@ -91,14 +91,14 @@ export interface CommentMeta {
 
 export function CM(k: CommentKind): CommentMeta {
   const m: Record<CommentKind, CommentMeta> = {
-    ai: { label: "AI generated", color: "#9E3B28", hl: "rgba(158,59,40,0.10)" },
-    wrong: { label: "Wrong company", color: "#9E3B28", hl: "rgba(158,59,40,0.14)" },
-    typo: { label: "Typo / sloppy", color: "#9E3B28", hl: "rgba(158,59,40,0.10)" },
-    flag: { label: "Red flag", color: "#9E3B28", hl: "rgba(158,59,40,0.10)" },
-    thin: { label: "Generic", color: "#9E3B28", hl: "rgba(158,59,40,0.08)" },
-    good: { label: "Paid attention", color: "#162335", hl: "transparent" },
-    ask: { label: "Ask this live", color: "#162335", hl: "transparent" },
-    neutral: { label: "Note", color: "rgba(22,35,53,0.5)", hl: "transparent" },
+    ai: { label: "AI generated", color: "#C0392B", hl: "rgba(192,57,43,0.10)" },
+    wrong: { label: "Wrong company", color: "#C0392B", hl: "rgba(192,57,43,0.14)" },
+    typo: { label: "Typo / sloppy", color: "#C0392B", hl: "rgba(192,57,43,0.10)" },
+    flag: { label: "Evasive", color: "#C0392B", hl: "rgba(192,57,43,0.10)" },
+    thin: { label: "Surface", color: "#B45309", hl: "rgba(180,83,9,0.10)" },
+    good: { label: "Owned", color: "#0B8F6A", hl: "rgba(11,143,106,0.10)" },
+    ask: { label: "Ask this live", color: "#2563EB", hl: "rgba(37,99,235,0.08)" },
+    neutral: { label: "Note", color: "#595959", hl: "transparent" },
   };
   return m[k] || m.neutral;
 }

@@ -10,6 +10,7 @@ import { useIsNarrow } from "./use-media-query";
 import { getWorkingFileContent } from "@/app/actions/triage";
 import { Avatar, WorkableStageChip } from "./pool-shared";
 import { nextStageSlug, type StageColumn } from "@/lib/triage/stages";
+import { CM } from "@/lib/triage/theme";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
@@ -658,48 +659,87 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
       {c.answers.length > 0 && (
         <Section id="answers" title="Their answers">
           <p style={mono({ margin: "0 0 14px", fontSize: 12, color: APP.faint })}>
-            Shown in the order answered · Claude&apos;s notes in the margin
+            Shown in the order answered · verdict + concepts + grader note
+            {c.answersRead?.label ? ` · Pool read: ${c.answersRead.label}` : ""}
           </p>
-          {c.answers.map((a, i) => (
-            <div
-              key={i}
-              style={{
-                display: "grid",
-                gridTemplateColumns: narrow ? "1fr" : "1fr 260px",
-                gap: narrow ? 8 : 22,
-                padding: "14px 0",
-                borderBottom: `1px solid ${APP.line}`,
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>
-                  <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
-                  {a.q || "Application question"}
-                </div>
-                <ExpandableText text={a.a} />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                {a.comment ? (
-                  <div
-                    style={mono({
-                      fontSize: 12.5,
-                      lineHeight: 1.5,
-                      color: APP.secondary,
-                      background: APP.accentSoft,
-                      border: `1px solid ${APP.accentBorder}`,
-                      borderRadius: 8,
-                      padding: "9px 11px",
-                    })}
-                  >
-                    <span style={{ color: APP.accent, fontWeight: 600 }}>Claude</span>
-                    <span style={{ display: "block", marginTop: 3 }}>{a.comment}</span>
+          {c.answers.map((a, i) => {
+            const meta = CM(a.kind);
+            const verdictLabel = a.verdict || meta.label;
+            return (
+              <div
+                key={i}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: narrow ? "1fr" : "1fr 280px",
+                  gap: narrow ? 8 : 22,
+                  padding: "14px 0",
+                  borderBottom: `1px solid ${APP.line}`,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>
+                      <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
+                      {a.q || "Application question"}
+                    </div>
+                    <span
+                      style={mono({
+                        fontSize: 11,
+                        fontWeight: 700,
+                        color: meta.color,
+                        background: meta.hl === "transparent" ? APP.line2 : meta.hl,
+                        border: `1px solid ${APP.hair}`,
+                        borderRadius: 4,
+                        padding: "2px 7px",
+                      })}
+                    >
+                      {verdictLabel}
+                    </span>
                   </div>
-                ) : (
-                  !narrow && <span style={mono({ fontSize: 11.5, color: APP.faint })}>No comment</span>
-                )}
+                  <ExpandableText text={a.a} />
+                  {!!a.present?.length && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                      {a.present.map((p) => (
+                        <span
+                          key={p}
+                          style={mono({
+                            fontSize: 11,
+                            color: APP.ink2,
+                            background: APP.line2,
+                            border: `1px solid ${APP.hair}`,
+                            borderRadius: 4,
+                            padding: "2px 7px",
+                          })}
+                        >
+                          {p}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  {a.comment ? (
+                    <div
+                      style={mono({
+                        fontSize: 12.5,
+                        lineHeight: 1.55,
+                        color: APP.secondary,
+                        background: APP.accentSoft,
+                        border: `1px solid ${APP.accentBorder}`,
+                        borderRadius: 8,
+                        padding: "9px 11px",
+                      })}
+                    >
+                      <span style={{ color: APP.accent, fontWeight: 600 }}>Grader note</span>
+                      <span style={{ display: "block", marginTop: 3 }}>{a.comment}</span>
+                    </div>
+                  ) : (
+                    !narrow && <span style={mono({ fontSize: 11.5, color: APP.faint })}>No grader note</span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </Section>
       )}
 

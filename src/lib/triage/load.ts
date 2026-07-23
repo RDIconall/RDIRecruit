@@ -1,7 +1,7 @@
 import "server-only";
 import { hasSupabase, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
-import { getBoardFromSupabase } from "../data/board-queries";
+import { getBoardFromSupabase, getBoardFromSupabaseForJobs } from "../data/board-queries";
 import { getPublishedJobs, getJobByShortcode } from "../jobs/service";
 import { wbJob } from "../workable/links";
 import { getJobRubric } from "../rubric/store";
@@ -26,6 +26,8 @@ import type { Decision } from "./types";
 import { buildStageColumns, FALLBACK_STAGES, type StageColumn } from "./stages";
 
 export const DEFAULT_JOB_SHORTCODE = "379AA16E8F"; // Clinical Data Manager — Data Integrity & Investigation
+/** Pseudo-shortcode: load inbox candidates across every published job. */
+export const CROSS_ROLE_SHORTCODE = "all";
 
 export interface TriagePool {
   candidates: Candidate[];
@@ -39,6 +41,8 @@ export interface TriagePool {
   specMd: string;
   /** Workable pipeline stages for this job (kanban columns). */
   stages: StageColumn[];
+  /** True when this pool spans every published job (cross-role inbox). */
+  crossRole?: boolean;
 }
 
 function emptyWorkspace(): Workspace {
@@ -352,9 +356,186 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
   return roster;
 }
 
-export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> {
+function withCrossRoleOption(jobs: JobOption[]): JobOption[] {
+  if (jobs.some((j) => j.shortcode === CROSS_ROLE_SHORTCODE)) return jobs;
+  return [{ shortcode: CROSS_ROLE_SHORTCODE, title: "New across roles" }, ...jobs];
+}
+
+/**
+ * Cross-role pool: every published job's candidates in one ranked inbox so you
+ * can answer "who's the best new applicant?" without switching jobs.
+ */
+async function loadCrossRolePool(): Promise<TriagePool> {
   const jobSummaries = await getPublishedJobs();
-  const jobs: JobOption[] = jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title }));
+  const jobs = withCrossRoleOption(jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title })));
+  const titleByShortcode = new Map(jobSummaries.map((j) => [j.shortcode, j.title]));
+  const shortcodes = jobSummaries.map((j) => j.shortcode);
+  const methodology = await getMethodDoc();
+  const emptyRubric = { rubricMd: "", specMd: "" };
+
+  if (!hasSupabase() || !shortcodes.length) {
+    return {
+      ...emptyPool(CROSS_ROLE_SHORTCODE, jobs, "New across roles", emptyRubric, FALLBACK_STAGES),
+      crossRole: true,
+    };
+  }
+
+  const board = await getBoardFromSupabaseForJobs(shortcodes);
+  if (!board?.length) {
+    return {
+      ...emptyPool(CROSS_ROLE_SHORTCODE, jobs, "New across roles", emptyRubric, FALLBACK_STAGES),
+      crossRole: true,
+      meta: {
+        title: "New across roles",
+        jobShortcode: CROSS_ROLE_SHORTCODE,
+        jobUrl: "",
+        healthState: "No candidates",
+        healthRead: "No candidates synced across published jobs yet.",
+        total: 0,
+      },
+    };
+  }
+
+  const ids = board.map((b) => b.candidate.workable_id);
+  const supabase = getServiceSupabase();
+
+  const [appsRes, evalRows, narrRes, evidenceRes, activityRes, workingFiles] = await Promise.all([
+    supabase.from("applications").select("candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url").in("candidate_id", ids),
+    fetchEvaluationsPaged(supabase, ids),
+    supabase.from("narratives").select("candidate_id, segments, generated_at").in("candidate_id", ids).order("generated_at", { ascending: false }),
+    supabase.from("evidence").select("*").in("candidate_id", ids).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
+    supabase.from("activity").select("id, candidate_id, type, author, body, created_at").in("candidate_id", ids).order("created_at", { ascending: true }),
+    getWorkingFiles(ids),
+  ]);
+
+  const activityByCandidate = new Map<string, ActivityEntry[]>();
+  for (const r of (activityRes.data ?? []) as ActivityRow[]) {
+    const list = activityByCandidate.get(r.candidate_id) ?? [];
+    list.push(toActivityEntry(r));
+    activityByCandidate.set(r.candidate_id, list);
+  }
+
+  const appsByCandidate = new Map<string, ApplicationLite>();
+  for (const a of (appsRes.data ?? []) as Array<{
+    candidate_id: string;
+    answers?: Record<string, string> | null;
+    cover_letter?: string | null;
+    parsed_experience?: ParsedExperienceEntry[] | null;
+    resume_text?: string | null;
+    resume_url?: string | null;
+  }>) {
+    if (!appsByCandidate.has(a.candidate_id)) {
+      appsByCandidate.set(a.candidate_id, {
+        answers: a.answers ?? null,
+        cover_letter: a.cover_letter ?? null,
+        parsed_experience: a.parsed_experience ?? null,
+        resume_text: a.resume_text ?? null,
+        resume_url: a.resume_url ?? null,
+      });
+    }
+  }
+
+  const evalsByCandidate = groupEvaluations(evalRows);
+  const narrByCandidate = new Map<string, NarrativeSegment[]>();
+  for (const n of (narrRes.data ?? []) as Array<{ candidate_id: string; segments: NarrativeSegment[] }>) {
+    if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
+  }
+  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
+  for (const e of (evidenceRes.data ?? []) as EvidenceRow[]) {
+    const list = evidenceByCandidate.get(e.candidate_id) ?? [];
+    list.push(e);
+    evidenceByCandidate.set(e.candidate_id, list);
+  }
+
+  const workspace = emptyWorkspace();
+  const candidates: Candidate[] = board.map((item, index) => {
+    const id = item.candidate.workable_id;
+    const jobShortcode = item.candidate.job_shortcode || "";
+    const wf = workingFiles.get(id);
+    const read = (wf?.read as DecisionRead | null) ?? null;
+
+    const candidate = mapCandidate({
+      candidate: item.candidate,
+      score: item.score ?? null,
+      ro: item.ro ?? null,
+      overlay: item.overlay ?? null,
+      application: appsByCandidate.get(id) ?? null,
+      narrative: narrByCandidate.get(id) ?? [],
+      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [] },
+      interviewEvidence: evidenceByCandidate.get(id) ?? [],
+      read,
+      corrections: wf?.workspace?.corrections ?? [],
+      decisionOverride: wf?.workspace?.decisionOverride ?? null,
+      processStatus: wf?.workspace?.processStatus ?? null,
+      rank: index + 1,
+      jobLocation: "Van Nuys, CA",
+      jobShortcode,
+      jobTitle: titleByShortcode.get(jobShortcode) ?? jobShortcode,
+    });
+
+    const dq = item.overlay?.status === "disqualified" || Boolean(item.candidate.disqualified);
+    if (dq) workspace.dq[id] = true;
+    const slice = wf?.workspace ?? {};
+    if (slice.ovr) workspace.ovr[id] = slice.ovr;
+    if (slice.replies) workspace.replies[id] = slice.replies;
+    if (slice.corrections) workspace.corrections[id] = slice.corrections;
+    if (slice.transcript) workspace.transcripts[id] = slice.transcript;
+    if (slice.deep) workspace.deep[id] = true;
+    if (slice.processStatus) workspace.process[id] = slice.processStatus;
+    if (slice.chat?.length) workspace.chat[id] = slice.chat;
+    const acts = activityByCandidate.get(id);
+    if (acts?.length) workspace.activity[id] = acts;
+
+    return candidate;
+  });
+
+  for (const c of candidates) {
+    if (c.decision !== "blocked") continue;
+    const app = appsByCandidate.get(c.id);
+    const inputs: GradingInputs = {
+      candidateId: c.id,
+      jobShortcode: c.jobShortcode || "",
+      answers: (app?.answers as Record<string, string> | null) ?? null,
+      resumeText: (app?.resume_text as string | null) ?? null,
+      resumeStoragePath: null,
+      resumeUrl: (app?.resume_url as string | null) ?? null,
+      coverLetter: (app?.cover_letter as string | null) ?? null,
+      parsedExperienceCount: Array.isArray(app?.parsed_experience) ? app!.parsed_experience.length : 0,
+      jobSpec: "",
+      rubric: "",
+      methodology,
+    };
+    c.readiness = computeReadiness(inputs);
+  }
+  assignPoolStanding(candidates, (id) => Boolean(workspace.dq[id]));
+
+  const interviewCount = candidates.filter((c) => c.decision === "interview" && !workspace.dq[c.id]).length;
+
+  return {
+    candidates,
+    workspace,
+    jobs,
+    configured: true,
+    rubricMd: "",
+    specMd: "",
+    stages: FALLBACK_STAGES,
+    crossRole: true,
+    meta: {
+      title: "New across roles",
+      jobShortcode: CROSS_ROLE_SHORTCODE,
+      jobUrl: "",
+      healthState: `${candidates.length} across ${shortcodes.length} jobs`,
+      healthRead: `${interviewCount} interview-ready among new/active applicants — ranked by decision, value, and answer fit.`,
+      total: candidates.length,
+    },
+  };
+}
+
+export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> {
+  if (jobShortcode === CROSS_ROLE_SHORTCODE) return loadCrossRolePool();
+
+  const jobSummaries = await getPublishedJobs();
+  const jobs = withCrossRoleOption(jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title })));
   const jobMeta = await getJobByShortcode(jobShortcode);
   const title = jobMeta?.title ?? jobShortcode;
   const [rubric, methodology, stages] = await Promise.all([
@@ -435,6 +616,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       rank: index + 1,
       jobLocation: "Van Nuys, CA",
       jobShortcode,
+      jobTitle: title,
     });
 
     // Hydrate the client workspace from persisted state.

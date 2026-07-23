@@ -3,16 +3,18 @@
 import { useMemo, useState } from "react";
 import { APP, DECISION_LABEL } from "@/lib/triage/app-theme";
 import { isInboxStage, phoneScreenSlug, type StageColumn } from "@/lib/triage/stages";
+import { sortBestNew } from "@/lib/triage/ranking";
 import type { Candidate, Decision } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
-import { Avatar, Checkbox, StatusSelect, mono, ellipsis } from "./pool-shared";
+import { Avatar, Checkbox, Dot, StatusSelect, mono, ellipsis } from "./pool-shared";
 
 interface Props {
   wsApi: WorkspaceApi;
   openCandidate: (id: string) => void;
   stages: StageColumn[];
   onStageChange: (id: string, stage: string) => void;
+  crossRole?: boolean;
 }
 
 type Filter = "all" | Decision;
@@ -27,8 +29,8 @@ function flagChips(c: Candidate) {
   return chips;
 }
 
-export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Props) {
-  const { candidates } = useTriageData();
+export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, crossRole }: Props) {
+  const { candidates, meta } = useTriageData();
   const dq = wsApi.ws.dq;
   const [filter, setFilter] = useState<Filter>("all");
   const [q, setQ] = useState("");
@@ -36,16 +38,17 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
 
   const inbox = useMemo(() => {
     const query = q.trim().toLowerCase();
-    return candidates
+    const rows = candidates
       .filter((c) => !dq[c.id] && isInboxStage(c.workableStage))
       .filter((c) => (filter === "all" ? true : c.decision === filter))
       .filter((c) => {
         if (!query) return true;
-        return `${c.name} ${c.company} ${c.why} ${c.role}`.toLowerCase().includes(query);
-      })
-      .sort((a, b) => (a.standing?.overallRank ?? 1e9) - (b.standing?.overallRank ?? 1e9));
+        return `${c.name} ${c.company} ${c.why} ${c.role} ${c.jobTitle || ""}`.toLowerCase().includes(query);
+      });
+    return sortBestNew(rows);
   }, [candidates, dq, filter, q]);
 
+  const best = inbox.find((c) => c.decision === "interview") ?? inbox[0] ?? null;
   const selectedIds = Object.keys(sel).filter((id) => sel[id] && inbox.some((c) => c.id === id));
   const screenSlug = phoneScreenSlug(stages);
 
@@ -58,20 +61,62 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
     });
 
   const sendToScreen = (id: string) => {
-    if (!screenSlug) {
-      wsApi.clearNotice();
+    if (crossRole) {
+      wsApi.sendToScreen(id);
       return;
     }
+    if (!screenSlug) return;
     onStageChange(id, screenSlug);
   };
 
   return (
     <div style={{ padding: "12px 20px 28px" }}>
+      {crossRole && best && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "14px 16px",
+            borderRadius: 10,
+            border: `1px solid ${APP.accentBorder}`,
+            background: APP.accentSoft,
+            display: "flex",
+            gap: 14,
+            alignItems: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={mono({ fontSize: 11, color: APP.accent, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" })}>
+              Best new applicant
+            </div>
+            <div style={{ fontWeight: 700, fontSize: 17, marginTop: 2 }}>
+              {best.name}
+              <span style={{ fontWeight: 500, color: APP.secondary, fontSize: 14 }}>
+                {" "}
+                · {best.jobTitle || best.role}
+              </span>
+            </div>
+            <div style={{ fontSize: 13, color: APP.ink2, marginTop: 4 }}>{best.why || DECISION_LABEL[best.decision]}</div>
+            <div style={mono({ fontSize: 12, color: APP.muted, marginTop: 4 })}>
+              {DECISION_LABEL[best.decision]} · {best.answersRead.label} · {best.value?.headline || "—"}
+            </div>
+          </div>
+          <button type="button" onClick={() => openCandidate(best.id)} style={{ ...btnStyle, background: APP.accent, borderColor: APP.accent, color: "#fff" }}>
+            Open
+          </button>
+          {best.decision === "interview" && (
+            <button type="button" onClick={() => sendToScreen(best.id)} style={btnStyle}>
+              Send to screen
+            </button>
+          )}
+        </div>
+      )}
+
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12, flexWrap: "wrap" }}>
         <input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search new candidates"
+          placeholder={crossRole ? "Search across roles" : "Search new candidates"}
           style={{
             height: 34,
             border: `1px solid ${APP.hair}`,
@@ -85,9 +130,9 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
         {(
           [
             ["all", "All new"],
-            ["reject", "Suggested reject"],
-            ["interview", "Suggested interview"],
+            ["interview", "Interview"],
             ["backup", "Backup"],
+            ["reject", "Reject"],
             ["blocked", "Blocked"],
           ] as const
         ).map(([key, label]) => (
@@ -111,7 +156,7 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
           </button>
         ))}
         <span style={{ marginLeft: "auto", ...mono({ fontSize: 12, color: APP.muted }) }}>
-          {inbox.length} in inbox · Workable stays Applied until you move them
+          {inbox.length} new · {meta.healthRead}
         </span>
       </div>
 
@@ -186,7 +231,10 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
                   }}
                 />
               </th>
-              {["Candidate", "AI call", "Why", "Flags", "Workable", ""].map((h) => (
+              {(crossRole
+                ? ["Candidate", "Role", "AI call", "Answers", "Why", "Flags", ""]
+                : ["Candidate", "AI call", "Answers", "Why", "Flags", "Workable", ""]
+              ).map((h) => (
                 <th
                   key={h || "actions"}
                   style={{
@@ -209,20 +257,26 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
           <tbody>
             {inbox.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ padding: 28, textAlign: "center", color: APP.muted, fontSize: 13 }}>
-                  Inbox clear — open Pipeline for pending calls.
+                <td colSpan={8} style={{ padding: 28, textAlign: "center", color: APP.muted, fontSize: 13 }}>
+                  No new applicants in Applied — try another filter or job.
                 </td>
               </tr>
             ) : (
-              inbox.map((c) => {
+              inbox.map((c, idx) => {
                 const chips = flagChips(c);
                 return (
-                  <tr key={c.id} style={{ borderBottom: `1px solid ${APP.hair}` }}>
+                  <tr
+                    key={c.id}
+                    style={{
+                      borderBottom: `1px solid ${APP.hair}`,
+                      background: idx === 0 && c.decision === "interview" ? APP.accentSoft : undefined,
+                    }}
+                  >
                     <td style={{ padding: "10px 12px" }}>
                       <Checkbox label={`Select ${c.name}`} checked={!!sel[c.id]} onChange={() => toggle(c.id)} />
                     </td>
                     <td style={{ padding: "10px 12px" }}>
-                      <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 180 }}>
+                      <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 160 }}>
                         <Avatar c={c} size={30} />
                         <div style={{ minWidth: 0 }}>
                           <button
@@ -247,10 +301,20 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
                         </div>
                       </div>
                     </td>
+                    {crossRole && (
+                      <td style={{ padding: "10px 12px", fontSize: 13, color: APP.ink2, maxWidth: 180 }}>
+                        <div style={ellipsis} title={c.jobTitle}>
+                          {c.jobTitle || "—"}
+                        </div>
+                      </td>
+                    )}
                     <td style={{ padding: "10px 12px" }}>
                       <StatusSelect value={c.decision} onChange={(d) => wsApi.setDecision(c.id, d)} />
                     </td>
-                    <td style={{ padding: "10px 12px", maxWidth: 320, color: APP.ink2, fontSize: 13 }} title={c.why}>
+                    <td style={{ padding: "10px 12px" }}>
+                      <Dot read={c.answersRead} />
+                    </td>
+                    <td style={{ padding: "10px 12px", maxWidth: 280, color: APP.ink2, fontSize: 13 }} title={c.why}>
                       <div style={ellipsis}>{c.why || DECISION_LABEL[c.decision]}</div>
                     </td>
                     <td style={{ padding: "10px 12px" }}>
@@ -276,18 +340,16 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange }: Pro
                         ))
                       )}
                     </td>
-                    <td style={{ padding: "10px 12px", fontSize: 12, color: APP.muted }}>
-                      {c.workableStage || "Applied"}
-                    </td>
+                    {!crossRole && (
+                      <td style={{ padding: "10px 12px", fontSize: 12, color: APP.muted }}>
+                        {c.workableStage || "Applied"}
+                      </td>
+                    )}
                     <td style={{ padding: "10px 12px", whiteSpace: "nowrap", textAlign: "right" }}>
-                      <button
-                        type="button"
-                        onClick={() => openCandidate(c.id)}
-                        style={btnStyle}
-                      >
+                      <button type="button" onClick={() => openCandidate(c.id)} style={btnStyle}>
                         Open
                       </button>
-                      {c.decision === "interview" && screenSlug && (
+                      {c.decision === "interview" && (
                         <button
                           type="button"
                           onClick={() => sendToScreen(c.id)}

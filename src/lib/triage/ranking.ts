@@ -14,9 +14,32 @@ const GROUP_LABEL: Record<Decision, string> = {
  * ordered by the strength-vs-salary value read first, then by raw fit; the other
  * groups fall back to fit alone.
  */
-function rankWeight(c: Candidate): number {
+/** Ordering signal within a decision group — also used for cross-role "best new". */
+export function rankWeight(c: Candidate): number {
   const value = c.value ? valueWeight(c.value.level) * 10 : 0;
   return value + fitWeight(c.answersRead.level) + fitWeight(c.specRead.level);
+}
+
+const DECISION_PRIORITY: Record<Decision, number> = {
+  interview: 0,
+  backup: 1,
+  reject: 2,
+  blocked: 3,
+};
+
+/**
+ * Sort for cross-role "best new applicant": Interview first, then value/fit,
+ * then newest appliedAt. Mutates nothing — returns a new array.
+ */
+export function sortBestNew(candidates: Candidate[]): Candidate[] {
+  return [...candidates].sort((a, b) => {
+    const dp = DECISION_PRIORITY[a.decision] - DECISION_PRIORITY[b.decision];
+    if (dp) return dp;
+    const rw = rankWeight(b) - rankWeight(a);
+    if (rw) return rw;
+    const at = Date.parse(b.appliedAt || "") - Date.parse(a.appliedAt || "");
+    return Number.isFinite(at) ? at : 0;
+  });
 }
 
 /**
