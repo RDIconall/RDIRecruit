@@ -24,6 +24,7 @@ import { reviewerSignalFor } from "./reviewer";
 import { askNumK, cityState } from "./format";
 import { avatarColor, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision, normalizeProcessStatus } from "./types";
+import { summarizeAnswerGrades } from "./answer-grades";
 import type {
   AnswerRow,
   Candidate,
@@ -389,9 +390,12 @@ function answersFrom(
   if (grades.length) {
     return grades.map((g) => {
       const verdict = verdictOf(g.verdict);
-      const present = Array.isArray(g.present)
-        ? g.present.map((p) => String(p).trim()).filter(Boolean)
-        : undefined;
+      // Only OWNED answers may carry concept chips — SURFACE "procedural logic"
+      // lists were inflating weak answers into looking demonstrated.
+      const present =
+        verdict === "OWNED" && Array.isArray(g.present)
+          ? g.present.map((p) => String(p).trim()).filter(Boolean)
+          : undefined;
       return {
         q: g.question || "Application answer",
         a: g.answer || "—",
@@ -697,48 +701,9 @@ function implicationFor(decision: Decision): string {
   }[decision];
 }
 
-/**
- * The cached "Answers" read for the pool board — the per-answer grades collapsed
- * to one plain-language verdict. Never a numeric score. Order of the read:
- * 1. AI first: when half or more of the answers read as AI-generated, that IS
- *    the label — substance graded on machine text is not the candidate's.
- * 2. Otherwise substance carries the weight: a majority of owned answers is
- *    "Good answers" even if one answer is generic or dodged; only a majority of
- *    dodged/empty answers reads "Weak answers"; everything between is "OK".
- */
+/** Pool-board Answers column — see summarizeAnswerGrades for the strict rules. */
 function answersReadFrom(grades: AnswerGradePayload[]): VerdictRead {
-  if (!grades.length) return { label: "—", level: "none" };
-  let owned = 0,
-    evasive = 0,
-    surface = 0,
-    ai = 0;
-  let concepts = 0;
-  for (const g of grades) {
-    const v = (g.verdict ?? "").toUpperCase();
-    if (v === "AI") ai++;
-    else if (v === "OWNED") owned++;
-    else if (v === "EVASIVE") evasive++;
-    else surface++;
-    if (Array.isArray(g.present)) concepts += g.present.filter(Boolean).length;
-  }
-  const n = grades.length;
-  const mix = [
-    owned ? `${owned} owned` : "",
-    surface ? `${surface} surface` : "",
-    evasive ? `${evasive} evasive` : "",
-    ai ? `${ai} AI` : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const conceptBit = concepts ? ` · ${concepts} concepts` : "";
-  if (ai >= Math.ceil(n / 2)) return { label: `AI-heavy (${mix})`, level: "weak" };
-  if (owned > surface + evasive + ai) {
-    return { label: `Strong answers (${mix}${conceptBit})`, level: "strong" };
-  }
-  if (evasive + ai > owned + surface) {
-    return { label: `Weak answers (${mix})`, level: "weak" };
-  }
-  return { label: `Mixed answers (${mix}${conceptBit})`, level: "mixed" };
+  return summarizeAnswerGrades(grades);
 }
 
 /**
