@@ -25,6 +25,12 @@ import { askNumK, cityState } from "./format";
 import { avatarColor, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision, normalizeProcessStatus } from "./types";
 import { summarizeAnswerGrades } from "./answer-grades";
+import {
+  analyzeTenureStability,
+  applyTenureDecisionGate,
+  coalesceTenureRoles,
+  type TenureStability,
+} from "./tenure-stability";
 import type {
   AnswerRow,
   Candidate,
@@ -155,26 +161,51 @@ export function deriveDecision(input: MapInput): Decision {
   // stale "blocked" read — and a cut candidate is NEVER surfaced as "Review blocked".
   if (humanCut(input)) return "reject";
 
-  if (input.read?.decision) return normalizeDecision(input.read.decision);
+  let decision: Decision;
+  if (input.read?.decision) {
+    decision = normalizeDecision(input.read.decision);
+  } else {
+    const { score, evals } = input;
+    if (!evals.invest || !score) return "blocked";
 
-  const { score, evals } = input;
-  if (!evals.invest || !score) return "blocked";
+    const integrity = (evals.dig?.integrity ?? "").toLowerCase();
+    if (integrity.startsWith("material")) return "reject";
 
-  const integrity = (evals.dig?.integrity ?? "").toLowerCase();
-  if (integrity.startsWith("material")) return "reject";
+    const total = score.total ?? 0;
+    if (total < 55) return "reject";
 
-  const total = score.total ?? 0;
-  if (total < 55) return "reject";
+    // A discrepancy or an unstated salary no longer earns its own status — the
+    // candidate is held as a backup with the thing-to-confirm surfaced as a caveat.
+    if (hasDiscrepancy(evals.verification)) {
+      decision = "backup";
+    } else {
+      const salaryUnstated = !evals.invest.ask || (score.salary_value ?? "") === "unstated";
+      if (salaryUnstated && total < 82) decision = "backup";
+      else if (total >= 68) decision = "interview";
+      else decision = "backup";
+    }
+  }
 
-  // A discrepancy or an unstated salary no longer earns its own status — the
-  // candidate is held as a backup with the thing-to-confirm surfaced as a caveat.
-  if (hasDiscrepancy(evals.verification)) return "backup";
+  // Deterministic hopping gate — Claude / high totals cannot keep Interview when
+  // the résumé shows repeated short completed stints.
+  return applyTenureDecisionGate(decision, tenureStabilityFor(input));
+}
 
-  const salaryUnstated = !evals.invest.ask || (score.salary_value ?? "") === "unstated";
-  if (salaryUnstated && total < 82) return "backup";
+function narrativeRolesForTenure(input: MapInput) {
+  return input.narrative
+    .filter((s) => s.type === "role")
+    .map((s) => {
+      const { role, org } = splitRoleAt(s.text);
+      return { title: role, company: org, span: s.span };
+    });
+}
 
-  if (total >= 68) return "interview";
-  return "backup";
+function tenureStabilityFor(input: MapInput): TenureStability {
+  const roles = coalesceTenureRoles(
+    input.application?.parsed_experience,
+    narrativeRolesForTenure(input),
+  );
+  return analyzeTenureStability(roles);
 }
 
 function nextFor(decision: Decision): string {
@@ -488,7 +519,18 @@ function redFlagsFrom(input: MapInput): RedFlag[] {
       });
     }
   }
+  appendTenureRedFlags(flags, tenureStabilityFor(input));
   return flags;
+}
+
+function appendTenureRedFlags(flags: RedFlag[], tenure: TenureStability) {
+  if (!tenure.flagDetail) return;
+  if (flags.some((f) => /short[- ]tenure/i.test(f.flag))) return;
+  flags.push({
+    flag: tenure.severity === "severe" ? "Short-tenure pattern" : "Short tenures",
+    detail: tenure.flagDetail,
+    source: "Résumé",
+  });
 }
 
 function cutFieldsFor(input: MapInput): Pick<Candidate, "cutGroup" | "cutReason" | "cite" | "cutMatters"> {
@@ -814,7 +856,7 @@ export function mapCandidate(input: MapInput): Candidate {
   const company = lastRoleRead?.company || ro?.per_role?.[ro.per_role.length - 1]?.company || "—";
 
   const salary = invest?.ask || "—";
-  const why =
+  let why =
     input.read?.why ||
     dig?.careerRead ||
     firstSentence(invest?.summary) ||
@@ -835,6 +877,9 @@ export function mapCandidate(input: MapInput): Candidate {
   const location = input.candidate.location || ((input.candidate.raw?.address as string) ?? "") || "—";
 
   const baseRedFlags = [...(input.read?.flags ?? redFlagsFrom(input))];
+  const tenure = tenureStabilityFor(input);
+  // Claude-authored flag lists omit our deterministic hopping flag — always merge it.
+  appendTenureRedFlags(baseRedFlags, tenure);
 
   const refusedToAnswer = refusedToAnswerFrom(input.application, input.evals.answerGrades);
   if (refusedToAnswer && !baseRedFlags.some((f) => f.flag === "Refused to answer")) {
@@ -849,13 +894,38 @@ export function mapCandidate(input: MapInput): Candidate {
     ? { label: "Blank", level: "weak" as const }
     : answersReadFrom(input.evals.answerGrades);
   const specRead = specReadFrom(input, decision);
-  const value = valueReadFrom(input, decision, answersRead, specRead);
+  let value = valueReadFrom(input, decision, answersRead, specRead);
+
+  const tenureDemotedInterview =
+    (tenure.severity === "pattern" || tenure.severity === "severe") &&
+    decision === "backup" &&
+    Boolean(input.read?.decision) &&
+    normalizeDecision(input.read?.decision) === "interview";
 
   // What must be confirmed before booking (the old "verify first", now a caveat).
   let caveat = input.read?.caveat;
-  if (!caveat) {
+  if (tenure.caveat) {
+    // Tenure caveat always surfaces — append if Claude already wrote one.
+    caveat = caveat && !/short[- ]tenure|short stint/i.test(caveat)
+      ? `${tenure.caveat} ${caveat}`
+      : tenure.caveat;
+  } else if (!caveat) {
     if (hasDiscrepancy(input.evals.verification)) caveat = "Confirm the flagged discrepancy before booking an interview.";
     else if (!invest?.ask || salaryValue === "unstated") caveat = "Salary expectation not stated — confirm it before an interview.";
+  }
+
+  // If the hopping gate demoted Interview → Backup, make the why name the pattern
+  // (stored Claude "interview" prose otherwise misleads the recruiter).
+  if (tenureDemotedInterview) {
+    why = `Short-tenure pattern on the résumé — held as backup until leave reasons are clear. ${why}`;
+    // Do not keep a Claude "Strong candidate" value headline after a hopping demotion.
+    if (value.level === "strong") {
+      value = {
+        headline: "Hold — short-tenure pattern",
+        level: "fair",
+        detail: `${tenure.caveat ?? tenure.flagDetail ?? "Short completed stints on the résumé."} ${value.detail}`,
+      };
+    }
   }
 
   const candidate: Candidate = {
@@ -876,7 +946,12 @@ export function mapCandidate(input: MapInput): Candidate {
     revNote: "No human review yet — read synced from submitted materials.",
     why,
     flag: risk,
-    next: (input.decisionOverride ? nextFor(normalizeDecision(input.decisionOverride)) : input.read?.next) || nextFor(decision),
+    // After a tenure demotion, ignore stale Claude "Interview" next-step copy.
+    next: input.decisionOverride
+      ? nextFor(normalizeDecision(input.decisionOverride))
+      : tenureDemotedInterview
+        ? nextFor(decision)
+        : input.read?.next || nextFor(decision),
     survivor: decision === "interview",
     value,
     caveat,

@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { env, hasAnthropic } from "../env";
 import { gradeLog } from "../triage/grade-log";
+import { analyzeTenureStability, capTenureCategoryScore } from "../triage/tenure-stability";
 import type { SeatContext } from "../jobs/seat-context";
 import type {
   AnswerGradePayload,
@@ -137,6 +138,11 @@ VALIDATION GATE (protect against AI-overwritten text):
 - Read the reasoning IN the answers, not what they claim. If human-authentic and matches the claimed stratum → CONFIRMED (basis: reasoning). If human-authentic but weaker than claimed → DOWNGRADE to demonstrated level. If likely AI-generated (mirrors job-post language, generic closers, polish without specific detail, cross-source inconsistency) → TEXT UNRELIABLE: stop scoring stratum/writing from prose, fall back to tenure → role-level deduction → references (weight references highest). Set confidence accordingly. ai_likelihood is a probability, NEVER an auto-reject.
 
 VERIFICATION (separate from scoring — never changes the fit number): compare application claims against the public professional profile, job-relevant only. Verdicts: CONFIRMED, DISCREPANCY (give the conflicting application vs profile lines), UNVERIFIABLE. Pull contradictions and auth-walled items to the top as things only a human can settle.
+
+TENURE CATEGORY (hard — do not soft-ball hoppers):
+- Score "tenure" from COMPLETED role lengths on the résumé. A current open-ended role does not erase short exits before it.
+- 2+ completed roles under ~18 months = hopping pattern: tenure points must land in the bottom 40% of the category max (severe / no multi-year anchor → bottom 20%). Do not award near-max tenure for "recent relevant experience" when the pattern is short stints.
+- Name the short roles in digIn.careerRead / resolve when the pattern is present.
 
 ANSWER GRADING — apply this filter order to each answer:
 1. AI FIRST: does the answer read as AI-generated (mirrors job-post language near-verbatim, generic closers, polish without lived detail, style inconsistent with the candidate's other writing)? If yes the verdict is AI — that IS the label; do not grade machine text on substance.
@@ -473,6 +479,15 @@ function clampCategories(
 
 function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): EvaluatorOutput {
   const categoryScores = clampCategories(parsed.categoryScores, input.weights);
+  // Deterministic tenure cap — LLM soft-balling short stints must not inflate the total.
+  if (typeof categoryScores.tenure === "number" && typeof input.weights.tenure === "number") {
+    const stability = analyzeTenureStability(input.roles);
+    categoryScores.tenure = capTenureCategoryScore(
+      categoryScores.tenure,
+      input.weights.tenure,
+      stability,
+    );
+  }
   const total = Object.values(categoryScores).reduce((sum, v) => sum + v, 0);
   const complement = parsed.complement === "owner" ? "owner" : "technician";
 
@@ -545,6 +560,13 @@ function heuristicEvaluate(input: EvaluatorInput): EvaluatorOutput {
     },
     input.weights,
   );
+  if (typeof categoryScores.tenure === "number" && typeof input.weights.tenure === "number") {
+    categoryScores.tenure = capTenureCategoryScore(
+      categoryScores.tenure,
+      input.weights.tenure,
+      analyzeTenureStability(input.roles),
+    );
+  }
   const total = Object.values(categoryScores).reduce((sum, v) => sum + v, 0);
 
   const roReads = input.roles.map((r) => ({
