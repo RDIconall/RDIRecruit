@@ -268,7 +268,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
         ]
       : [
           "Should we interview them?",
-          "What’s the one thing that would change the call?",
+          "What's the one thing that would change the call?",
           "How do they stack against the rest of the pool?",
         ];
 
