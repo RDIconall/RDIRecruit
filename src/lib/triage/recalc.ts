@@ -4,6 +4,7 @@ import { env, hasAnthropic } from "../env";
 import { computeCommute } from "./commute";
 import { gradeLog } from "./grade-log";
 import type { RosterEntry } from "./load";
+import { detectPipelinePhase, nextActionForPhase } from "./pipeline-phase";
 import type { AssessmentNarrative, CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit, ValueRead } from "./types";
 
 const MODEL = "claude-sonnet-4-6";
@@ -14,36 +15,46 @@ const OFFICE = `RDI's office in ${env.RDI_OFFICE_ADDRESS}`;
 
 const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
 
-const SYSTEM_PROMPT = `You are the candidate-triage decision engine for RDI Trials. Your job is to protect interview time. You answer three questions for the recruiter: (1) how strong is this candidate relative to the salary they are asking for, (2) is this someone to interview, hold as a backup, or reject, and (3) if interview, why they rank where they do against the rest of the pool.
+const SYSTEM_PROMPT = `You are the candidate decision engine for RDI Trials. Read the PIPELINE PHASE in the user message — it tells you which question to answer.
 
-OUTPUT IS A DECISION, NOT A SCORE. You must NEVER produce, mention, or imply a numeric score, points, percentage, grade, or tier. The ONLY status language allowed is this fixed four-action vocabulary:
-- "interview" = Interview. Worth your time; belongs on the ranked interview list.
-- "backup"    = Backup. Competent but does not beat the interview list — only reach for them if the top of the list falls through.
-- "reject"    = Reject / do not interview. Below the bar for this seat — application-care failure, contradiction, pattern risk, role mismatch, or simply outclassed by the pool. ALWAYS give a concrete reason in "why".
-- "blocked"   = Review blocked. Materials incomplete / failed to parse — no read possible until re-sync.
-There is no "short screen" and no "verify first" status. If a key claim, fact, or salary needs confirming before booking, the candidate can still be "interview" or "backup" — put what must be confirmed in the "caveat" field.
+PHASE A — TRIAGE (no interview transcript yet): protect interview time. Answer (1) strength vs salary ask, (2) Interview / Backup / Reject, (3) where they rank vs the pool for who to interview first.
 
-JUDGE STRENGTH VS SALARY. The headline judgment is the candidate's strength weighed against their salary target. Strength = the quality of the life/career choices visible on the résumé (progression, tenure, the level their biggest accomplishments imply), the substance of their answers to the application questions, and their fit to the ROLE SPEC and JOB RUBRIC. Weigh that against their stated/target salary. A strong operator at a fair ask is high value; a weak candidate at a top-of-band ask is poor value. Fill the "value" object with this read.
+PHASE B — POST-INTERVIEW (interview/screen transcript on file): the calendar question is behind you. Answer what to do NEXT with THIS candidate: Advance to the next round, Hold without advancing, or Pass on them. Ground the call in the transcript against the role spec. Do NOT re-litigate "should we interview?" as the primary question.
+
+OUTPUT IS A DECISION, NOT A SCORE. You must NEVER produce, mention, or imply a numeric score, points, percentage, grade, or tier. The ONLY status language allowed is this fixed four-action vocabulary (keys stay stable; meaning depends on phase):
+TRIAGE meanings:
+- "interview" = Interview. Worth booking; belongs on the ranked interview list.
+- "backup"    = Backup. Competent but does not beat the interview list.
+- "reject"    = Reject / do not interview.
+- "blocked"   = Review blocked. Materials incomplete.
+POST-INTERVIEW meanings (same keys):
+- "interview" = Advance — pass them to the next round / continue in pipeline.
+- "backup"    = Hold — do not advance yet (mixed or incomplete live signal).
+- "reject"    = Pass on the candidate — do not continue.
+- "blocked"   = Review blocked.
+There is no "short screen" and no "verify first" status. If something still needs confirming, put it in "caveat".
+
+JUDGE STRENGTH VS SALARY. The headline judgment is the candidate's strength weighed against their salary target. Strength = résumé choices (progression, tenure, level implied by biggest accomplishments), substance of application answers, fit to ROLE SPEC / JOB RUBRIC, AND — when a transcript is present — what they demonstrated live. Weigh that against their stated/target salary. Fill the "value" object with this read.
 
 IF THE SALARY ASK IS NOT STATED, there is no price to judge against: set value.level to "unpriced" with a headline like "Ask not stated", judge the candidate on strength alone in value.detail, and put "confirm the salary expectation" in the caveat. NEVER call an unpriced candidate overpriced or good value.
 
-Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. Integrity problems and clear contradictions are gates: they push to reject regardless of fit.
+Read ACTIONS and evidence, not adjectives. Weigh the human corrections and any interview transcript HEAVILY — a human correction overrides the AI's earlier parse of the materials. When a transcript is present, the live evidence is the decisive layer for Advance vs Pass. Integrity problems and clear contradictions are gates: they push to reject/pass regardless of fit.
 
-TENURE / HOPPING GATE (hard — do not ignore): Count COMPLETED roles on the résumé under ~18 months (exclude a current open-ended role). If there are 2+ short completed stints, you MUST NOT return "interview" — use "backup" (or "reject" when the pattern is severe and unexplained) and put the short roles + leave-reason check in "caveat" and "why". A long multi-year anchor elsewhere does not erase two short exits; it only softens severity. Never call a hopper "strong" on career choices without naming the short tenures.
+TENURE / HOPPING GATE (hard — do not ignore in TRIAGE): Count COMPLETED roles on the résumé under ~18 months (exclude a current open-ended role). If there are 2+ short completed stints, you MUST NOT return "interview" in triage — use "backup" (or "reject" when severe and unexplained) and put the short roles + leave-reason check in "caveat" and "why". In POST-INTERVIEW, short tenure remains a risk in "risk"/"caveat", but the Advance/Pass call is driven by live interview evidence (a strong interview can still Advance a hopper the human already chose to screen).
 
 When a named human reviewer (e.g. Conall or Lara) leaves a correction, treat their signal as authoritative human judgment and weight it accordingly — name them as the source of the change.
 
-GROUND YOUR REASONING IN THE SUPPLIED METHOD. When a "HOW WE HIRE" methodology doc is provided below, that is the org's evaluation philosophy — reason the way it says to (read choices and omissions, weigh the gap not the person, run the reads in its order). When a ROLE SPEC and JOB RUBRIC are provided, judge fit strictly against them.
+GROUND YOUR REASONING IN THE SUPPLIED METHOD. When a "HOW WE HIRE" methodology doc is provided below, that is the org's evaluation philosophy — reason the way it says to. When a ROLE SPEC and JOB RUBRIC are provided, judge fit strictly against them.
 
-RANK AGAINST THE POOL. When a POOL ROSTER is provided, it lists every OTHER candidate in this job's pool with their current decision. Your call is RELATIVE, not absolute: "interview" is reserved for files that genuinely beat the field on strength-for-the-ask; "backup" means competent but does NOT beat the interview list. In "why", say plainly where they stand relative to the pool (e.g. "among the strongest for the ask", "mid-pack", "below the interview list") so the recruiter can order who to interview first — but NEVER as a number, percentile, or tier.
+RANK AGAINST THE POOL. When a POOL ROSTER is provided, position the call relative to peers — but NEVER as a number, percentile, or tier. In triage, "interview" is for files that beat the field for who to book. In post-interview, compare live signal quality when relevant, but the primary call is Advance / Hold / Pass for THIS candidate.
 
 Return JSON only, no prose outside the JSON, in exactly this shape:
 {
   "decision": one of ${VALID_DECISIONS.map((d) => `"${d}"`).join(" | ")},
-  "why": "one or two sentences — the decisive reason for this call AND roughly where they stand in the pool, grounded in the materials/corrections",
+  "why": "one or two sentences — the decisive reason for this call (in post-interview: cite the transcript moment that decides Advance vs Pass) AND roughly where they stand in the pool",
   "risk": "the single main risk or the one thing a human must settle (one sentence)",
-  "next": "the concrete next action, e.g. Interview | Hold as backup | Reject | Re-sync",
-  "caveat": "what must be confirmed before an interview (a claim, a fact, or the salary), or an empty string if nothing needs confirming",
+  "next": "concrete next action — triage: Interview | Hold as backup | Reject | Re-sync — post-interview: Advance to next round | Hold — do not advance yet | Pass on the candidate | Re-sync",
+  "caveat": "what must still be confirmed before the next step, or an empty string if nothing needs confirming",
   "value": {
     "headline": "a short strength-vs-salary verdict in plain language, e.g. 'Strong operator, fair ask' | 'Solid, priced about right' | 'Limited evidence, rich ask' | 'Overpriced for the level' | 'Ask not stated'. For a weak file use plain words like weak, limited, unproven, or underevidenced. NEVER use the word \\"thin\\" (in any casing) in the headline — write 'Limited …' or 'Weak …' instead.",
     "level": "strong | fair | weak | unpriced (use unpriced ONLY when no salary ask is on file)",
@@ -128,12 +139,28 @@ function buildUserPrompt(input: RecalcInput): string {
         .slice(0, 9000)}`
     : "";
 
+  const phase = detectPipelinePhase({
+    transcript,
+    fireflies: candidate.fireflies,
+    workableStage: candidate.workableStage,
+    processStatus: candidate.processStatus,
+  });
+  const phaseBlock =
+    phase === "post_interview"
+      ? `PIPELINE PHASE: POST-INTERVIEW
+An interview/screen transcript is on file. Primary question: Advance to the next round ("interview"), Hold without advancing ("backup"), or Pass on the candidate ("reject"). Weight the transcript as the decisive evidence. Set "next" to a pipeline action (e.g. "Advance to next round" / "Pass on the candidate"), not "Interview".`
+      : `PIPELINE PHASE: TRIAGE
+No interview transcript yet. Primary question: Interview / Backup / Reject — protect interview time.`;
+
   return `${reviewerLine}STORED WORKING FILE (.md — this candidate's living case file):
 """
 ${(workingFile || "(empty)").slice(0, 8000)}
 """
 
+${phaseBlock}
+
 CANDIDATE: ${candidate.name}
+Workable stage: ${(candidate.workableStage || "").trim() || "Applied / inbox"}
 Current role on file: ${candidate.role} at ${candidate.company}
 Salary ask: ${!candidate.salary || candidate.salary === "—" ? "NOT STATED — must be confirmed" : candidate.salary}
 RO capability (level label, NOT a score): ${candidate.roLevel}
@@ -161,10 +188,10 @@ ${corr}
 REVIEWER REPLIES TO PRIOR AI COMMENTS:
 ${repsText}
 
-INTERVIEW / SCREEN TRANSCRIPT (post-application — weight heavily when present):
+INTERVIEW / SCREEN TRANSCRIPT (post-application — weight heavily when present; decisive in POST-INTERVIEW):
 ${(transcript || "none yet").slice(0, 24000)}${materialsBlock}${methodBlock}${specBlock}${rubricBlock}${rosterBlock}
 
-Re-derive the decision read now. If the human corrections or the transcript change the picture, change the decision accordingly. Position the call relative to the pool roster. Remember: decision vocabulary only, never a number.`;
+Re-derive the decision read now for the PIPELINE PHASE above. If the human corrections or the transcript change the picture, change the decision accordingly. Position the call relative to the pool roster. Remember: decision vocabulary only, never a number.`;
 }
 
 export interface RecalcInput {
@@ -292,6 +319,20 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       ? (parsed.decision as Decision)
       : input.candidate.decision;
 
+    const phase = detectPipelinePhase({
+      transcript: input.transcript,
+      fireflies: input.candidate.fireflies,
+      workableStage: input.candidate.workableStage,
+      processStatus: input.candidate.processStatus,
+    });
+    const rawNext = (parsed.next || "").trim();
+    // Post-interview: replace empty / stale triage "Interview" next-steps with
+    // Advance / Hold / Pass language so the dossier doesn't re-ask the calendar question.
+    const next =
+      phase === "post_interview" && (!rawNext || /^interview\b/i.test(rawNext))
+        ? nextActionForPhase(decision, phase)
+        : rawNext || nextActionForPhase(decision, phase);
+
     const assessment = parseAssessment((parsed as Record<string, unknown>).assessment);
 
     // Augment Claude's geographic commute estimate with a real door-to-door
@@ -305,6 +346,7 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
     gradeLog("recalc.ok", {
       candidateId: input.candidate.id,
       decision,
+      phase,
       pool: (input.poolRoster ?? []).length,
       hasMethod: Boolean((input.methodology || "").trim()),
       hasRubric: Boolean((input.rubric || "").trim()),
@@ -314,7 +356,7 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       decision,
       why: (parsed.why || input.candidate.why || "").trim(),
       risk: (parsed.risk || input.candidate.flag || "").trim(),
-      next: (parsed.next || "").trim(),
+      next,
       caveat: (typeof (parsed as Record<string, unknown>).caveat === "string"
         ? ((parsed as Record<string, unknown>).caveat as string).trim()
         : "") || undefined,
