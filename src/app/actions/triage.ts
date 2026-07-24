@@ -11,6 +11,7 @@ import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/workin
 import { gradeCandidate } from "@/lib/triage/grade";
 import { prepareGradingInputs, describeMissing } from "@/lib/triage/readiness";
 import { chatWithClaude } from "@/lib/triage/chat";
+import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-phase";
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
@@ -678,6 +679,21 @@ export async function sendCandidateChat(input: {
     return { name: other.candidate.name, content };
   };
 
+  const interviewCount =
+    acts.filter((a) => a.type === "interview" && a.body.trim()).length +
+    (one?.candidate.fireflies ?? []).filter((f) => f.transcript?.trim()).length +
+    ((one?.slice.transcript ?? "").trim() ? 1 : 0);
+  const phase = detectPipelinePhase({
+    activity: acts,
+    transcript: one?.slice.transcript,
+    fireflies: one?.candidate.fireflies,
+    workableStage: one?.candidate.workableStage,
+    processStatus: one?.candidate.processStatus,
+  });
+  const phaseBlock = one
+    ? phaseContextBlock({ phase, candidate: one.candidate, interviewCount })
+    : "";
+
   const reply = await chatWithClaude({
     candidateName: one?.candidate.name,
     workingFile,
@@ -685,6 +701,8 @@ export async function sendCandidateChat(input: {
     rubric: rubric.rubricMd,
     jobSpec: rubric.specMd,
     roster: rosterText,
+    phase,
+    phaseBlock,
     fetchOtherCandidate: roster.length ? fetchOtherCandidate : undefined,
     // Cap the turns we replay so a long thread can't blow the context window.
     history: withUser.slice(-24),

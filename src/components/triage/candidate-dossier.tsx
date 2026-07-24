@@ -1,8 +1,13 @@
 "use client";
 
 import { CSSProperties, useEffect, useMemo, useState } from "react";
-import { APP, DECISION_LABEL, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
+import { APP, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
+import {
+  decisionLabelForPhase,
+  detectPipelinePhase,
+  type PipelinePhase,
+} from "@/lib/triage/pipeline-phase";
 import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
@@ -238,15 +243,34 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   if (!candidate) return null;
   const c = candidate;
 
-  const decisionLabel = DECISION_LABEL[c.decision];
+  const activity = ws.activity[id] ?? [];
+  const phase: PipelinePhase = detectPipelinePhase({
+    activity,
+    transcript: ws.transcripts[id],
+    fireflies: c.fireflies,
+    workableStage: c.workableStage,
+    processStatus: c.processStatus,
+  });
+  const decisionLabel = decisionLabelForPhase(c.decision, phase);
   const decisionC = decisionColor(c.decision);
   const isDq = !!ws.dq[id];
-  const activity = ws.activity[id] ?? [];
   const chat = ws.chat[id] ?? [];
   const chatThinking = !!wsApi.chatBusy[id];
   const busy = !!wsApi.busy[id];
   const regenAt = ws.regen[id];
   const advanceSlug = nextStageSlug(c.workableStage, stages);
+  const warRoomStarters =
+    phase === "post_interview"
+      ? [
+          "Advance to the next round, or pass?",
+          "What did the interview actually prove vs the spec?",
+          "What would make you hold instead of advancing?",
+        ]
+      : [
+          "Should we interview them?",
+          "What's the one thing that would change the call?",
+          "How do they stack against the rest of the pool?",
+        ];
 
   const steps = c.careerProgression?.steps ?? [];
   const record = useMemo(() => buildRecord(c), [c]);
@@ -402,7 +426,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
           style={mono({ fontSize: 12.5, color: decisionC, background: APP.surface, border: `1px solid ${APP.hair}`, borderRadius: 5, padding: "5px 10px", cursor: "pointer" })}
         >
           {DECISION_OPTIONS.map((d) => (
-            <option key={d} value={d}>{DECISION_LABEL[d]}</option>
+            <option key={d} value={d}>{decisionLabelForPhase(d, phase)}</option>
           ))}
         </select>
         {advanceSlug && (
@@ -1036,8 +1060,35 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
         }
       >
         <p style={{ margin: "0 0 14px", fontSize: 13.5, lineHeight: 1.5, color: APP.muted }}>
-          Ask Claude about this candidate — it reads the cached assessment, activity log, résumé, and spec. Chat is reasoning only; use the assessment card above to re-run and persist the read.
+          {phase === "post_interview"
+            ? "Interview evidence is on file — Claude’s job here is the next pipeline move: advance to the next round, hold, or pass. Chat is reasoning only; use Update assessment above to persist the call."
+            : "Ask Claude whether this file clears the bar for an interview. Chat is reasoning only; use Update assessment above to persist the read."}
         </p>
+        {chat.length === 0 && !chatThinking && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
+            {warRoomStarters.map((q) => (
+              <button
+                key={q}
+                type="button"
+                onClick={() => {
+                  wsApi.sendChat(id, q);
+                }}
+                style={{
+                  cursor: "pointer",
+                  background: APP.surface,
+                  border: `1px solid ${APP.hair}`,
+                  borderRadius: 6,
+                  padding: "6px 12px",
+                  fontSize: 12.5,
+                  color: APP.ink2,
+                  textAlign: "left",
+                }}
+              >
+                {q}
+              </button>
+            ))}
+          </div>
+        )}
         <div style={{ display: "flex", flexDirection: "column", gap: 12, marginBottom: 14 }}>
           {chat.map((m, i) => {
             return (
@@ -1072,7 +1123,11 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
                 sendChat();
               }
             }}
-            placeholder="Ask about this candidate…  (⌘↵ to send)"
+            placeholder={
+              phase === "post_interview"
+                ? "Advance, hold, or pass — ask with the transcript in mind…  (⌘↵ to send)"
+                : "Ask about interviewing this candidate…  (⌘↵ to send)"
+            }
             rows={2}
             style={{ ...textareaStyle, flex: 1 }}
           />
