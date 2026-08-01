@@ -10,9 +10,9 @@ import {
 } from "@/lib/triage/pipeline-phase";
 import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
+import { answerQuestionKey, compareAnswerToPool } from "@/lib/triage/answer-grades";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
-import { getWorkingFileContent } from "@/app/actions/triage";
 import { Avatar, WorkableStageChip } from "./pool-shared";
 import { nextStageSlug, type StageColumn } from "@/lib/triage/stages";
 import { CM } from "@/lib/triage/theme";
@@ -71,17 +71,17 @@ function periodStartKey(period: string | undefined | null): number {
   return year * 12 + (mi >= 0 ? mi : 0);
 }
 
-function reviewedList(c: Candidate, activityCount: number): string[] {
-  const out: string[] = [];
-  if (c.resume?.hasResume) out.push(c.resume.roles.length ? `Résumé — ${c.resume.roles.length} roles` : "Résumé");
-  if (c.cover?.hasLetter) out.push("Cover letter");
-  if (c.answers?.length) out.push(`${c.answers.length} application ${c.answers.length === 1 ? "answer" : "answers"}`);
-  if (c.salary && c.salary !== "—") out.push(`Stated salary — ${c.salary}`);
-  out.push(`Logistics — ${c.logistics.location || "—"}`);
-  const interviews = (c.fireflies ?? []).filter((f) => f.transcript?.trim()).length;
-  if (interviews) out.push(`${interviews} interview ${interviews === 1 ? "transcript" : "transcripts"}`);
-  if (activityCount) out.push(`Activity log — ${activityCount} ${activityCount === 1 ? "entry" : "entries"}`);
-  return out;
+/**
+ * Fold the "main risk" into the assessment narrative as a closing sentence, so
+ * the read is one paragraph instead of prose + a detached risk row (#11).
+ */
+function joinNarrativeWithRisk(why: string | undefined | null, risk: string | undefined | null): string {
+  const w = (why ?? "").trim();
+  const r = (risk ?? "").trim();
+  if (!r) return w;
+  const riskSentence = `The main risk: ${r}${/[.!?]$/.test(r) ? "" : "."}`;
+  if (!w) return riskSentence;
+  return `${w}${/[.!?]$/.test(w) ? "" : "."} ${riskSentence}`;
 }
 
 /** Split a prose block into paragraphs on blank lines (Claude separates with \n\n). */
@@ -194,7 +194,7 @@ function buildRecord(c: Candidate): RecordRow[] {
 // ---------------------------------- component ----------------------------------
 
 export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
-  const { findCandidate } = useTriageData();
+  const { findCandidate, candidates } = useTriageData();
   const ws = wsApi.ws;
   const id = activeId;
   const narrow = useIsNarrow();
@@ -251,8 +251,10 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     workableStage: c.workableStage,
     processStatus: c.processStatus,
   });
-  const decisionLabel = decisionLabelForPhase(c.decision, phase);
   const decisionC = decisionColor(c.decision);
+  // The narrative and its main risk read as one paragraph (#11) — not a prose
+  // block followed by a detached "Main risk" row restating the same concern.
+  const assessmentNarrative = joinNarrativeWithRisk(c.why, c.flag);
   const isDq = !!ws.dq[id];
   const chat = ws.chat[id] ?? [];
   const chatThinking = !!wsApi.chatBusy[id];
@@ -274,6 +276,25 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
 
   const steps = c.careerProgression?.steps ?? [];
   const record = useMemo(() => buildRecord(c), [c]);
+
+  // Every other candidate's graded verdict per question, so each answer can be
+  // placed against the pool's answers to the SAME question (#14). The verdicts
+  // are the AI grader's own per-candidate reads; the comparison is assembled
+  // here because the grader never sees more than one candidate at a time.
+  const poolVerdictsByQuestion = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const other of candidates) {
+      if (other.id === id) continue;
+      for (const ans of other.answers ?? []) {
+        const key = answerQuestionKey(ans.q);
+        if (!key || !ans.verdict) continue;
+        const arr = map.get(key) ?? [];
+        arr.push(ans.verdict);
+        map.set(key, arr);
+      }
+    }
+    return map;
+  }, [candidates, id]);
 
   const chartPts = useMemo<ChartPoint[]>(() => {
     if (!c.careerProgression?.hasData) return [];
@@ -311,21 +332,6 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     return ordered;
   }, [c.careerProgression?.hasData, c.resume?.roles, steps, id, wsApi]);
 
-  const downloadMd = async () => {
-    try {
-      const { content } = await getWorkingFileContent({ candidateId: id });
-      const blob = new Blob([content], { type: "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${id}.md`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    } catch {
-      /* best-effort */
-    }
-  };
-
   const sendChat = () => {
     const v = chatDraft.trim();
     if (!v || chatThinking) return;
@@ -361,7 +367,6 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     { k: "RO level", v: stratumLevel(c.roLevel) },
     { k: "Answers", v: <DotInline read={c.answersRead} /> },
     { k: "Vs. spec", v: <DotInline read={c.specRead} /> },
-    { k: "Recommendation", v: <span style={{ color: decisionC, fontWeight: 600 }}>{decisionLabel}</span> },
   ];
 
   if (isAdvancedStage(c.workableStage)) {
@@ -373,7 +378,6 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
 
   const blockedReadiness = c.decision === "blocked" && c.readiness && !c.readiness.ready ? c.readiness : null;
 
-  const reviewed = reviewedList(c, activity.length);
   const hasAssessment = !!(c.assessment && (c.assessment.bio || c.assessment.application || c.assessment.commute));
 
   // bio paragraphs — prefer Claude's full written biography; fall back to the
@@ -617,15 +621,9 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
 
       {/* Claude assessment — pinned dark card */}
       <div id="assessment" style={{ scrollMarginTop: 104, margin: "26px 0", background: APP.ink, color: "#fff", borderRadius: 10, padding: narrow ? "18px 16px" : "22px 24px" }}>
-        <div style={mono({ fontSize: 11, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.5)", marginBottom: 10 })}>
-          Claude&apos;s assessment
-        </div>
         {/* headline strength-vs-salary value read */}
         {c.value && c.value.level !== "none" && (
           <div style={{ marginBottom: 14 }}>
-            <div style={mono({ fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: "rgba(255,255,255,0.45)", marginBottom: 4 })}>
-              Strength vs salary target
-            </div>
             <div style={{ fontSize: 19, fontWeight: 700, letterSpacing: "-0.01em", color: valueHeadlineColor(c.value.level) }}>
               {c.value.headline}
             </div>
@@ -634,32 +632,8 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
             )}
           </div>
         )}
-        <p style={{ margin: "0 0 14px", fontSize: 17, lineHeight: 1.5 }}>{c.why || "No assessment on file yet."}</p>
-        <AssessRow label="Recommendation" value={decisionLabel} valueColor={c.decision === "interview" ? "#93b4ff" : c.decision === "reject" ? "#f0a89e" : "#fff"} />
+        <p style={{ margin: "0 0 14px", fontSize: 17, lineHeight: 1.5 }}>{assessmentNarrative || "No assessment on file yet."}</p>
         {c.caveat && <AssessRow label="Confirm first" value={c.caveat} valueColor="#f5d28a" />}
-        {c.flag && <AssessRow label="Main risk" value={c.flag} />}
-        {c.next && <AssessRow label="Next" value={c.next} />}
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
-          <div style={mono({ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 8 })}>Check the evidence</div>
-          <div style={{ display: "grid", gridTemplateColumns: narrow ? "1fr" : "repeat(3, minmax(0, 1fr))", gap: 8 }}>
-            <EvidenceLink href={c.answers.length ? "#answers" : "#dossier"} label="Answers" value={c.answers.length ? c.answersRead.label : "No answers"} />
-            <EvidenceLink href="#application" label="Vs. spec" value={c.specRead.label} />
-            <EvidenceLink href={record.length ? "#record" : "#resume"} label="Record" value={record.length ? `${record.length} roles` : "No parsed record"} />
-            <EvidenceLink href="#resume" label="Resume" value={c.resume.hasResume ? "On file" : "Missing"} />
-            <EvidenceLink href="#dossier" label="Logistics" value={c.logistics.likelihood && c.logistics.likelihood !== "—" ? c.logistics.likelihood : c.locationShort || "—"} />
-            <EvidenceLink href="#notes" label="Team notes" value={activity.length ? `${activity.length} entries` : "None yet"} />
-          </div>
-        </div>
-        <div style={{ marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.12)" }}>
-          <div style={mono({ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 6 })}>Reviewed</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {reviewed.map((r) => (
-              <span key={r} style={mono({ fontSize: 11.5, color: "rgba(255,255,255,0.82)", border: "1px solid rgba(255,255,255,0.18)", borderRadius: 4, padding: "3px 8px" })}>
-                {r}
-              </span>
-            ))}
-          </div>
-        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14, marginTop: 16, flexWrap: "wrap" }}>
           <span style={mono({ fontSize: 11, color: "rgba(255,255,255,0.45)" })}>
             {c.assessedAt ? `Reviewed ${formatStamp(c.assessedAt)}` : "Cached at ingest"} · saved to {id}.md
@@ -669,12 +643,9 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
           <button
             onClick={regenerate}
             disabled={busy}
-            style={mono({ cursor: busy ? "default" : "pointer", background: busy ? "rgba(255,255,255,0.12)" : "#fff", color: busy ? "rgba(255,255,255,0.6)" : APP.ink, border: "1px solid #fff", borderRadius: 5, padding: "5px 12px", fontSize: 12, fontWeight: 600 })}
+            style={mono({ cursor: busy ? "default" : "pointer", background: "transparent", color: busy ? "rgba(255,255,255,0.5)" : "#fff", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 5, padding: "5px 12px", fontSize: 12 })}
           >
-            {busy ? "Regenerating…" : hasAssessment ? "Regenerate assessment" : "Generate full assessment"}
-          </button>
-          <button onClick={downloadMd} style={mono({ cursor: "pointer", background: "transparent", color: "#fff", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 5, padding: "5px 12px", fontSize: 12 })}>
-            Download .md
+            {busy ? "Regenerating…" : hasAssessment ? "Update assessment" : "Generate full assessment"}
           </button>
         </div>
       </div>
@@ -682,85 +653,43 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
       {/* application answers — surfaced right under the assessment (their own words) */}
       {c.answers.length > 0 && (
         <Section id="answers" title="Their answers">
-          <p style={mono({ margin: "0 0 14px", fontSize: 12, color: APP.faint })}>
-            Shown in the order answered · verdict + concepts + grader note
-            {c.answersRead?.label ? ` · Pool read: ${c.answersRead.label}` : ""}
-          </p>
           {c.answers.map((a, i) => {
             const meta = CM(a.kind);
             const verdictLabel = a.verdict || meta.label;
+            const poolLine = compareAnswerToPool(a.verdict, poolVerdictsByQuestion.get(answerQuestionKey(a.q)) ?? []);
             return (
-              <div
-                key={i}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: narrow ? "1fr" : "1fr 280px",
-                  gap: narrow ? 8 : 22,
-                  padding: "14px 0",
-                  borderBottom: `1px solid ${APP.line}`,
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>
-                      <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
-                      {a.q || "Application question"}
-                    </div>
-                    <span
-                      style={mono({
-                        fontSize: 11,
-                        fontWeight: 700,
-                        color: meta.color,
-                        background: meta.hl === "transparent" ? APP.line2 : meta.hl,
-                        border: `1px solid ${APP.hair}`,
-                        borderRadius: 4,
-                        padding: "2px 7px",
-                      })}
-                    >
-                      {verdictLabel}
-                    </span>
+              <div key={i} style={{ padding: "14px 0", borderBottom: `1px solid ${APP.line}` }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 6 }}>
+                  <div style={{ fontSize: 13, fontWeight: 600, color: APP.ink }}>
+                    <span style={mono({ color: APP.faint, marginRight: 6 })}>{i + 1}.</span>
+                    {a.q || "Application question"}
                   </div>
-                  <ExpandableText text={a.a} />
-                  {!!a.present?.length && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                      {a.present.map((p) => (
-                        <span
-                          key={p}
-                          style={mono({
-                            fontSize: 11,
-                            color: APP.ink2,
-                            background: APP.line2,
-                            border: `1px solid ${APP.hair}`,
-                            borderRadius: 4,
-                            padding: "2px 7px",
-                          })}
-                        >
-                          {p}
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  <span
+                    style={mono({
+                      fontSize: 11,
+                      fontWeight: 700,
+                      color: meta.color,
+                      background: meta.hl === "transparent" ? APP.line2 : meta.hl,
+                      border: `1px solid ${APP.hair}`,
+                      borderRadius: 4,
+                      padding: "2px 7px",
+                    })}
+                  >
+                    {verdictLabel}
+                  </span>
                 </div>
-                <div style={{ minWidth: 0 }}>
-                  {a.comment ? (
-                    <div
-                      style={mono({
-                        fontSize: 12.5,
-                        lineHeight: 1.55,
-                        color: APP.secondary,
-                        background: APP.accentSoft,
-                        border: `1px solid ${APP.accentBorder}`,
-                        borderRadius: 8,
-                        padding: "9px 11px",
-                      })}
-                    >
-                      <span style={{ color: APP.accent, fontWeight: 600 }}>Grader note</span>
-                      <span style={{ display: "block", marginTop: 3 }}>{a.comment}</span>
-                    </div>
-                  ) : (
-                    !narrow && <span style={mono({ fontSize: 11.5, color: APP.faint })}>No grader note</span>
-                  )}
-                </div>
+                <p style={{ margin: "6px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2, whiteSpace: "pre-wrap" }}>{a.a}</p>
+                {(poolLine || a.comment) && (
+                  <p style={mono({ margin: "8px 0 0", fontSize: 12.5, lineHeight: 1.55, color: APP.secondary })}>
+                    {poolLine && (
+                      <span style={{ color: meta.color, fontWeight: 600 }}>
+                        Vs the pool: {poolLine}.
+                      </span>
+                    )}
+                    {poolLine && a.comment ? " " : ""}
+                    {a.comment}
+                  </p>
+                )}
               </div>
             );
           })}
@@ -1185,28 +1114,6 @@ function Section({ id, title, right, children }: { id?: string; title: string; r
   );
 }
 
-function EvidenceLink({ href, label, value }: { href: string; label: string; value: string }) {
-  return (
-    <a
-      href={href}
-      style={{
-        display: "block",
-        textDecoration: "none",
-        color: "#fff",
-        border: "1px solid rgba(255,255,255,0.16)",
-        borderRadius: 8,
-        padding: "8px 10px",
-        background: "rgba(255,255,255,0.04)",
-      }}
-    >
-      <span style={mono({ display: "block", fontSize: 10.5, color: "rgba(255,255,255,0.45)", letterSpacing: "0.05em", textTransform: "uppercase" })}>
-        {label}
-      </span>
-      <span style={{ display: "block", marginTop: 2, fontSize: 13.5, lineHeight: 1.35, color: "rgba(255,255,255,0.86)" }}>{value}</span>
-    </a>
-  );
-}
-
 function AssessRow({ label, value, valueColor = "#fff" }: { label: string; value: string; valueColor?: string }) {
   return (
     <div style={{ display: "flex", gap: 12, marginTop: 8 }}>
@@ -1280,31 +1187,6 @@ function ActivityEvent({ e }: { e: ActivityEntry }) {
         </div>
       </div>
     </div>
-  );
-}
-
-/**
- * Body text that clamps past ~400 characters with a "Show more" toggle, so a
- * page of long application answers stops reading as one uninterrupted wall.
- * The clamp breaks on a word boundary; short text renders as a plain paragraph.
- */
-function ExpandableText({ text, clampAt = 400 }: { text: string; clampAt?: number }) {
-  const [open, setOpen] = useState(false);
-  const needsClamp = text.length > clampAt + 120; // don't clamp for a trivial tail
-  const shown = !needsClamp || open ? text : text.slice(0, text.lastIndexOf(" ", clampAt)) + "…";
-  return (
-    <>
-      <p style={{ margin: "6px 0 0", fontSize: 15, lineHeight: 1.55, color: APP.ink2, whiteSpace: "pre-wrap" }}>{shown}</p>
-      {needsClamp && (
-        <button
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          style={mono({ cursor: "pointer", background: "transparent", border: "none", padding: 0, marginTop: 4, fontSize: 12.5, color: APP.accent })}
-        >
-          {open ? "Show less" : "Show full answer"}
-        </button>
-      )}
-    </>
   );
 }
 
