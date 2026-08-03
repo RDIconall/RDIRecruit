@@ -95,6 +95,14 @@ export const DECISION_LABEL: Record<Decision, string> = {
   blocked: "Review blocked",
 };
 
+// The next action each decision implies, in triage language.
+export const DECISION_NEXT: Record<Decision, string> = {
+  interview: "Interview",
+  backup: "Hold as backup",
+  reject: "Reject",
+  blocked: "Re-sync",
+};
+
 // --- Post-decision process status (our pipeline, set in-app) ------------------
 // A separate dimension from the triage Decision: where a candidate we've decided
 // to pursue is in OUR process. Ordered as the workflow progresses.
