@@ -531,7 +531,41 @@ async function loadCrossRolePool(): Promise<TriagePool> {
   };
 }
 
+/**
+ * Pool rendered when Supabase does not answer (paused/unhealthy project,
+ * network failure). Every Supabase request carries a 30s timeout, so instead
+ * of hanging until the serverless function is killed at its duration cap
+ * (504 GATEWAY_TIMEOUT with no explanation), the page loads with this state.
+ */
+function unreachablePool(jobShortcode: string): TriagePool {
+  const crossRole = jobShortcode === CROSS_ROLE_SHORTCODE;
+  const base = emptyPool(
+    jobShortcode,
+    withCrossRoleOption([]),
+    crossRole ? "New across roles" : jobShortcode,
+  );
+  return {
+    ...base,
+    crossRole,
+    meta: {
+      ...base.meta,
+      healthState: "Database unreachable",
+      healthRead:
+        "Supabase did not respond in time, so no candidates could load. This usually means the Supabase project is paused, restarting, or unhealthy — check its dashboard, then reload this page.",
+    },
+  };
+}
+
 export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> {
+  try {
+    return await loadTriagePoolUnguarded(jobShortcode);
+  } catch (error) {
+    console.error("loadTriagePool failed — rendering unreachable-database pool", error);
+    return unreachablePool(jobShortcode);
+  }
+}
+
+async function loadTriagePoolUnguarded(jobShortcode: string): Promise<TriagePool> {
   if (jobShortcode === CROSS_ROLE_SHORTCODE) return loadCrossRolePool();
 
   const jobSummaries = await getPublishedJobs();
