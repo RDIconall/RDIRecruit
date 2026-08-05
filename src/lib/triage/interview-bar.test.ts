@@ -46,9 +46,17 @@ const refused = assessInterviewBar({ ...strongFile, refusedToAnswer: true });
 assert.equal(refused.clears, false);
 assert.match(refused.reason ?? "", /dash-filled/);
 
-// No score on file yet: the bar does not invent a band judgment.
+// No rubric read on file: strong answers can still carry the file…
 assert.equal(assessInterviewBar({ ...strongFile, total: null }).clears, true);
-// …but the answer-evidence gate still applies without a score.
+// …but with nothing graded and nothing standout, a stale model "interview" must
+// not ride through on the absence of a disqualifier.
+const nothingOnFile = assessInterviewBar({ ...strongFile, total: null, answersLevel: "mixed" });
+assert.equal(nothingOnFile.clears, false);
+assert.match(nothingOnFile.reason ?? "", /Nothing on file/);
+assert.equal(
+  assessInterviewBar({ ...strongFile, total: null, answersLevel: "none" }).clears,
+  false,
+);
 assert.equal(
   assessInterviewBar({ ...strongFile, total: null, answersLevel: "weak" }).clears,
   false,

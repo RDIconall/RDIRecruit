@@ -166,6 +166,44 @@ assert.equal(strongView.specRead.level, "strong");
 assert.equal(strongView.interviewGate?.clears, true);
 assert.equal(strongView.survivor, true);
 
+// No score row at all: a stale model "interview" cannot ride through on the
+// absence of a disqualifier. This is the shape that kept a weak applicant billed
+// as the best new candidate.
+const noRubricRead = deriveDecisionDetail(
+  input({
+    score: null,
+    read: { decision: "interview", why: "Great fit.", risk: "", next: "Interview" },
+    evals: {
+      ...input().evals,
+      answerGrades: [grade("OWNED"), grade("SURFACE"), grade("AI")],
+    },
+  }),
+);
+assert.equal(noRubricRead.decision, "backup");
+assert.match(noRubricRead.bar.reason ?? "", /Nothing on file/);
+
+// A model "strong" value headline cannot outrank the evidence: it is what orders
+// the interview list, so an unbacked "strong" must not take the top slot.
+const inflatedValue = mapCandidate(
+  input({
+    score: score(88),
+    evals: {
+      ...input().evals,
+      answerGrades: [grade("SURFACE"), grade("SURFACE"), grade("SURFACE")],
+    },
+    read: {
+      decision: "interview",
+      why: "Reads like the strongest in the pool.",
+      risk: "",
+      next: "Interview",
+      value: { headline: "Strong operator, fair ask", level: "strong", detail: "Reads strong." },
+    },
+  }),
+);
+assert.equal(inflatedValue.decision, "backup");
+assert.equal(inflatedValue.value.level, "fair");
+assert.notEqual(inflatedValue.value.headline, "Strong operator, fair ask");
+
 // A demoted file's copy names the reason instead of keeping the model's pitch.
 const demotedView = mapCandidate(
   input({

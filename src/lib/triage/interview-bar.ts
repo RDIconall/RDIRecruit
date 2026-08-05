@@ -2,15 +2,19 @@
  * Deterministic "does this file clear the bar for a first interview?" gate.
  *
  * Interview is the list a human works top-down, so it has to mean "worth your
- * calendar", not "the best of what we happen to have". Three paths were putting
+ * calendar", not "the best of what we happen to have". Several paths were putting
  * files on it that no one would call an A player:
  *   - the evaluator's borderline band was read as interview-ready,
  *   - a model read could return "interview" on an application whose answers own
- *     nothing (surface, evasive, AI-written, or dash-filled), and
+ *     nothing (surface, evasive, AI-written, or dash-filled),
  *   - a merely competent file with nothing standout in it read the same as one
- *     that clears the seat bar outright.
- * None of those is an interview-first file. They land in Backup until a human
- * says otherwise — a manual decision always wins over this gate.
+ *     that clears the seat bar outright, and
+ *   - a file with NO rubric read at all rode a stale model "interview" through,
+ *     because nothing in the gate was disqualifying it.
+ * None of those is an interview-first file. Clearing the bar therefore takes
+ * positive evidence rather than the absence of a disqualifier. Anything short of
+ * it lands in Backup until a human says otherwise — a manual decision always
+ * wins over this gate.
  *
  * The evaluator total and the answer verdicts stay internal: they pick the
  * bucket here and are never surfaced (no scores, no tiers in the UI).
@@ -83,14 +87,20 @@ export function assessInterviewBar(input: InterviewBarInput): InterviewBar {
     };
   }
 
-  // Between "holds the level" and "clears the seat bar" the file needs something
-  // of its own to justify the slot: answers that actually own the work. Competent
-  // and unremarkable is what Backup is for.
-  if (
-    input.total != null &&
-    input.total < ADVANCE_BAND_MIN &&
-    input.answersLevel !== "strong"
-  ) {
+  // Clearing the bar takes POSITIVE evidence, not merely the absence of a
+  // disqualifier: either the rubric read says the file clears the seat bar, or the
+  // answers themselves own the work. Everything else — competent-but-unremarkable,
+  // and any file with no rubric read and no standout answers — is a Backup.
+  const clearsSeatBar = input.total != null && input.total >= ADVANCE_BAND_MIN;
+  if (!clearsSeatBar && input.answersLevel !== "strong") {
+    if (input.total == null) {
+      return {
+        clears: false,
+        reason:
+          "Nothing on file argues for this candidate yet — no rubric read, and the answers demonstrate nothing that would earn a slot ahead of the field.",
+        caveat: "Re-sync and grade the file, or confirm the substance live, before booking an interview.",
+      };
+    }
     return {
       clears: false,
       reason:
