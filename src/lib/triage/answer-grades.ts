@@ -85,3 +85,48 @@ export function summarizeAnswerGrades(
 
   return { label: `Mixed answers (${mix}${conceptBit})`, level: "mixed" };
 }
+
+/**
+ * Key for matching "the same question" across candidates: lowercase, collapse
+ * whitespace, strip trailing punctuation. Workable question text is identical
+ * per job, so this only has to absorb formatting noise.
+ */
+export function answerQuestionKey(q: string | null | undefined): string {
+  return (q ?? "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\s?.:!]+$/g, "")
+    .trim();
+}
+
+/**
+ * Place one candidate's answer against the rest of the pool's answers to the
+ * SAME question. This is deterministic aggregation over the per-answer verdicts
+ * the AI grader already produced for every candidate — the grader itself reads
+ * one candidate at a time and is forbidden from inventing cross-candidate
+ * claims, so the comparison has to be assembled here from real grades.
+ *
+ * Returns null when nobody else has answered the question (no comparison to make).
+ */
+export function compareAnswerToPool(
+  verdict: string | null | undefined,
+  otherVerdicts: Array<string | null | undefined>,
+): string | null {
+  if (!otherVerdicts.length) return null;
+  const up = (v: string | null | undefined) => (v ?? "").toUpperCase();
+  const total = otherVerdicts.length + 1;
+  const ownedOthers = otherVerdicts.filter((v) => up(v) === "OWNED").length;
+  const mine = up(verdict);
+
+  if (mine === "OWNED") {
+    return ownedOthers === 0
+      ? `the only owned answer to this question across ${total} candidates`
+      : `one of ${ownedOthers + 1} owned answers to this question across ${total} candidates`;
+  }
+
+  const read = mine === "AI" ? "reads as AI" : mine === "EVASIVE" ? "dodges it" : "stays surface";
+  if (ownedOthers > 0) {
+    return `${ownedOthers} of ${total} candidates answered this at owned depth — this one ${read}`;
+  }
+  return `no owned answers to this question yet across ${total} candidates — this one ${read}`;
+}
