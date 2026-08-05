@@ -859,16 +859,36 @@ function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
 }
 
 /**
+ * The value read is what orders the interview list (see rankWeight), so a model
+ * that calls a file "strong" puts it at the top — which is how a weak applicant
+ * ended up billed as the best new candidate. A "strong" verdict has to be backed
+ * by the evidence we can actually check: the answers and the rubric grading. When
+ * it isn't, keep the model's own words in the detail but stop the headline and the
+ * ordering from claiming more than the file earns.
+ */
+function groundValueRead(value: ValueRead, answers: VerdictRead, spec: VerdictRead): ValueRead {
+  if (value.level !== "strong") return value;
+  const strength = fitWeight(answers.level) + fitWeight(spec.level); // 0..4
+  if (strength >= 3) return value;
+  return {
+    headline: "Strong on paper, limited evidence",
+    level: "fair",
+    detail: value.detail,
+  };
+}
+
+/**
  * The headline strength-vs-salary value read for the board + page. Prefers a
- * Claude-persisted value; otherwise derives a coarse read from the cached answer/
- * spec fit and the salary-value signal so the column is never blank. Words only.
+ * Claude-persisted value (grounded against the checkable evidence); otherwise
+ * derives a coarse read from the cached answer/spec fit and the salary-value
+ * signal so the column is never blank. Words only.
  *
  * A candidate with NO stated salary is "unpriced", never "overpriced": there is
  * no ask to weigh strength against, so the read degrades to level "none" and the
  * caveat ("Salary expectation not stated…") carries the follow-up.
  */
 function valueReadFrom(input: MapInput, decision: Decision, answers: VerdictRead, spec: VerdictRead): ValueRead {
-  if (input.read?.value) return input.read.value;
+  if (input.read?.value) return groundValueRead(input.read.value, answers, spec);
   if (decision === "blocked") {
     return { headline: "No read yet", level: "none", detail: "Materials incomplete — strength-vs-salary read pending." };
   }
