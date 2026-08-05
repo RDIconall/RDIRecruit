@@ -47,8 +47,8 @@ function applyRead(candidate: Candidate, read: DecisionRead): Candidate {
  * Query params:
  *   job=<shortcode>     required
  *   since=<ISO>         default epoch (grade everything); pass a fixed run start to resume
- *   budgetMs=<n>        default 240000
- *   concurrency=<n>     default 4
+ *   budgetMs=<n>        default 180000
+ *   concurrency=<n>     default 2
  *   limit=<n>           optional cap on candidates processed this call
  *   dryRun=1           count eligible candidates without grading
  */
@@ -70,11 +70,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Missing ?job=<shortcode>" }, { status: 400 });
   }
   const since = params.get("since") || "1970-01-01T00:00:00.000Z";
-  const budgetMs = Number(params.get("budgetMs") ?? 240_000);
-  const concurrency = Math.max(1, Number(params.get("concurrency") ?? 4));
+  const budgetMs = Number(params.get("budgetMs") ?? 180_000);
+  const concurrency = Math.max(1, Number(params.get("concurrency") ?? 2));
   const limitParam = Number(params.get("limit") ?? NaN);
   const limit = Number.isFinite(limitParam) ? limitParam : Infinity;
   const dryRun = params.get("dryRun") === "1";
+  // One Claude re-grade is ~60–90s — never start a batch without this much left.
+  const UNIT_MS = 100_000;
 
   const board = await getBoardFromSupabase(job);
   if (!board?.length) {
@@ -179,7 +181,9 @@ export async function GET(request: NextRequest) {
   }
 
   for (let i = 0; i < targets.length; i += concurrency) {
-    if (Date.now() - started > budgetMs) break;
+    const elapsed = Date.now() - started;
+    if (elapsed > budgetMs) break;
+    if (budgetMs - elapsed < UNIT_MS) break;
     const batch = targets.slice(i, i + concurrency);
     await Promise.allSettled(batch.map((id) => regradeOne(id)));
   }

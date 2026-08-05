@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
   try {
     if (params.get("mode") === "photos") {
       const result = await backfillMissingPhotos({
-        budgetMs: 240_000,
+        budgetMs: 180_000,
         limit: boundedLimit,
       });
       return NextResponse.json({ ok: true, mode: "photos", ...result });
@@ -53,10 +53,10 @@ export async function GET(request: NextRequest) {
 
     if (params.get("mode") === "answers") {
       // Tighter budget than the other modes: each rehydrated candidate also runs
-      // a full Claude re-score (~2 min), and one starting near the budget edge
-      // must still finish inside the function's 300s maxDuration.
+      // a full Claude re-score (~2 min). Leave headroom under maxDuration so a
+      // score that starts near the edge can still finish without timing out.
       const result = await recaptureMissingAnswers({
-        budgetMs: 130_000,
+        budgetMs: 100_000,
         limit: boundedLimit,
       });
       return NextResponse.json({ ok: true, mode: "answers", ...result });
@@ -66,7 +66,7 @@ export async function GET(request: NextRequest) {
       const idsParam = params.get("ids");
       const ids = idsParam ? idsParam.split(",").map((s) => s.trim()).filter(Boolean) : undefined;
       const result = await recaptureBlockedResumes({
-        budgetMs: 240_000,
+        budgetMs: 180_000,
         limit: boundedLimit,
         dryRun: params.get("dryRun") === "1",
         ids,
@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
     }
 
     const result = await backfillMissingResumes({
-      budgetMs: 240_000,
+      budgetMs: 180_000,
       limit: boundedLimit,
     });
     return NextResponse.json({ ok: true, ...result });
