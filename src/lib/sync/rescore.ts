@@ -1,6 +1,7 @@
 import { hasAnthropic, hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { INTERVIEW_EVIDENCE_TYPES } from "./candidate-hash";
+import { enqueueScoreOne } from "./enqueue-score";
 
 export type RescoreReason =
   | "new_evidence"
@@ -9,7 +10,11 @@ export type RescoreReason =
   | "fireflies"
   | "manual";
 
-/** Re-score only when new interview evidence arrives — not on status or comment changes. */
+/**
+ * Re-score when new interview evidence arrives — not on status or comment changes.
+ * Enqueues a durable Workflow step so the webhook/ingest request returns fast
+ * instead of waiting on a multi-minute Claude eval.
+ */
 export async function rescoreCandidateOnNewEvidence(
   candidateId: string,
   reason: RescoreReason = "new_evidence",
@@ -18,19 +23,31 @@ export async function rescoreCandidateOnNewEvidence(
     return { scored: false, reason: "not_configured" as const };
   }
 
-  const { scoreCandidate } = await import("../scoring/run-score");
-  const result = await scoreCandidate(candidateId, { force: true, replace: true });
-
   const supabase = getServiceSupabase();
+  const { data: candidate } = await supabase
+    .from("candidates")
+    .select("job_shortcode")
+    .eq("workable_id", candidateId)
+    .maybeSingle();
+
+  const enqueued = await enqueueScoreOne({
+    id: candidateId,
+    jobShortcode: (candidate?.job_shortcode as string | null) ?? null,
+    // Force a replace-style re-score: mark as already scored + stale so the
+    // score step uses { replace: true }.
+    scored: true,
+    stale: true,
+  });
+
   await supabase.from("audit_log").insert({
     actor: "system",
     action: "rescore",
     entity: "candidate",
     entity_id: candidateId,
-    detail: { reason },
+    detail: { reason, runId: enqueued.runId, enqueued: enqueued.enqueued },
   });
 
-  return { scored: true, result };
+  return { scored: enqueued.enqueued > 0, runId: enqueued.runId };
 }
 
 export async function loadInterviewEvidenceText(candidateId: string): Promise<string> {
