@@ -48,7 +48,10 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
     return sortBestNew(rows);
   }, [candidates, dq, filter, q]);
 
-  const best = inbox.find((c) => c.decision === "interview") ?? inbox[0] ?? null;
+  // Only a file that actually clears the bar for an interview gets the callout.
+  // Falling back to the top row promoted whoever happened to sort first — which is
+  // how weak applicants ended up billed as the one to screen.
+  const best = inbox.find((c) => c.decision === "interview") ?? null;
   const selectedIds = Object.keys(sel).filter((id) => sel[id] && inbox.some((c) => c.id === id));
   const screenSlug = phoneScreenSlug(stages);
 
@@ -104,11 +107,29 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
           <button type="button" onClick={() => openCandidate(best.id)} style={{ ...btnStyle, background: APP.accent, borderColor: APP.accent, color: "#fff" }}>
             Open
           </button>
-          {best.decision === "interview" && (
-            <button type="button" onClick={() => sendToScreen(best.id)} style={btnStyle}>
-              Send to screen
-            </button>
-          )}
+          <button type="button" onClick={() => sendToScreen(best.id)} style={btnStyle}>
+            Send to screen
+          </button>
+        </div>
+      )}
+
+      {crossRole && !best && inbox.length > 0 && (
+        <div
+          style={{
+            marginBottom: 14,
+            padding: "12px 16px",
+            borderRadius: 10,
+            border: `1px solid ${APP.hair}`,
+            background: APP.surface,
+          }}
+        >
+          <div style={mono({ fontSize: 11, color: APP.muted, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" })}>
+            Nothing to interview yet
+          </div>
+          <div style={{ fontSize: 13, color: APP.ink2, marginTop: 4 }}>
+            No new applicant clears the bar for an interview. Work the backups below or keep recruiting — the
+            list stays empty rather than talking up the least-weak file.
+          </div>
         </div>
       )}
 

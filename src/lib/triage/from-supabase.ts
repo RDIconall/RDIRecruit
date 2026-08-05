@@ -22,9 +22,16 @@ import type {
 import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
 import { askNumK, cityState } from "./format";
-import { avatarColor, fitWeight, initialsOf } from "./app-theme";
+import { avatarColor, DECISION_NEXT, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision, normalizeProcessStatus } from "./types";
 import { summarizeAnswerGrades } from "./answer-grades";
+import {
+  ADVANCE_BAND_MIN,
+  applyInterviewBar,
+  assessInterviewBar,
+  CONSIDER_BAND_MIN,
+  type InterviewBar,
+} from "./interview-bar";
 import {
   analyzeTenureStability,
   applyTenureDecisionGate,
@@ -42,6 +49,7 @@ import type {
   CutGroup,
   Decision,
   DecisionRead,
+  InterviewGate,
   ProcessStatus,
   FirefliesRecording,
   Logistics,
@@ -146,49 +154,123 @@ function hasDiscrepancy(v: VerificationPayload | null): boolean {
 }
 
 /**
- * Derive the decision-vocabulary call. The numeric `total`/bands stay internal —
- * they pick the bucket but never reach the UI. Verdict bands mirror the evaluator:
- * 85+ ADVANCE · 70-84 CONSIDER · 55-69 HOLD · <55 DENY, with integrity/verification
- * gates layered on top.
+ * The call before the deterministic gates: a stored model read when there is
+ * one, otherwise derived from the cached evaluation. The numeric `total`/bands
+ * stay internal — they pick the bucket but never reach the UI. Verdict bands
+ * mirror the evaluator: 85+ ADVANCE · 70-84 CONSIDER · 55-69 HOLD · <55 DENY,
+ * with integrity/verification gates layered on top.
  */
-export function deriveDecision(input: MapInput): Decision {
-  // A human's manual status wins over everything else, including the model read.
-  // Legacy/stored values are normalized to the current four-action vocabulary.
-  if (input.decisionOverride) return normalizeDecision(input.decisionOverride);
+function ungatedDecision(input: MapInput): Decision {
+  if (input.read?.decision) return normalizeDecision(input.read.decision);
+
+  const { score, evals } = input;
+  if (!evals.invest || !score) return "blocked";
+
+  const integrity = (evals.dig?.integrity ?? "").toLowerCase();
+  if (integrity.startsWith("material")) return "reject";
+
+  const total = score.total ?? 0;
+  if (total < 55) return "reject";
+
+  // A discrepancy or an unstated salary no longer earns its own status — the
+  // candidate is held as a backup with the thing-to-confirm surfaced as a caveat.
+  if (hasDiscrepancy(evals.verification)) return "backup";
+
+  const salaryUnstated = !evals.invest.ask || (score.salary_value ?? "") === "unstated";
+  if (salaryUnstated && total < 82) return "backup";
+  // The borderline (HOLD) band is NOT interview-ready — only a file that holds
+  // the level for the seat goes on the list a human works top-down.
+  if (total >= CONSIDER_BAND_MIN) return "interview";
+  return "backup";
+}
+
+export interface DecisionDerivation {
+  /** The call the board shows. */
+  decision: Decision;
+  /** The call before the deterministic tenure / interview-bar gates. */
+  ungated: Decision;
+  tenure: TenureStability;
+  bar: InterviewBar;
+  /** True when a gate pulled an Interview call down to Backup. */
+  demoted: boolean;
+  /** The sentence naming why ("" when nothing was demoted). */
+  demotionNote: string;
+}
+
+/**
+ * Derive the decision-vocabulary call together with the deterministic gates that
+ * shaped it, so the mapper can say in the candidate's own copy why a file that
+ * "looked like" an interview is being held as a backup instead.
+ */
+export function deriveDecisionDetail(input: MapInput): DecisionDerivation {
+  const tenure = tenureStabilityFor(input);
+  const bar = interviewBarFor(input);
+  const settled = (decision: Decision): DecisionDerivation => ({
+    decision,
+    ungated: decision,
+    tenure,
+    bar,
+    demoted: false,
+    demotionNote: "",
+  });
+
+  // A human's manual status wins over everything else — the model read and both
+  // gates. Legacy/stored values normalize to the current four-action vocabulary.
+  if (input.decisionOverride) return settled(normalizeDecision(input.decisionOverride));
 
   // A cut (disqualified in Workable / overlay, or a record retired because it was
   // deleted at the source) is terminal: it outranks any stored read — including a
   // stale "blocked" read — and a cut candidate is NEVER surfaced as "Review blocked".
-  if (humanCut(input)) return "reject";
+  if (humanCut(input)) return settled("reject");
 
-  let decision: Decision;
-  if (input.read?.decision) {
-    decision = normalizeDecision(input.read.decision);
-  } else {
-    const { score, evals } = input;
-    if (!evals.invest || !score) return "blocked";
+  const ungated = ungatedDecision(input);
+  // Hopping gate first (repeated short completed stints), then the interview bar
+  // (borderline evidence / answers that own nothing). Neither can be overridden
+  // by a model read: both are properties of the file, not of the read.
+  const decision = applyInterviewBar(applyTenureDecisionGate(ungated, tenure), bar);
+  const demoted = ungated === "interview" && decision !== "interview";
 
-    const integrity = (evals.dig?.integrity ?? "").toLowerCase();
-    if (integrity.startsWith("material")) return "reject";
+  return {
+    decision,
+    ungated,
+    tenure,
+    bar,
+    demoted,
+    demotionNote: demoted ? demotionNoteFor(tenure, bar) : "",
+  };
+}
 
-    const total = score.total ?? 0;
-    if (total < 55) return "reject";
+export function deriveDecision(input: MapInput): Decision {
+  return deriveDecisionDetail(input).decision;
+}
 
-    // A discrepancy or an unstated salary no longer earns its own status — the
-    // candidate is held as a backup with the thing-to-confirm surfaced as a caveat.
-    if (hasDiscrepancy(evals.verification)) {
-      decision = "backup";
-    } else {
-      const salaryUnstated = !evals.invest.ask || (score.salary_value ?? "") === "unstated";
-      if (salaryUnstated && total < 82) decision = "backup";
-      else if (total >= 68) decision = "interview";
-      else decision = "backup";
-    }
+/** The one sentence a recruiter needs for why an Interview call was held back. */
+function demotionNoteFor(tenure: TenureStability, bar: InterviewBar): string {
+  if (tenure.severity === "pattern" || tenure.severity === "severe") {
+    return "Short-tenure pattern on the résumé — held as backup until the leave reasons are clear.";
   }
+  return bar.reason ?? "";
+}
 
-  // Deterministic hopping gate — Claude / high totals cannot keep Interview when
-  // the résumé shows repeated short completed stints.
-  return applyTenureDecisionGate(decision, tenureStabilityFor(input));
+function interviewBarFor(input: MapInput): InterviewBar {
+  return assessInterviewBar({
+    total: input.score?.total ?? null,
+    answersLevel: summarizeAnswerGrades(input.evals.answerGrades).level,
+    refusedToAnswer: refusedToAnswerFrom(input.application, input.evals.answerGrades),
+    hasLiveEvidence: input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
+  });
+}
+
+/**
+ * The gate as carried to the client on the mapped candidate: what the gates would
+ * do to an Interview call on this file, whatever the current decision is.
+ */
+function interviewGateFrom(derived: DecisionDerivation): InterviewGate {
+  const clears =
+    applyInterviewBar(applyTenureDecisionGate("interview", derived.tenure), derived.bar) === "interview";
+  return clears
+    ? { clears: true, note: "" }
+    : { clears: false, note: demotionNoteFor(derived.tenure, derived.bar) };
 }
 
 function narrativeRolesForTenure(input: MapInput) {
@@ -209,12 +291,7 @@ function tenureStabilityFor(input: MapInput): TenureStability {
 }
 
 function nextFor(decision: Decision): string {
-  return {
-    interview: "Interview",
-    backup: "Hold as backup",
-    reject: "Reject",
-    blocked: "Re-sync",
-  }[decision];
+  return DECISION_NEXT[decision];
 }
 
 function askTierFor(salaryValue: string | null): Candidate["askTier"] {
@@ -504,7 +581,7 @@ function firefliesFrom(evidence: EvidenceRow[]): FirefliesRecording[] {
     }));
 }
 
-function redFlagsFrom(input: MapInput): RedFlag[] {
+function redFlagsFrom(input: MapInput, tenure: TenureStability): RedFlag[] {
   const flags: RedFlag[] = [];
   const integrity = (input.evals.dig?.integrity ?? "").toLowerCase();
   if (integrity.startsWith("material") && input.evals.dig?.integrityNote) {
@@ -519,7 +596,7 @@ function redFlagsFrom(input: MapInput): RedFlag[] {
       });
     }
   }
-  appendTenureRedFlags(flags, tenureStabilityFor(input));
+  appendTenureRedFlags(flags, tenure);
   return flags;
 }
 
@@ -710,7 +787,7 @@ function reviewerFrom(
  * Prefers a Claude-filled read.careerRead; otherwise maps from dig_in. Returns
  * undefined when there is no dig_in (degrade gracefully — block is hidden).
  */
-function careerReadFrom(input: MapInput): CareerRead | undefined {
+function careerReadFrom(input: MapInput, decision: Decision): CareerRead | undefined {
   if (input.read?.careerRead) return input.read.careerRead;
   const dig = input.evals.dig;
   if (!dig) return undefined;
@@ -730,7 +807,7 @@ function careerReadFrom(input: MapInput): CareerRead | undefined {
     path: path || "Career path read not yet derived.",
     positive: positive || "No standout positive inference on file yet.",
     risk: riskText || "No decisive risk surfaced from the materials.",
-    implication: implicationFor(input.read?.decision ?? deriveDecision(input)),
+    implication: implicationFor(decision),
   };
 }
 
@@ -750,8 +827,15 @@ function answersReadFrom(grades: AnswerGradePayload[]): VerdictRead {
 
 /**
  * The cached "Vs. spec" read for the pool board — fit against the job rubric/spec.
- * Prefers a Claude-persisted rubricFit verdict; otherwise derives from the
- * decision so the column is never blank for a scored candidate.
+ * Prefers a Claude-persisted rubricFit verdict; otherwise falls back to the
+ * evaluator's own rubric read so the column is never blank for a scored candidate.
+ *
+ * It must NOT be derived from the decision. Reading "Strong fit" off an Interview
+ * call was circular — the decision made the fit look strong, the fit fed the
+ * strength-vs-salary read, and that pushed the file to the top of the interview
+ * list. The band below is the evaluator's grading of the candidate against the
+ * seat's rubric, which is real evidence; it is translated to words here and the
+ * number itself never reaches the screen.
  */
 function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
   const verdict = input.read?.rubricFit?.verdict?.trim();
@@ -764,29 +848,47 @@ function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
         : "mixed";
     return { label: verdict, level };
   }
-  switch (decision) {
-    case "interview":
-      return { label: "Strong fit", level: "strong" };
-    case "backup":
-      return { label: "Partial", level: "mixed" };
-    case "reject":
-      return { label: "Below bar", level: "weak" };
-    default:
-      return { label: "—", level: "none" };
-  }
+  if (decision === "blocked") return { label: "—", level: "none" };
+  if (decision === "reject") return { label: "Below bar", level: "weak" };
+
+  const total = input.score?.total;
+  if (total == null) return { label: "No spec read yet", level: "none" };
+  if (total >= ADVANCE_BAND_MIN) return { label: "Clears the bar", level: "strong" };
+  if (total >= CONSIDER_BAND_MIN) return { label: "Partial", level: "mixed" };
+  return { label: "Below bar", level: "weak" };
+}
+
+/**
+ * The value read is what orders the interview list (see rankWeight), so a model
+ * that calls a file "strong" puts it at the top — which is how a weak applicant
+ * ended up billed as the best new candidate. A "strong" verdict has to be backed
+ * by the evidence we can actually check: the answers and the rubric grading. When
+ * it isn't, keep the model's own words in the detail but stop the headline and the
+ * ordering from claiming more than the file earns.
+ */
+function groundValueRead(value: ValueRead, answers: VerdictRead, spec: VerdictRead): ValueRead {
+  if (value.level !== "strong") return value;
+  const strength = fitWeight(answers.level) + fitWeight(spec.level); // 0..4
+  if (strength >= 3) return value;
+  return {
+    headline: "Strong on paper, limited evidence",
+    level: "fair",
+    detail: value.detail,
+  };
 }
 
 /**
  * The headline strength-vs-salary value read for the board + page. Prefers a
- * Claude-persisted value; otherwise derives a coarse read from the cached answer/
- * spec fit and the salary-value signal so the column is never blank. Words only.
+ * Claude-persisted value (grounded against the checkable evidence); otherwise
+ * derives a coarse read from the cached answer/spec fit and the salary-value
+ * signal so the column is never blank. Words only.
  *
  * A candidate with NO stated salary is "unpriced", never "overpriced": there is
  * no ask to weigh strength against, so the read degrades to level "none" and the
  * caveat ("Salary expectation not stated…") carries the follow-up.
  */
 function valueReadFrom(input: MapInput, decision: Decision, answers: VerdictRead, spec: VerdictRead): ValueRead {
-  if (input.read?.value) return input.read.value;
+  if (input.read?.value) return groundValueRead(input.read.value, answers, spec);
   if (decision === "blocked") {
     return { headline: "No read yet", level: "none", detail: "Materials incomplete — strength-vs-salary read pending." };
   }
@@ -845,7 +947,9 @@ function experienceFrom(application: ApplicationLite | null, ro: RoAssessmentRow
 }
 
 export function mapCandidate(input: MapInput): Candidate {
-  const decision = deriveDecision(input);
+  const derived = deriveDecisionDetail(input);
+  const decision = derived.decision;
+  const tenure = derived.tenure;
   const invest = input.evals.invest;
   const dig = input.evals.dig;
   const ro = input.ro;
@@ -876,8 +980,7 @@ export function mapCandidate(input: MapInput): Candidate {
 
   const location = input.candidate.location || ((input.candidate.raw?.address as string) ?? "") || "—";
 
-  const baseRedFlags = [...(input.read?.flags ?? redFlagsFrom(input))];
-  const tenure = tenureStabilityFor(input);
+  const baseRedFlags = [...(input.read?.flags ?? redFlagsFrom(input, tenure))];
   // Claude-authored flag lists omit our deterministic hopping flag — always merge it.
   appendTenureRedFlags(baseRedFlags, tenure);
 
@@ -896,12 +999,6 @@ export function mapCandidate(input: MapInput): Candidate {
   const specRead = specReadFrom(input, decision);
   let value = valueReadFrom(input, decision, answersRead, specRead);
 
-  const tenureDemotedInterview =
-    (tenure.severity === "pattern" || tenure.severity === "severe") &&
-    decision === "backup" &&
-    Boolean(input.read?.decision) &&
-    normalizeDecision(input.read?.decision) === "interview";
-
   // What must be confirmed before booking (the old "verify first", now a caveat).
   let caveat = input.read?.caveat;
   if (tenure.caveat) {
@@ -910,20 +1007,24 @@ export function mapCandidate(input: MapInput): Candidate {
       ? `${tenure.caveat} ${caveat}`
       : tenure.caveat;
   } else if (!caveat) {
-    if (hasDiscrepancy(input.evals.verification)) caveat = "Confirm the flagged discrepancy before booking an interview.";
+    if (derived.bar.caveat) caveat = derived.bar.caveat;
+    else if (hasDiscrepancy(input.evals.verification)) caveat = "Confirm the flagged discrepancy before booking an interview.";
     else if (!invest?.ask || salaryValue === "unstated") caveat = "Salary expectation not stated — confirm it before an interview.";
   }
 
-  // If the hopping gate demoted Interview → Backup, make the why name the pattern
-  // (stored Claude "interview" prose otherwise misleads the recruiter).
-  if (tenureDemotedInterview) {
-    why = `Short-tenure pattern on the résumé — held as backup until leave reasons are clear. ${why}`;
-    // Do not keep a Claude "Strong candidate" value headline after a hopping demotion.
+  // When a gate pulled Interview → Backup, make the copy name the reason. A
+  // stored "interview" why (or a "Strong candidate" value headline) otherwise
+  // sells the recruiter on a file the gate just held back.
+  if (derived.demoted && derived.demotionNote) {
+    if (!why.includes(derived.demotionNote)) why = `${derived.demotionNote} ${why}`;
     if (value.level === "strong") {
       value = {
-        headline: "Hold — short-tenure pattern",
+        headline:
+          tenure.severity === "pattern" || tenure.severity === "severe"
+            ? "Hold — short-tenure pattern"
+            : "Hold — not an interview-first",
         level: "fair",
-        detail: `${tenure.caveat ?? tenure.flagDetail ?? "Short completed stints on the résumé."} ${value.detail}`,
+        detail: `${caveat ?? derived.demotionNote} ${value.detail}`.trim(),
       };
     }
   }
@@ -946,10 +1047,10 @@ export function mapCandidate(input: MapInput): Candidate {
     revNote: "No human review yet — read synced from submitted materials.",
     why,
     flag: risk,
-    // After a tenure demotion, ignore stale Claude "Interview" next-step copy.
+    // After a gate demotion, ignore stale Claude "Interview" next-step copy.
     next: input.decisionOverride
       ? nextFor(normalizeDecision(input.decisionOverride))
-      : tenureDemotedInterview
+      : derived.demoted
         ? nextFor(decision)
         : input.read?.next || nextFor(decision),
     survivor: decision === "interview",
@@ -984,7 +1085,7 @@ export function mapCandidate(input: MapInput): Candidate {
     redFlags: baseRedFlags,
     resume: resumeFrom(input.application),
     careerProgression: careerProgressionFrom(ro),
-    careerRead: careerReadFrom(input),
+    careerRead: careerReadFrom(input, decision),
     assessment: input.read?.assessment,
     assessedAt: input.read?.assessment ? input.read?.recalculatedAt : undefined,
     rubricFit: input.read?.rubricFit,
@@ -998,6 +1099,7 @@ export function mapCandidate(input: MapInput): Candidate {
     experience: experienceFrom(input.application, ro),
     answersRead,
     specRead,
+    interviewGate: interviewGateFrom(derived),
   };
 
   if (decision === "reject") {

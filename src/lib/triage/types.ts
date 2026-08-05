@@ -206,6 +206,17 @@ export interface CandidateReadiness {
   resumeMissingFromSource: boolean;
 }
 
+// The deterministic interview-bar verdict for a file, carried on the mapped
+// candidate. Derived server-side from the résumé tenure pattern and the evidence
+// on file (see interview-bar.ts + tenure-stability.ts) so the client can hold the
+// same line when a fresh model read arrives mid-session.
+export interface InterviewGate {
+  /** False when the deterministic gates keep this file off the interview list. */
+  clears: boolean;
+  /** One sentence naming what keeps it off ("" when it clears). */
+  note: string;
+}
+
 // Pool-relative standing — ordinal only, NEVER a numeric score or tier. Derived
 // across the active pool at load time and surfaced as "Nth of M".
 export interface PoolStanding {
@@ -435,6 +446,9 @@ export interface Candidate {
   readiness?: CandidateReadiness;
   // Pool-relative standing (ordinal only), derived across the active pool at load.
   standing?: PoolStanding;
+  // Whether this file clears the deterministic bar for a first interview, and
+  // what keeps it off the list when it does not.
+  interviewGate?: InterviewGate;
 }
 
 // Persisted human-edit workspace. Hydrated server-side from candidate_overlay

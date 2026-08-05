@@ -78,7 +78,7 @@ function nowStamp(): string {
 export function useWorkspace(
   initial: Workspace,
   candidates: Candidate[],
-  onRead: (id: string, read: DecisionRead) => void,
+  onRead: (id: string, read: DecisionRead, opts?: { manual?: boolean }) => void,
   opts?: {
     jobShortcode?: string;
     onStageChange?: (id: string, stage: string) => void;
@@ -178,7 +178,8 @@ export function useWorkspace(
   const setDecision = useCallback(
     (id: string, decision: Decision) => {
       // Optimistic: applyRead reads only the fields we set, leaving the rest intact.
-      onRead(id, { decision } as DecisionRead);
+      // Flagged manual so the interview bar does not second-guess a human's call.
+      onRead(id, { decision } as DecisionRead, { manual: true });
       setBusyFor(id, true);
       void setDecisionAction({ candidateId: id, decision })
         .then((res) => {

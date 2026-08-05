@@ -2,7 +2,8 @@
 
 import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { APP } from "@/lib/triage/app-theme";
+import { APP, DECISION_NEXT } from "@/lib/triage/app-theme";
+import { applyInterviewGate } from "@/lib/triage/interview-bar";
 import type { Candidate, DecisionRead } from "@/lib/triage/types";
 import type { Viewer } from "@/lib/triage/reviewer";
 import type { TriagePool } from "@/lib/triage/load";
@@ -29,30 +30,36 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
     [candidates],
   );
 
-  const applyRead = useCallback((id: string, read: DecisionRead) => {
+  const applyRead = useCallback((id: string, read: DecisionRead, opts?: { manual?: boolean }) => {
     setCandidates((prev) =>
-      prev.map((c) =>
-        c.id === id
-          ? {
-              ...c,
-              decision: read.decision,
-              why: read.why || c.why,
-              flag: read.risk || c.flag,
-              next: read.next || c.next,
-              redFlags: read.flags ?? c.redFlags,
-              reanalysis: read.reanalysis ?? c.reanalysis,
-              rev: read.rev ?? c.rev,
-              revNote: read.revNote ?? c.revNote,
-              careerRead: read.careerRead ?? c.careerRead,
-              value: read.value ?? c.value,
-              caveat: read.caveat ?? c.caveat,
-              assessment: read.assessment ?? c.assessment,
-              assessedAt: read.assessment ? read.recalculatedAt ?? c.assessedAt : c.assessedAt,
-              rubricFit: read.rubricFit ?? c.rubricFit,
-              survivor: read.decision === "interview",
-            }
-          : c,
-      ),
+      prev.map((c) => {
+        if (c.id !== id) return c;
+        // A human's own call stands as given. A model read still has to clear the
+        // deterministic interview bar, so a fresh "interview" on a file the board
+        // holds as a backup doesn't flash Interview until the next page load.
+        const decision = opts?.manual
+          ? read.decision
+          : applyInterviewGate(read.decision, c.interviewGate);
+        const held = decision !== read.decision;
+        return {
+          ...c,
+          decision,
+          why: held && c.interviewGate?.note ? `${c.interviewGate.note} ${read.why || c.why}` : read.why || c.why,
+          flag: read.risk || c.flag,
+          next: held ? DECISION_NEXT[decision] : read.next || c.next,
+          redFlags: read.flags ?? c.redFlags,
+          reanalysis: read.reanalysis ?? c.reanalysis,
+          rev: read.rev ?? c.rev,
+          revNote: read.revNote ?? c.revNote,
+          careerRead: read.careerRead ?? c.careerRead,
+          value: read.value ?? c.value,
+          caveat: read.caveat ?? c.caveat,
+          assessment: read.assessment ?? c.assessment,
+          assessedAt: read.assessment ? read.recalculatedAt ?? c.assessedAt : c.assessedAt,
+          rubricFit: read.rubricFit ?? c.rubricFit,
+          survivor: decision === "interview",
+        };
+      }),
     );
   }, []);
 
