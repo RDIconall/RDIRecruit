@@ -1,11 +1,11 @@
 import { hasAnthropic, hasSupabase, hasWorkable } from "../env";
 import {
-  scoreUnscoredAcrossJobs,
   syncCandidateById,
   syncChangedCandidatesForJob,
   syncJobsFromWorkable,
   upsertCandidateFromWorkable,
 } from "./workable-sync";
+import { enqueueScoreBacklog, enqueueScoreOne } from "./enqueue-score";
 import { readSyncState, writeSyncState } from "./sync-state";
 import { getServiceSupabase } from "../supabase/server";
 import { getCandidate } from "../workable/client";
@@ -17,10 +17,15 @@ export interface SyncResult {
   jobs: number;
   candidatesSynced: number;
   candidatesSkipped: number;
+  /** Candidates enqueued onto the durable scoring workflow this pass. */
   scored: number;
   rescored: number;
   /** Candidates still awaiting analysis after this pass (run again to continue). */
   remaining: number;
+  /** Workflow run id when a scoring workflow was started. */
+  scoreRunId?: string;
+  /** Why scoring was not enqueued, when applicable. */
+  scoreSkip?: string;
   /** First few mirror errors, when something fails (debug aid). */
   sampleErrors?: string[];
 }
@@ -68,12 +73,16 @@ async function deltaScanAllJobs() {
 /**
  * Incremental sync:
  * - Delta scan with updated_after (skips unchanged candidates)
- * - Score only brand-new applicants; interview evidence triggers rescore separately
+ * - Enqueue durable scoring for candidates that still need an evaluation
  *
  * Real-time status/stage changes arrive via the `candidate_moved` webhook. The
  * previous SPI `/events` fast-path was removed: that endpoint returns only
  * SCHEDULED events (call/interview/meeting), never candidate-lifecycle events, so
  * it processed nothing while burning a rate-limited call every sync.
+ *
+ * Scoring no longer runs inside this request. Each Claude evaluation is a
+ * Workflow step, so the cron returns well under the function time limit even
+ * when the backlog is deep.
  */
 export async function incrementalSync(mode: SyncMode = "incremental"): Promise<SyncResult> {
   if (!hasWorkable()) {
@@ -98,32 +107,17 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
   result.candidatesSkipped += delta.skipped;
   if (delta.errors.length) result.sampleErrors = delta.errors;
 
-  // 2) Analyze candidates that have no score yet, within a time budget.
+  // 2) Enqueue durable scoring for the backlog. Returns in milliseconds.
   if (hasAnthropic()) {
-    // Incremental passes stay short (the Sync button loops); cron has more room.
-    // Daily budget leaves headroom under the 300s function cap for the upfront
-    // mirror and the trailing board-summary regen so the pass returns cleanly.
-    const budgetMs = mode === "incremental" ? 40_000 : 220_000;
-    const batch = await scoreUnscoredAcrossJobs({ budgetMs });
-    result.scored += batch.scored;
-    result.remaining = batch.remaining;
-
-    // 3) Refresh the editorial board summary for jobs whose reads just changed.
-    if (batch.scored > 0 && hasSupabase()) {
-      try {
-        const { regenerateBoardSummary } = await import("../board/summary");
-        const supabase = getServiceSupabase();
-        const { data: jobs } = await supabase
-          .from("jobs")
-          .select("shortcode, title")
-          .eq("status", "published");
-        for (const job of jobs ?? []) {
-          await regenerateBoardSummary(job.shortcode as string, job.title as string | undefined);
-        }
-      } catch (error) {
-        console.error("Board summary refresh failed", error);
-      }
-    }
+    const enqueued = await enqueueScoreBacklog({
+      limit: mode === "incremental" ? 20 : 40,
+      // Manual Sync should always kick work; the cron is debounced.
+      force: mode === "incremental",
+    });
+    result.scored = enqueued.enqueued;
+    result.remaining = enqueued.remaining;
+    if (enqueued.runId) result.scoreRunId = enqueued.runId;
+    if (enqueued.skippedReason) result.scoreSkip = enqueued.skippedReason;
   }
 
   await writeSyncState("last_incremental", {
@@ -150,40 +144,27 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
 }
 
 /**
- * Score-only pass: re-score stale + unscored candidates and refresh board summaries,
- * skipping the Workable mirror/events entirely. Used to drive a bulk re-score (e.g.
- * after a scoring-epoch bump) without burning the function budget on the event scan.
- * The atomic scoring lock still guards against overlap with the reconcile cron.
+ * Score-only pass: enqueue the durable scoring workflow for stale + unscored
+ * candidates without the Workable mirror. Used after a scoring-epoch bump.
  */
-export async function rescoreOnly(budgetMs = 240_000): Promise<{ scored: number; remaining: number }> {
+export async function rescoreOnly(): Promise<{
+  scored: number;
+  remaining: number;
+  scoreRunId?: string;
+  scoreSkip?: string;
+}> {
   if (!hasAnthropic() || !hasSupabase()) return { scored: 0, remaining: 0 };
 
-  // Modestly higher concurrency than the mirror path: each eval is output-bound
-  // (~90s), so parallelism is the throughput lever — but too much trips Anthropic
-  // rate limits. With the delete-after-eval fix a rate-limited candidate simply
-  // keeps its prior score and is retried next pass, so failures are harmless.
-  const batch = await scoreUnscoredAcrossJobs({ budgetMs, concurrency: 10 });
-
-  if (batch.scored > 0) {
-    try {
-      const { regenerateBoardSummary } = await import("../board/summary");
-      const supabase = getServiceSupabase();
-      const { data: jobs } = await supabase
-        .from("jobs")
-        .select("shortcode, title")
-        .eq("status", "published");
-      for (const job of jobs ?? []) {
-        await regenerateBoardSummary(job.shortcode as string, job.title as string | undefined);
-      }
-    } catch (error) {
-      console.error("Board summary refresh failed", error);
-    }
-  }
-
-  return { scored: batch.scored, remaining: batch.remaining };
+  const enqueued = await enqueueScoreBacklog({ limit: 50, force: true });
+  return {
+    scored: enqueued.enqueued,
+    remaining: enqueued.remaining,
+    scoreRunId: enqueued.runId,
+    scoreSkip: enqueued.skippedReason,
+  };
 }
 
-/** Webhook: new applicant → ingest + initial score; everything else → metadata + comments only. */
+/** Webhook: new applicant → ingest + enqueue score; everything else → metadata + comments only. */
 export async function syncCandidateFromWebhook(input: {
   eventType: string;
   jobShortcode: string;
@@ -192,9 +173,18 @@ export async function syncCandidateFromWebhook(input: {
   const isNew = NEW_CANDIDATE_EVENTS.has(input.eventType);
 
   if (isNew) {
+    // Mirror only in the webhook request — scoring is durable so Workable gets a
+    // fast 200 instead of waiting on a multi-minute Claude eval.
     const { upsert } = await syncCandidateById(input.jobShortcode, input.candidateId, {
-      analyze: true,
-      initialScore: true,
+      analyze: false,
+      initialScore: false,
+      syncComments: true,
+    });
+    await enqueueScoreOne({
+      id: input.candidateId,
+      jobShortcode: input.jobShortcode,
+      scored: false,
+      stale: false,
     });
     return upsert;
   }

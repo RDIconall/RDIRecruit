@@ -6,11 +6,15 @@ import type { Pipeline } from "@/lib/radar/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // Background enrichment: scores any not-yet-scored contacts against the active
 // scorecard, time-budgeted so it stays within a serverless invocation. Public
 // route gated by CRON_SECRET (mirrors the other /api/cron/* handlers).
-const BUDGET_MS = 50_000;
+// Keep well under maxDuration: each Claude call is ~10–20s and we must not
+// start another near the edge.
+const BUDGET_MS = 40_000;
+const UNIT_MS = 25_000;
 
 export async function GET(request: NextRequest) {
   const authz = request.headers.get("authorization");
@@ -32,6 +36,7 @@ export async function GET(request: NextRequest) {
     remaining[pipeline] = unscored.length;
     for (const contact of unscored) {
       if (Date.now() - started > BUDGET_MS) break;
+      if (BUDGET_MS - (Date.now() - started) < UNIT_MS) break;
       const result = await scoreContact(contact, pipeline, scorecard.content);
       if (!result) continue;
       await saveScore({

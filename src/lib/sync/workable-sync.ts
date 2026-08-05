@@ -397,9 +397,118 @@ export async function syncChangedCandidatesForJob(
 }
 
 /**
+ * Candidates that still need an evaluation (never scored, or stale vs a scoring
+ * epoch). Unscored first, then stale; oldest applicants first within each.
+ * Disqualified / reviewer-locked files are excluded. Pure listing — no Claude.
+ */
+export async function listCandidatesNeedingScore(options?: {
+  limit?: number;
+}): Promise<Array<{ id: string; jobShortcode: string | null; scored: boolean; stale: boolean }>> {
+  if (!hasSupabase()) return [];
+  const supabase = getServiceSupabase();
+
+  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }, { data: dqOverlayRows }] =
+    await Promise.all([
+      supabase.from("candidates").select("workable_id, job_shortcode, created_at, disqualified"),
+      supabase.from("scores").select("candidate_id, created_at, model_version"),
+      supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
+      supabase.from("candidate_overlay").select("candidate_id").eq("status", "disqualified"),
+    ]);
+
+  const disqualifiedOverlay = new Set((dqOverlayRows ?? []).map((r) => r.candidate_id as string));
+
+  const latestScoreAt = new Map<string, string>();
+  const latestModel = new Map<string, string>();
+  for (const r of scoredRows ?? []) {
+    const id = r.candidate_id as string;
+    const at = (r.created_at as string) ?? "";
+    const prev = latestScoreAt.get(id);
+    if (!prev || at > prev) {
+      latestScoreAt.set(id, at);
+      latestModel.set(id, (r.model_version as string | null) ?? "");
+    }
+  }
+  const locked = new Set(
+    [...latestModel.entries()].filter(([, m]) => m === "reviewer-override").map(([id]) => id),
+  );
+
+  const epochByScope = new Map<string, string>();
+  for (const row of epochRows ?? []) {
+    const scope = (row.key as string).replace("scoring_epoch:", "");
+    const at = (row.value as { at?: string } | null)?.at;
+    if (at) epochByScope.set(scope, at);
+  }
+  const globalEpoch = epochByScope.get("global") ?? "";
+  const effectiveEpoch = (jobShortcode: string | null) => {
+    const role = jobShortcode ? epochByScope.get(jobShortcode) ?? "" : "";
+    return role > globalEpoch ? role : globalEpoch;
+  };
+
+  const toScore = (candidateRows ?? [])
+    .filter((r) => !(r.disqualified as boolean | null) && !disqualifiedOverlay.has(r.workable_id as string))
+    .map((r) => ({
+      id: r.workable_id as string,
+      jobShortcode: (r.job_shortcode as string | null) ?? null,
+      created_at: (r.created_at as string) ?? "",
+    }))
+    .map((c) => {
+      const scoredAt = latestScoreAt.get(c.id);
+      const epoch = effectiveEpoch(c.jobShortcode);
+      const stale = Boolean(scoredAt && epoch && scoredAt < epoch);
+      return { ...c, scored: Boolean(scoredAt), stale };
+    })
+    .filter((c) => !locked.has(c.id))
+    .filter((c) => !c.scored || c.stale)
+    .sort((a, b) => Number(a.scored) - Number(b.scored) || a.created_at.localeCompare(b.created_at));
+
+  const limit = options?.limit;
+  const sliced = Number.isFinite(limit) ? toScore.slice(0, limit) : toScore;
+  return sliced.map(({ id, jobShortcode, scored, stale }) => ({ id, jobShortcode, scored, stale }));
+}
+
+/**
+ * Hydrate (when still list-only) + evaluate one candidate. Used by the durable
+ * scoring workflow and by the residual inline score path. Never throws — returns
+ * a status the caller can tally.
+ */
+export async function scoreOneCandidateEntry(entry: {
+  id: string;
+  jobShortcode: string | null;
+  scored: boolean;
+  stale: boolean;
+}): Promise<{ ok: boolean; skipped?: boolean; jobShortcode: string | null }> {
+  try {
+    if (!entry.scored && entry.jobShortcode) {
+      try {
+        const full = await getCandidate(entry.jobShortcode, entry.id);
+        await upsertCandidateFromWorkable(full, entry.jobShortcode, {
+          analyze: false,
+          syncComments: false,
+          hydrate: true,
+        });
+      } catch (hydrateError) {
+        console.error(`Hydrate failed for ${entry.id}`, hydrateError);
+      }
+    }
+    const { scoreCandidate } = await import("../scoring/run-score");
+    const result = await scoreCandidate(entry.id, entry.stale ? { replace: true } : undefined);
+    if (result && "skipped" in result && result.skipped) {
+      return { ok: true, skipped: true, jobShortcode: entry.jobShortcode };
+    }
+    return { ok: true, jobShortcode: entry.jobShortcode };
+  } catch (error) {
+    console.error(`Score failed for ${entry.id}`, error);
+    return { ok: false, jobShortcode: entry.jobShortcode };
+  }
+}
+
+/**
  * Analyze (score + evaluate) every candidate that has no score yet, oldest first,
  * stopping when the time budget is exhausted so the request never times out.
  * Returns how many were scored this pass and how many still remain.
+ *
+ * Prefer the durable `scoreCandidatesWorkflow` for production crons — this inline
+ * path remains for the Sync button / residual callers that want a short burst.
  */
 export async function scoreUnscoredAcrossJobs(options?: {
   budgetMs?: number;
@@ -435,106 +544,29 @@ async function runScoreUnscoredPass(options?: {
   concurrency?: number;
 }): Promise<{ scored: number; failed: number; remaining: number }> {
   const budgetMs = options?.budgetMs ?? 45_000;
-  const concurrency = options?.concurrency ?? 8;
-  const supabase = getServiceSupabase();
+  // Keep concurrency modest: each Claude eval is ~60–90s, and a batch started
+  // near the budget edge must still finish inside the function's maxDuration.
+  const concurrency = options?.concurrency ?? 3;
+  // Never start a new batch unless we have this much wall time left — one slow
+  // eval plus a few seconds of hydrate / DB write.
+  const UNIT_MS = 100_000;
 
-  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }, { data: dqOverlayRows }] =
-    await Promise.all([
-      supabase.from("candidates").select("workable_id, job_shortcode, created_at, disqualified"),
-      supabase.from("scores").select("candidate_id, created_at, model_version"),
-      supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
-      supabase.from("candidate_overlay").select("candidate_id").eq("status", "disqualified"),
-    ]);
-
-  // Disqualified candidates (Workable state or app overlay) are out of the pool —
-  // never spend an evaluation on them. Mirrors the reanalyze cron's eligibility.
-  const disqualifiedOverlay = new Set((dqOverlayRows ?? []).map((r) => r.candidate_id as string));
-
-  // Latest score (timestamp + model) per candidate.
-  const latestScoreAt = new Map<string, string>();
-  const latestModel = new Map<string, string>();
-  for (const r of scoredRows ?? []) {
-    const id = r.candidate_id as string;
-    const at = (r.created_at as string) ?? "";
-    const prev = latestScoreAt.get(id);
-    if (!prev || at > prev) {
-      latestScoreAt.set(id, at);
-      latestModel.set(id, (r.model_version as string | null) ?? "");
-    }
-  }
-  // Reviewer overrides are locked — never auto-overwrite a human's corrected read.
-  const locked = new Set(
-    [...latestModel.entries()].filter(([, m]) => m === "reviewer-override").map(([id]) => id),
-  );
-
-  // Scoring epoch per scope (job shortcode or 'global'). A candidate is stale
-  // when its latest score predates the effective epoch for its seat.
-  const epochByScope = new Map<string, string>();
-  for (const row of epochRows ?? []) {
-    const scope = (row.key as string).replace("scoring_epoch:", "");
-    const at = (row.value as { at?: string } | null)?.at;
-    if (at) epochByScope.set(scope, at);
-  }
-  const globalEpoch = epochByScope.get("global") ?? "";
-  const effectiveEpoch = (jobShortcode: string | null) => {
-    const role = jobShortcode ? epochByScope.get(jobShortcode) ?? "" : "";
-    return role > globalEpoch ? role : globalEpoch;
-  };
-
-  const toScore = (candidateRows ?? [])
-    .filter((r) => !(r.disqualified as boolean | null) && !disqualifiedOverlay.has(r.workable_id as string))
-    .map((r) => ({
-      id: r.workable_id as string,
-      jobShortcode: (r.job_shortcode as string | null) ?? null,
-      created_at: (r.created_at as string) ?? "",
-    }))
-    .map((c) => {
-      const scoredAt = latestScoreAt.get(c.id);
-      const epoch = effectiveEpoch(c.jobShortcode);
-      const stale = Boolean(scoredAt && epoch && scoredAt < epoch);
-      return { ...c, scored: Boolean(scoredAt), stale };
-    })
-    .filter((c) => !locked.has(c.id))
-    .filter((c) => !c.scored || c.stale)
-    // Unscored first, then stale; oldest applicants first within each.
-    .sort((a, b) => Number(a.scored) - Number(b.scored) || a.created_at.localeCompare(b.created_at));
-
-  const { scoreCandidate } = await import("../scoring/run-score");
-  const start = Date.now();
+  const toScore = await listCandidatesNeedingScore();
+  const started = Date.now();
   let scored = 0;
   let failed = 0;
   let processed = 0;
 
   for (let i = 0; i < toScore.length; i += concurrency) {
-    if (Date.now() - start > budgetMs) break;
+    const elapsed = Date.now() - started;
+    if (elapsed > budgetMs) break;
+    if (budgetMs - elapsed < UNIT_MS) break;
     const batch = toScore.slice(i, i + concurrency);
-    await Promise.all(
-      batch.map(async (entry) => {
-        try {
-          // Hydrate full candidate (answers, experience, résumé URL) — the list
-          // endpoint only returns summaries — then evaluate. Stale re-scores are
-          // already fully mirrored, so skip the Workable round-trip for them
-          // (keeps the bulk re-score fast enough to finish inside the budget).
-          if (!entry.scored && entry.jobShortcode) {
-            try {
-              const full = await getCandidate(entry.jobShortcode, entry.id);
-              await upsertCandidateFromWorkable(full, entry.jobShortcode, {
-                analyze: false,
-                syncComments: false,
-                hydrate: true,
-              });
-            } catch (hydrateError) {
-              console.error(`Hydrate failed for ${entry.id}`, hydrateError);
-            }
-          }
-          await scoreCandidate(entry.id, entry.stale ? { replace: true } : undefined);
-          scored += 1;
-        } catch (error) {
-          failed += 1;
-          console.error(`Score failed for ${entry.id}`, error);
-        }
-      }),
-    );
+    const results = await Promise.all(batch.map((entry) => scoreOneCandidateEntry(entry)));
+    for (const r of results) {
+      if (r.ok && !r.skipped) scored += 1;
+      else if (!r.ok) failed += 1;
+    }
     processed += batch.length;
   }
 
