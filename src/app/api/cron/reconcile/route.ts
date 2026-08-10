@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
 import { incrementalSync, rescoreOnly } from "@/lib/sync/incremental-sync";
 
-export const maxDuration = 300;
+// Mirror + enqueue only — Claude evaluations run as durable Workflow steps, so
+// this cron should return in seconds. Keep maxDuration for the Workable mirror
+// on a busy day, not for AI work.
+export const maxDuration = 60;
 
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");
@@ -10,9 +13,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // ?scoreOnly=1 drives a bulk re-score (stale + unscored) without the Workable
-  // mirror — used to drain a scoring-epoch bump efficiently. The atomic lock keeps
-  // it from colliding with the scheduled reconcile.
+  // ?scoreOnly=1 enqueues the durable scoring workflow for stale + unscored
+  // candidates without the Workable mirror.
   const scoreOnly = request.nextUrl.searchParams.get("scoreOnly") === "1";
 
   try {

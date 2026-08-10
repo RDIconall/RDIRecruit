@@ -28,6 +28,7 @@
     "tailwind-merge": "^3.3.0",
     "tesseract.js": "^7.0.0",
     "vercel": "^54.13.0",
+    "workflow": "^4.8.0",
     "zod": "^3.25.36"
   },
   "devDependencies": {

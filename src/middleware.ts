@@ -9,6 +9,8 @@ const isPublicRoute = createRouteMatcher([
   "/api/health",
   "/api/ingest/(.*)",
   "/api/radar/unsubscribe",
+  // Vercel Workflows internal enqueue / resume routes — must not hit Clerk.
+  "/.well-known/workflow/(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
@@ -19,7 +21,9 @@ export default clerkMiddleware(async (auth, request) => {
 
 export const config = {
   matcher: [
-    "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
+    // Exclude Workflow SDK internals — intercepting them breaks enqueue/resume
+    // (detached ArrayBuffer / queue failures on Next 16).
+    "/((?!_next|\\.well-known/workflow|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
     "/(api|trpc)(.*)",
   ],
 };
