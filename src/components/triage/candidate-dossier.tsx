@@ -1,6 +1,6 @@
 "use client";
 
-import { CSSProperties, useEffect, useMemo, useState } from "react";
+import { CSSProperties, useEffect, useState } from "react";
 import { APP, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
 import {
@@ -211,6 +211,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   const [showParsed, setShowParsed] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- These effects intentionally reset local drafts when the selected candidate changes. */
   useEffect(() => {
     setChatDraft("");
     setActDraft("");
@@ -239,6 +240,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
       cancelled = true;
     };
   }, [id]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!candidate) return null;
   const c = candidate;
@@ -273,9 +275,9 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
         ];
 
   const steps = c.careerProgression?.steps ?? [];
-  const record = useMemo(() => buildRecord(c), [c]);
+  const record = buildRecord(c);
 
-  const chartPts = useMemo<ChartPoint[]>(() => {
+  const chartPts: ChartPoint[] = (() => {
     if (!c.careerProgression?.hasData) return [];
     const roles = c.resume?.roles ?? [];
     // Career steps carry no dates, so borrow the matching résumé role's period to order them.
@@ -309,7 +311,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
       ordered.unshift({ label: edu.org, sub: "Education", y: baseY, kind: "edu" });
     }
     return ordered;
-  }, [c.careerProgression?.hasData, c.resume?.roles, steps, id, wsApi]);
+  })();
 
   const downloadMd = async () => {
     try {
@@ -867,10 +869,17 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
         </Section>
       )}
 
-      {/* level over time */}
-      {chartPts.length >= 2 && (
-        <Section title="Level over time">
-          <LevelChart pts={chartPts} />
+      {/* requisite / RO level over time */}
+      {c.careerProgression?.hasData && (
+        <Section title="Requisite chart">
+          {chartPts.length > 0 ? (
+            <LevelChart pts={chartPts} />
+          ) : (
+            <div>
+              <FactLine k="Current capability" v={c.careerProgression.currentCapability || c.roLevel || "—"} />
+              <FactLine k="Seat stratum" v={c.careerProgression.seatStratum || "—"} />
+            </div>
+          )}
           {c.careerProgression?.trajectory && (
             <p style={mono({ margin: "10px 0 0", fontSize: 12.5, color: APP.muted })}>{c.careerProgression.trajectory}</p>
           )}

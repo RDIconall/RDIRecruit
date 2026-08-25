@@ -1,6 +1,7 @@
 import type { CategoryKey } from "../types";
 
 export interface SeatContext {
+  jobShortcode?: string | null;
   jobTitle: string;
   /** The stratum band the seat requires, e.g. "IVc–IVb" or "IIb–IIa". */
   seatStratum: string;
@@ -39,6 +40,7 @@ function seatStratumFromTitle(title: string): string {
  * otherwise we derive a faithful default from the title.
  */
 export function buildSeatContext(input: {
+  shortcode?: string | null;
   title: string;
   department?: string | null;
   location?: string | null;
@@ -63,6 +65,7 @@ export function buildSeatContext(input: {
       `(work off the desk vs. risk off the company) and whether the gap it hands back is one RDI can cover.`;
 
   return {
+    jobShortcode: input.shortcode ?? null,
     jobTitle: title,
     seatStratum,
     jdSummary,

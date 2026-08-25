@@ -1,30 +1,14 @@
 import { hasSupabase, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
-import { upsertOverlay } from "../data/overlay";
-
-/** A Workable fetch that 404s means the candidate was deleted/merged at the source. */
-function isWorkableNotFound(err: unknown): boolean {
-  const message = err instanceof Error ? err.message : String(err);
-  return /\b404\b/.test(message) || /not found/i.test(message);
-}
-
-/**
- * Retire a candidate that no longer exists in Workable (our ATS of record). We
- * archive rather than hard-delete: the overlay status drops them out of the active
- * pool, and because a cut now outranks any stored read in deriveDecision, they
- * stop showing as "Review blocked". Reversible — clearing the overlay restores them.
- */
-async function retireMissingCandidate(candidateId: string): Promise<void> {
-  await upsertOverlay(
-    candidateId,
-    { status: "withdrawn", status_reason: "Removed from Workable (no longer exists at source)" },
-    "recapture (Workable 404)",
-  );
-}
+import {
+  isPermanentWorkableNotFound,
+  tombstoneMissingWorkableCandidate,
+} from "../sync/failures";
 
 export interface ResumeBackfillResult {
   attempted: number;
   ingested: number;
+  retired: number;
   failed: number;
   remaining: number;
   errors: string[];
@@ -46,6 +30,7 @@ export async function backfillMissingResumes(options?: {
   const result: ResumeBackfillResult = {
     attempted: 0,
     ingested: 0,
+    retired: 0,
     failed: 0,
     remaining: 0,
     errors: [],
@@ -119,10 +104,15 @@ export async function backfillMissingResumes(options?: {
         if (result.errors.length < 10) result.errors.push(`${candidateId}: ${upsert.resumeError}`);
       }
     } catch (err) {
-      result.failed += 1;
       const message = err instanceof Error ? err.message : String(err);
-      if (result.errors.length < 10) result.errors.push(`${candidateId}: ${message}`);
-      console.error(`Resume backfill failed for ${candidateId}`, err);
+      if (isPermanentWorkableNotFound(err)) {
+        await tombstoneMissingWorkableCandidate(candidateId, "resume backfill (Workable 404)");
+        result.retired += 1;
+      } else {
+        result.failed += 1;
+        if (result.errors.length < 10) result.errors.push(`${candidateId}: ${message}`);
+        console.error(`Resume backfill failed for ${candidateId}`, err);
+      }
     }
   }
 
@@ -398,10 +388,10 @@ export async function recaptureBlockedResumes(options?: {
       // A 404 means the candidate was deleted/merged in Workable. Re-pulling will
       // never succeed, and leaving the row stuck on "Review blocked" is the exact
       // zombie that prompted this. Retire it out of the active pool (unless dry-run).
-      if (isWorkableNotFound(err)) {
+      if (isPermanentWorkableNotFound(err)) {
         if (!options?.dryRun) {
           try {
-            await retireMissingCandidate(candidateId);
+            await tombstoneMissingWorkableCandidate(candidateId, "recapture (Workable 404)");
             detail.retired = true;
             result.retired += 1;
           } catch (retireErr) {

@@ -1,6 +1,16 @@
 import { getWorkableToken, env } from "../env";
+import {
+  WorkableApiError,
+  isRetryableWorkableStatus,
+} from "./errors";
 
 import { createHmac, timingSafeEqual } from "crypto";
+
+export {
+  WorkableApiError,
+  isPermanentWorkableNotFound,
+  isRetryableWorkableStatus,
+} from "./errors";
 
 const BASE_URL = () =>
   `https://${env.WORKABLE_SUBDOMAIN}.workable.com/spi/v3`;
@@ -14,7 +24,7 @@ function headers(): Record<string, string> {
 
 // Workable enforces ~10 req/s per token and returns 429 when exceeded. 5xx are
 // transient. We retry both, bounded, honouring rate-limit headers when present.
-const MAX_RETRIES = 5;
+export const MAX_WORKABLE_RETRIES = 5;
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -57,7 +67,7 @@ export async function workableFetch<T>(
   const url = path.startsWith("http") ? path : `${BASE_URL()}${path}`;
   let lastError: Error | null = null;
 
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt += 1) {
+  for (let attempt = 0; attempt <= MAX_WORKABLE_RETRIES; attempt += 1) {
     let res: Response;
     try {
       res = await fetch(url, {
@@ -71,7 +81,7 @@ export async function workableFetch<T>(
       // Transient network/DNS blips: back off and retry, then surface the error.
       lastError =
         networkError instanceof Error ? networkError : new Error(String(networkError));
-      if (attempt < MAX_RETRIES) {
+      if (attempt < MAX_WORKABLE_RETRIES) {
         await sleep(backoffMs(attempt));
         continue;
       }
@@ -80,10 +90,10 @@ export async function workableFetch<T>(
 
     // 429 (rate limit) and 5xx (transient) are retryable. Don't read the body
     // before deciding — `continue` discards the response and retries cleanly.
-    if ((res.status === 429 || res.status >= 500) && attempt < MAX_RETRIES) {
+    if (isRetryableWorkableStatus(res.status) && attempt < MAX_WORKABLE_RETRIES) {
       const waitMs = retryAfterMs(res) ?? backoffMs(attempt);
       console.warn(
-        `workable.fetch.retry: ${res.status} on ${path} — attempt ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`,
+        `workable.fetch.retry: ${res.status} on ${path} — attempt ${attempt + 1}/${MAX_WORKABLE_RETRIES} in ${waitMs}ms`,
       );
       await sleep(waitMs);
       continue;
@@ -91,7 +101,7 @@ export async function workableFetch<T>(
 
     const body = await res.text();
     if (!res.ok) {
-      throw new Error(`Workable API error ${res.status} on ${path}: ${body}`);
+      throw new WorkableApiError(res.status, path, body);
     }
     // Action endpoints (move/disqualify/revert/comments) return 200/202 with an
     // empty or `text/plain` body. Don't blow up trying to JSON-parse a non-JSON

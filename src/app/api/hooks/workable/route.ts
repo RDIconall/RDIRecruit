@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { markEventProcessed, recordEvent } from "@/lib/sync/workable-sync";
-import { syncCandidateFromWebhook } from "@/lib/sync/incremental-sync";
+import { recordEvent } from "@/lib/sync/workable-sync";
 import { verifyWorkableSignature } from "@/lib/workable/client";
 
 // Workable SPI v3 only exposes two subscribable candidate events:
@@ -41,21 +40,11 @@ export async function POST(request: NextRequest) {
   };
 
   const eventType = payload.event_type ?? payload.type ?? "unknown";
-  await recordEvent("workable", eventType, payload as Record<string, unknown>);
+  const eventId = await recordEvent("workable", eventType, payload as Record<string, unknown>);
 
-  try {
-    const candidateId = payload.data?.candidate?.id ?? payload.data?.id;
-    const jobShortcode = payload.data?.job?.shortcode;
-
-    if (candidateId && jobShortcode && HANDLED_EVENTS.has(eventType)) {
-      await syncCandidateFromWebhook({ eventType, jobShortcode, candidateId });
-    }
-
-    if (payload.id) await markEventProcessed(payload.id);
-  } catch (error) {
-    console.error("Workable webhook processing failed", error);
-    return NextResponse.json({ ok: false }, { status: 500 });
-  }
-
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    queued: HANDLED_EVENTS.has(eventType),
+    eventId,
+  });
 }

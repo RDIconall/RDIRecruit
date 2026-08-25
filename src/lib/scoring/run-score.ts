@@ -11,7 +11,7 @@ import {
 import { evaluateCandidate } from "./evaluator";
 import { getActiveRubric } from "../rubric/service";
 import { getCalibrationForJob } from "../calibration/service";
-import { getMethodDoc } from "../evaluation/method";
+import { getActiveMethodDoc } from "../evaluation/method";
 import { getJobRubric } from "../rubric/store";
 import { computeReadiness, type GradingInputs } from "../triage/readiness";
 import { gradeLog } from "../triage/grade-log";
@@ -157,7 +157,7 @@ export async function scoreCandidate(
   // jobRubric is the single editable job spec/rubric source of truth (job_rubrics);
   // we read it here too so the scorer's readiness gate agrees with the triage view.
   const [method, rubric, calibration, jobRubric] = await Promise.all([
-    getMethodDoc(),
+    getActiveMethodDoc(),
     getActiveRubric(candidate.job_shortcode),
     candidate.job_shortcode
       ? getCalibrationForJob(candidate.job_shortcode)
@@ -182,7 +182,7 @@ export async function scoreCandidate(
       : 0,
     jobSpec: jobRubric.specMd,
     rubric: jobRubric.rubricMd,
-    methodology: method,
+    methodology: method.markdown,
   };
   let readiness = computeReadiness(readinessInputs);
 
@@ -227,6 +227,7 @@ export async function scoreCandidate(
         .maybeSingle()
     : { data: null };
   const seat = buildSeatContext({
+    shortcode: candidate.job_shortcode ?? null,
     title: jobRow?.title ?? "the open seat",
     department: jobRow?.department,
     location: jobRow?.location,
@@ -244,7 +245,10 @@ export async function scoreCandidate(
     publicProfile: null,
     seat,
     weights: rubric.weights,
-    method,
+    dimensions: rubric.dimensions,
+    rubricSchemaVersion: rubric.schemaVersion,
+    method: method.markdown,
+    methodologyVersion: method.version,
     rubricGuidance: rubric.rawMd,
     globalCalibration: calibration.global,
     roleCalibration: calibration.role,
@@ -285,6 +289,17 @@ export async function scoreCandidate(
       candidate_id: candidateId,
       rubric_version: rubric.version,
       category_scores: evaluation.categoryScores,
+      seat_dimension_scores: evaluation.seatDimensionScores,
+      gate_results: {
+        integrity: evaluation.integrityGate,
+        other: evaluation.otherGateResults,
+        capReasons: evaluation.capReasons,
+      },
+      evidence_provenance: evaluation.evidenceProvenance,
+      alternate_seat_signals: evaluation.alternateSeatSignals,
+      rubric_schema_version: evaluation.rubricSchemaVersion,
+      methodology_version: evaluation.methodologyVersion,
+      decision_band: evaluation.decisionBand,
       total: evaluation.total,
       salary_value: evaluation.salaryValue,
       model_version: "claude-sonnet-4-6",
@@ -372,6 +387,36 @@ export async function scoreCandidate(
     { kind: "dig_in", ref: null, payload: { ...evaluation.digIn } },
     { kind: "verification", ref: "profile", payload: { ...evaluation.verification } },
     { kind: "compose_questions", ref: null, payload: { questions: evaluation.composeQuestions } },
+    {
+      kind: "seat_fit",
+      ref: candidate.job_shortcode ?? null,
+      payload: {
+        personQuality: evaluation.personQuality,
+        seatFit: evaluation.seatFit,
+        seatDimensionScores: evaluation.seatDimensionScores,
+        evidenceConfidence: evaluation.evidenceConfidence,
+        integrityGate: evaluation.integrityGate,
+        otherGateResults: evaluation.otherGateResults,
+        capReasons: evaluation.capReasons,
+        decisionBand: evaluation.decisionBand,
+        liveValidationQuestions: evaluation.liveValidationQuestions,
+      },
+    },
+    {
+      kind: "evidence_provenance",
+      ref: null,
+      payload: { evidenceProvenance: evaluation.evidenceProvenance },
+    },
+    {
+      kind: "alternate_seats",
+      ref: null,
+      payload: { alternateSeatSignals: evaluation.alternateSeatSignals },
+    },
+    {
+      kind: "ro_diagnostic",
+      ref: null,
+      payload: { ...evaluation.roDiagnostic },
+    },
   ];
 
   for (const role of evaluation.roReads) {

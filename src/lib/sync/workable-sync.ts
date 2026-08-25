@@ -4,6 +4,10 @@ import type { WorkableCandidate, WorkableJob } from "../workable/client";
 import { getCandidate, getJob, listAllCandidates, listJobs } from "../workable/client";
 import { computeApplicationFingerprint } from "./candidate-hash";
 import { syncWorkableComments } from "./sync-comments";
+import {
+  isPermanentWorkableNotFound,
+  tombstoneMissingWorkableCandidate,
+} from "./failures";
 
 // Only one bulk-scoring pass may run at a time. The 10-minute reconcile cron, a
 // manual sync, and webhook scoring can otherwise overlap, each re-scoring the same
@@ -524,6 +528,10 @@ async function runScoreUnscoredPass(options?: {
                 hydrate: true,
               });
             } catch (hydrateError) {
+              if (isPermanentWorkableNotFound(hydrateError)) {
+                await tombstoneMissingWorkableCandidate(entry.id, "score hydrate (Workable 404)");
+                return;
+              }
               console.error(`Hydrate failed for ${entry.id}`, hydrateError);
             }
           }
@@ -581,21 +589,53 @@ export async function recordEvent(
   source: string,
   type: string,
   payload: Record<string, unknown>,
-) {
-  if (!hasSupabase()) return;
+): Promise<string | null> {
+  if (!hasSupabase()) return null;
   const supabase = getServiceSupabase();
-  await supabase.from("events").insert({
+  const { data } = await supabase.from("events").insert({
     source,
     type,
     payload,
     processed: false,
-  });
+  }).select("id").maybeSingle();
+  return (data?.id as string | undefined) ?? null;
 }
 
 export async function markEventProcessed(eventId: string) {
   if (!hasSupabase()) return;
   const supabase = getServiceSupabase();
-  await supabase.from("events").update({ processed: true }).eq("id", eventId);
+  const { error } = await supabase
+    .from("events")
+    .update({
+      processed: true,
+      status: "succeeded",
+      processed_at: new Date().toISOString(),
+      last_error: null,
+      locked_at: null,
+    })
+    .eq("id", eventId);
+  if (error) {
+    await supabase.from("events").update({ processed: true }).eq("id", eventId);
+  }
+}
+
+export async function markEventFailure(
+  eventId: string,
+  status: "retryable_failure" | "permanent_failure",
+  errorMessage: string,
+) {
+  if (!hasSupabase()) return;
+  const supabase = getServiceSupabase();
+  await supabase
+    .from("events")
+    .update({
+      status,
+      processed: status === "permanent_failure",
+      processed_at: status === "permanent_failure" ? new Date().toISOString() : null,
+      last_error: errorMessage.slice(0, 1000),
+      locked_at: null,
+    })
+    .eq("id", eventId);
 }
 
 export async function patchCandidateFromWorkable(candidate: WorkableCandidate, jobShortcode: string) {

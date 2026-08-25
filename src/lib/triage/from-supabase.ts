@@ -507,11 +507,16 @@ function answersFrom(
       return {
         q: g.question || "Application answer",
         a: g.answer || "—",
-        comment: g.note || undefined,
+        comment: [g.note, g.provenanceNote].filter(Boolean).join(" ") || undefined,
         present: present?.length ? present : undefined,
         verdict,
         kind:
-          verdict === "AI"
+          g.candidateEvidenceCredit === "high"
+            ? ("good" as const)
+            : g.candidateEvidenceCredit === "zero" ||
+                (g.answerProvenance === "unsupported" && g.authorshipConfidence === "likely_synthetic")
+              ? ("flag" as const)
+              : verdict === "AI"
             ? ("ai" as const)
             : verdict === "OWNED"
               ? ("good" as const)

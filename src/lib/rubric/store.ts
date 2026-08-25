@@ -3,6 +3,7 @@ import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import type { JobRubric } from "../triage/types";
 import { EA_RUBRIC_TEMPLATE } from "./ea-template";
+import { getBuiltinSeatRubric, seatRubricMarkdown } from "./seat-rubrics";
 
 /** Very small HTML → text reducer for Workable job descriptions (which arrive as HTML). */
 function htmlToText(html: string | null | undefined): string {
@@ -77,7 +78,10 @@ export async function getJobRubric(jobShortcode: string): Promise<JobRubric> {
   const storedRubric = (rubricRow?.rubric_md as string | null) ?? "";
   const storedSpec = (rubricRow?.spec_md as string | null) ?? "";
 
-  const rubricMd = storedRubric || (isExecutiveAssistant(job?.title) ? EA_RUBRIC_TEMPLATE : "");
+  const builtin = getBuiltinSeatRubric({ shortcode: jobShortcode, title: job?.title });
+  const rubricMd =
+    storedRubric ||
+    (builtin ? seatRubricMarkdown(builtin) : isExecutiveAssistant(job?.title) ? EA_RUBRIC_TEMPLATE : "");
   const specMd = storedSpec || specFromJob(job);
 
   return { rubricMd, specMd };

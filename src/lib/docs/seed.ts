@@ -1,5 +1,6 @@
 import { promises as fs } from "fs";
 import path from "path";
+import { getBuiltinSeatRubric, seatRubricMarkdown } from "../rubric/seat-rubrics";
 
 /**
  * The docs/ folder is the canonical source for the markdown the grader reads:
@@ -46,7 +47,13 @@ export async function getSeedMethod(): Promise<string | null> {
 }
 
 /** The best-matching seat rubric from docs/ for a job title, or null. */
-export async function getSeedRubricForJob(title: string | null | undefined): Promise<string | null> {
+export async function getSeedRubricForJob(
+  title: string | null | undefined,
+  shortcode?: string | null,
+): Promise<string | null> {
+  const builtin = getBuiltinSeatRubric({ shortcode, title });
+  if (builtin) return seatRubricMarkdown(builtin);
+
   if (!title) return null;
   const entry = RUBRIC_FILES.find((r) => r.match.test(title));
   if (!entry) return null;

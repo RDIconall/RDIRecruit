@@ -118,7 +118,7 @@ export async function getActiveRubricMarkdown(jobShortcode: string) {
       .eq("shortcode", jobShortcode)
       .maybeSingle();
     const { getSeedRubricForJob } = await import("@/lib/docs/seed");
-    const seed = await getSeedRubricForJob(job?.title as string | undefined);
+    const seed = await getSeedRubricForJob(job?.title as string | undefined, jobShortcode);
     if (seed) return { markdown: seed, source: "seed" as const, version: null };
   }
   return { markdown: null, source: "none" as const, version: null };

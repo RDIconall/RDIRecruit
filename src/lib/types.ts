@@ -8,6 +8,93 @@ export type CategoryKey =
 
 export type CategoryScores = Record<CategoryKey, number>;
 
+export type RubricSchemaVersion = "legacy-v1" | "seat-dimensions-v2";
+
+export interface SeatDimension {
+  key: string;
+  label: string;
+  weight: number;
+  description: string;
+  evidenceRequirements: string[];
+  /** Minimum raw points required to clear Interview-First automatically. */
+  criticalMinimum?: number;
+}
+
+export type SeatDimensionScores = Record<string, number>;
+
+export type AnswerQuality = "excellent" | "good" | "surface" | "evasive";
+export type AnswerProvenance =
+  | "experience_backed"
+  | "adjacent_plausible"
+  | "unsupported"
+  | "contradicted";
+export type AuthorshipConfidence =
+  | "high"
+  | "uncertain"
+  | "likely_ai_assisted"
+  | "likely_synthetic";
+export type CandidateEvidenceCredit = "high" | "partial" | "low" | "zero";
+
+export interface EvidenceProvenance {
+  capability: string;
+  provenance: AnswerProvenance;
+  origin: string;
+  sourceRefs: string[];
+  note?: string;
+}
+
+export interface GateResult {
+  key: string;
+  label: string;
+  status: "pass" | "warn" | "fail" | "unknown";
+  severity?: "info" | "caution" | "critical";
+  note: string;
+}
+
+export interface IntegrityGate {
+  status: "clear" | "concern" | "fail";
+  concern?:
+    | "MATERIAL_SYNTHETIC_EXPERTISE"
+    | "POSSIBLE_MISREPRESENTATION"
+    | "INTEGRITY_CONCERN_HIGH"
+    | "OTHER";
+  note: string;
+}
+
+export type PersonQuality = "high" | "solid" | "promising" | "weak" | "blocked";
+
+export interface SeatFitRead {
+  appliedSeat: string;
+  verdict:
+    | "strong_seat"
+    | "viable_seat"
+    | "hold"
+    | "wrong_seat"
+    | "pass"
+    | "routing";
+  score: number | null;
+  summary: string;
+}
+
+export type EvidenceConfidence = "high" | "medium" | "low" | "unsupported";
+
+export interface RoDiagnostic {
+  currentCapability: string;
+  trajectory: string;
+  maturationPlacement?: string;
+  note: string;
+}
+
+export interface AlternateSeatSignal {
+  seatKey: string;
+  seatLabel: string;
+  fit: "high_potential" | "possible" | "weak";
+  score?: number;
+  evidence: string[];
+  gaps: string[];
+  verify: string[];
+}
+
 export type SalaryValue =
   | "justified"
   | "great value"
@@ -49,6 +136,18 @@ export interface ScoreRow {
   candidate_id: string;
   rubric_version: number;
   category_scores: CategoryScores;
+  /** Primary v2 seat-specific dimensions. Legacy rows leave this null/empty. */
+  seat_dimension_scores?: SeatDimensionScores | null;
+  gate_results?: {
+    integrity?: IntegrityGate;
+    other?: GateResult[];
+    capReasons?: string[];
+  } | null;
+  evidence_provenance?: EvidenceProvenance[] | null;
+  alternate_seat_signals?: AlternateSeatSignal[] | null;
+  rubric_schema_version?: RubricSchemaVersion | null;
+  methodology_version?: number | null;
+  decision_band?: string | null;
   total: number;
   salary_value: SalaryValue | null;
   confidence: Confidence | null;
@@ -141,7 +240,8 @@ export interface CandidateOverlayRow {
   updated_at?: string | null;
 }
 
-// AI = the answer reads as AI-generated (first filter, overrides substance).
+// Legacy answer verdict. New code separates answer quality, provenance,
+// authorship confidence, and candidate evidence credit below.
 export type AnswerVerdict = "AI" | "OWNED" | "SURFACE" | "EVASIVE";
 export type VerificationVerdict = "CONFIRMED" | "DISCREPANCY" | "UNVERIFIABLE";
 
@@ -196,6 +296,13 @@ export interface AnswerGradePayload {
   question: string;
   answer: string;
   verdict: AnswerVerdict;
+  answerQuality?: AnswerQuality;
+  answerProvenance?: AnswerProvenance;
+  authorshipConfidence?: AuthorshipConfidence;
+  candidateEvidenceCredit?: CandidateEvidenceCredit;
+  capabilities?: string[];
+  provenanceNote?: string;
+  liveValidationQuestion?: string;
   present: string[];
   note: string;
   kind: string;

@@ -274,8 +274,23 @@ Given the job description, this master rubric, the role-specific rubric, the can
 - Pull anything unverifiable to the top as `[NEEDS YOU]`.
 - Keep dimensions separate. Do not blend fit, evidence quality, integrity, level, trajectory, and compensation into one generic vibe.
 - Treat integrity and ego as gates, not scores.
+- Treat evidence provenance as a gate on capability credit. Before crediting a substantive answer, ask: "Where would this person have learned this?" Cross-check the displayed capability against the resume, work history, interview evidence, verified Workable notes, references, or other job-relevant verified evidence.
+- Separate answer quality from candidate capability. The answer may be excellent while the candidate's career history does not show a plausible origin for that expertise.
+- AI use is not the problem. AI as editor on experience-backed judgment can receive full credit. AI as thought partner on adjacent experience can receive cautious credit and live validation. AI as substitute for experience or judgment, when unsupported expertise is likely synthetic, is a material authenticity concern.
+- Do not accuse based on polished prose alone. The evidence mismatch is the signal.
 - Test portability. Do not reward coincidence.
 - The verdict is last and explicitly Conall's call.
+
+### Evidence provenance labels
+
+Use these labels whenever an answer displays job-relevant capability:
+
+- **Experience-backed** - the career record shows the candidate has performed substantially similar work.
+- **Adjacent plausible** - the exact task is not shown, but the underlying work could reasonably produce the judgment.
+- **Unsupported expertise** - the answer displays detailed expertise the career record gives no credible reason to believe they possess.
+- **Contradicted** - the answer conflicts materially with verified evidence.
+
+An excellent answer with unsupported expertise should be written plainly: "Excellent answer. Career history does not show where they learned this." Do not translate that answer into proven capability.
 
 ### Required output framing
 

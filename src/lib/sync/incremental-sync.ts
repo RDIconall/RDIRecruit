@@ -1,5 +1,7 @@
 import { hasAnthropic, hasSupabase, hasWorkable } from "../env";
 import {
+  markEventFailure,
+  markEventProcessed,
   scoreUnscoredAcrossJobs,
   syncCandidateById,
   syncChangedCandidatesForJob,
@@ -9,6 +11,14 @@ import {
 import { readSyncState, writeSyncState } from "./sync-state";
 import { getServiceSupabase } from "../supabase/server";
 import { getCandidate } from "../workable/client";
+import {
+  eventFailureStatus,
+  shouldRetryEvent,
+} from "./event-queue";
+import {
+  isPermanentWorkableNotFound,
+  tombstoneMissingWorkableCandidate,
+} from "./failures";
 
 export type SyncMode = "incremental" | "daily" | "full";
 
@@ -19,6 +29,8 @@ export interface SyncResult {
   candidatesSkipped: number;
   scored: number;
   rescored: number;
+  webhookEvents: number;
+  webhookFailures: number;
   /** Candidates still awaiting analysis after this pass (run again to continue). */
   remaining: number;
   /** First few mirror errors, when something fails (debug aid). */
@@ -30,6 +42,7 @@ export interface SyncResult {
 // handled by re-fetching the full candidate (which carries stage/disqualified/
 // hired_at) in syncCandidateFromWebhook.
 const NEW_CANDIDATE_EVENTS = new Set(["candidate_created"]);
+const HANDLED_WEBHOOK_EVENTS = new Set(["candidate_created", "candidate_moved"]);
 
 async function deltaScanAllJobs() {
   if (!hasSupabase()) return { changed: 0, skipped: 0, errors: [] as string[] };
@@ -87,10 +100,19 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
     candidatesSkipped: 0,
     scored: 0,
     rescored: 0,
+    webhookEvents: 0,
+    webhookFailures: 0,
     remaining: 0,
   };
 
   result.jobs = await syncJobsFromWorkable();
+
+  const webhookDrain = await processPendingWorkableEvents({
+    budgetMs: mode === "incremental" ? 20_000 : 45_000,
+    limit: mode === "incremental" ? 10 : 40,
+  });
+  result.webhookEvents = webhookDrain.processed;
+  result.webhookFailures = webhookDrain.failed;
 
   // 1) Mirror candidates into Supabase — fast, no Claude. This is the source of truth.
   const delta = await deltaScanAllJobs();
@@ -181,6 +203,111 @@ export async function rescoreOnly(budgetMs = 240_000): Promise<{ scored: number;
   }
 
   return { scored: batch.scored, remaining: batch.remaining };
+}
+
+interface PendingWorkableEventRow {
+  id: string;
+  type: string | null;
+  payload: {
+    event_type?: string;
+    type?: string;
+    data?: {
+      id?: string;
+      candidate?: { id?: string };
+      job?: { shortcode?: string };
+    };
+  } | null;
+  attempts?: number | null;
+  status?: string | null;
+}
+
+export async function processPendingWorkableEvents(options?: {
+  limit?: number;
+  budgetMs?: number;
+}): Promise<{ processed: number; failed: number; permanent: number; remaining: number }> {
+  if (!hasSupabase() || !hasWorkable()) return { processed: 0, failed: 0, permanent: 0, remaining: 0 };
+  const supabase = getServiceSupabase();
+  const limit = options?.limit ?? 25;
+  const budgetMs = options?.budgetMs ?? 30_000;
+  const staleBefore = new Date(Date.now() - 10 * 60_000).toISOString();
+
+  const { error: staleError } = await supabase
+    .from("events")
+    .update({ status: "stale", locked_at: null })
+    .eq("source", "workable")
+    .eq("processed", false)
+    .eq("status", "processing")
+    .lt("locked_at", staleBefore);
+  if (staleError) {
+    console.error("Failed to reclaim stale Workable events", staleError);
+  }
+
+  const { data: rows, error } = await supabase
+    .from("events")
+    .select("id, type, payload, attempts, status")
+    .eq("source", "workable")
+    .eq("processed", false)
+    .in("status", ["pending", "retryable_failure", "stale"])
+    .order("received_at", { ascending: true })
+    .limit(limit);
+  if (error) {
+    console.error("Failed to load pending Workable events", error);
+    return { processed: 0, failed: 1, permanent: 0, remaining: 0 };
+  }
+
+  const started = Date.now();
+  let processed = 0;
+  let failed = 0;
+  let permanent = 0;
+
+  for (const row of (rows ?? []) as PendingWorkableEventRow[]) {
+    if (Date.now() - started > budgetMs) break;
+    const attempts = (row.attempts ?? 0) + 1;
+    if (!shouldRetryEvent(row.status, attempts - 1)) {
+      await markEventFailure(row.id, "permanent_failure", "Retry budget exhausted");
+      permanent += 1;
+      continue;
+    }
+
+    await supabase
+      .from("events")
+      .update({ status: "processing", attempts, locked_at: new Date().toISOString() })
+      .eq("id", row.id);
+
+    const payload = row.payload ?? {};
+    const eventType = payload.event_type ?? payload.type ?? row.type ?? "unknown";
+    const candidateId = payload.data?.candidate?.id ?? payload.data?.id;
+    const jobShortcode = payload.data?.job?.shortcode;
+
+    try {
+      if (!candidateId || !jobShortcode || !HANDLED_WEBHOOK_EVENTS.has(eventType)) {
+        await markEventProcessed(row.id);
+        processed += 1;
+        continue;
+      }
+      await syncCandidateFromWebhook({ eventType, jobShortcode, candidateId });
+      await markEventProcessed(row.id);
+      processed += 1;
+    } catch (error) {
+      const status = eventFailureStatus(error, attempts);
+      if (status === "permanent_failure") {
+        permanent += 1;
+        if (candidateId && isPermanentWorkableNotFound(error)) {
+          await tombstoneMissingWorkableCandidate(candidateId, "workable event queue");
+        }
+      } else {
+        failed += 1;
+      }
+      await markEventFailure(
+        row.id,
+        status,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  const remaining = Math.max(0, (rows?.length ?? 0) - processed - failed - permanent);
+  return { processed, failed, permanent, remaining };
 }
 
 /** Webhook: new applicant → ingest + initial score; everything else → metadata + comments only. */

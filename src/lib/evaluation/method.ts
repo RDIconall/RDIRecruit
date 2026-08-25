@@ -43,28 +43,45 @@ Reason from §1–6, framed on the one question in §2 (what load off the desk, 
 ## Compliance (non-negotiable)
 Job-relevant evidence only. Never extract, infer, or flag protected or non-job attributes (age, race, national origin, religion, gender, orientation, disability, health, family status, photos, appearance). Career span (years since graduation / first role) is a permitted experience/level signal for the progression-rate read — it is not age and must never become a threshold or cutoff. Public/async text is self-reported and possibly AI-written — treat polish as weak evidence and push the load onto live, unscripted demonstration.`;
 
+export interface ActiveMethodDoc {
+  markdown: string;
+  version: number | null;
+  source: "db" | "seed" | "default";
+}
+
 /**
  * The active global method doc. Priority: in-app edit (DB) → docs/ seed file →
  * bundled default. So editing in-app overrides the file, and the file is the
  * canonical source when nothing has been edited.
  */
-export async function getMethodDoc(): Promise<string> {
+export async function getActiveMethodDoc(): Promise<ActiveMethodDoc> {
   if (hasSupabase()) {
     const supabase = getServiceSupabase();
     const { data } = await supabase
       .from("calibration")
-      .select("markdown")
+      .select("markdown, version")
       .eq("scope", METHOD_SCOPE)
       .eq("active", true)
       .order("version", { ascending: false })
       .limit(1)
       .maybeSingle();
     const md = (data?.markdown as string | undefined)?.trim();
-    if (md && md.length > 40) return md;
+    if (md && md.length > 40) {
+      return {
+        markdown: md,
+        version: (data?.version as number | undefined) ?? null,
+        source: "db",
+      };
+    }
   }
   const { getSeedMethod } = await import("../docs/seed");
   const seed = await getSeedMethod();
-  return seed ?? DEFAULT_METHOD_MD;
+  if (seed) return { markdown: seed, version: 0, source: "seed" };
+  return { markdown: DEFAULT_METHOD_MD, version: null, source: "default" };
+}
+
+export async function getMethodDoc(): Promise<string> {
+  return (await getActiveMethodDoc()).markdown;
 }
 
 /** Save a new version of the global method doc and bump the global scoring epoch. */

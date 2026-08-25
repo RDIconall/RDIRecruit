@@ -38,7 +38,6 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
   const [sel, setSel] = useState<RowSelectionState>({});
   const [showDisq, setShowDisq] = useState(false);
 
-  const isDq = (c: Candidate) => !!dq[c.id];
   // Active candidates, ordered the way the pool reads top-down (decision-group
   // priority, then pool standing within the group). The table keeps this as its
   // default order; sorting a column overrides it per group. Process status is
@@ -46,12 +45,12 @@ export function PoolBoard({ wsApi, openCandidate }: Props) {
   const active = useMemo(
     () =>
       candidates
-        .filter((c) => !isDq(c))
+        .filter((c) => !dq[c.id])
         .map((c) => ({ ...c, processStatus: processMap[c.id] ?? null }))
         .sort((a, b) => (a.standing?.overallRank ?? 1e9) - (b.standing?.overallRank ?? 1e9)),
     [candidates, dq, processMap],
   );
-  const disqRows = useMemo(() => candidates.filter((c) => isDq(c)), [candidates, dq]);
+  const disqRows = useMemo(() => candidates.filter((c) => !!dq[c.id]), [candidates, dq]);
 
   // Mobile-only grouping (desktop grouping lives inside PoolTable).
   const groups = useMemo(() => {
@@ -229,6 +228,7 @@ function JobSpecPanel({
 
   // Keep drafts in sync with server-fed values (e.g. after a job switch / refresh).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- This mirrors server-loaded drafts into local editable textareas.
     setSpecDraft(specMd);
     setRubricDraft(rubricMd);
   }, [specMd, rubricMd, jobShortcode]);
