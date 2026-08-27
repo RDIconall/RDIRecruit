@@ -283,30 +283,48 @@ export async function scoreCandidate(
     await supabase.from("evaluations").delete().eq("candidate_id", candidateId);
   }
 
-  const { data: scoreRow, error: scoreError } = await supabase
+  const scorePayload = {
+    candidate_id: candidateId,
+    rubric_version: rubric.version,
+    category_scores: evaluation.categoryScores,
+    seat_dimension_scores: evaluation.seatDimensionScores,
+    gate_results: {
+      integrity: evaluation.integrityGate,
+      other: evaluation.otherGateResults,
+      capReasons: evaluation.capReasons,
+    },
+    evidence_provenance: evaluation.evidenceProvenance,
+    alternate_seat_signals: evaluation.alternateSeatSignals,
+    rubric_schema_version: evaluation.rubricSchemaVersion,
+    methodology_version: evaluation.methodologyVersion,
+    decision_band: evaluation.decisionBand,
+    total: evaluation.total,
+    salary_value: evaluation.salaryValue,
+    model_version: "claude-sonnet-4-6",
+    confidence: evaluation.confidence,
+  };
+  let { data: scoreRow, error: scoreError } = await supabase
     .from("scores")
-    .insert({
-      candidate_id: candidateId,
-      rubric_version: rubric.version,
-      category_scores: evaluation.categoryScores,
-      seat_dimension_scores: evaluation.seatDimensionScores,
-      gate_results: {
-        integrity: evaluation.integrityGate,
-        other: evaluation.otherGateResults,
-        capReasons: evaluation.capReasons,
-      },
-      evidence_provenance: evaluation.evidenceProvenance,
-      alternate_seat_signals: evaluation.alternateSeatSignals,
-      rubric_schema_version: evaluation.rubricSchemaVersion,
-      methodology_version: evaluation.methodologyVersion,
-      decision_band: evaluation.decisionBand,
-      total: evaluation.total,
-      salary_value: evaluation.salaryValue,
-      model_version: "claude-sonnet-4-6",
-      confidence: evaluation.confidence,
-    })
+    .insert(scorePayload)
     .select("*")
     .single();
+  if (scoreError) {
+    const { data: legacyRow, error: legacyError } = await supabase
+      .from("scores")
+      .insert({
+        candidate_id: candidateId,
+        rubric_version: rubric.version,
+        category_scores: evaluation.categoryScores,
+        total: evaluation.total,
+        salary_value: evaluation.salaryValue,
+        model_version: "claude-sonnet-4-6",
+        confidence: evaluation.confidence,
+      })
+      .select("*")
+      .single();
+    scoreRow = legacyRow;
+    scoreError = legacyError;
+  }
 
   if (scoreError || !scoreRow) {
     throw scoreError ?? new Error("Failed to write score");
@@ -387,36 +405,6 @@ export async function scoreCandidate(
     { kind: "dig_in", ref: null, payload: { ...evaluation.digIn } },
     { kind: "verification", ref: "profile", payload: { ...evaluation.verification } },
     { kind: "compose_questions", ref: null, payload: { questions: evaluation.composeQuestions } },
-    {
-      kind: "seat_fit",
-      ref: candidate.job_shortcode ?? null,
-      payload: {
-        personQuality: evaluation.personQuality,
-        seatFit: evaluation.seatFit,
-        seatDimensionScores: evaluation.seatDimensionScores,
-        evidenceConfidence: evaluation.evidenceConfidence,
-        integrityGate: evaluation.integrityGate,
-        otherGateResults: evaluation.otherGateResults,
-        capReasons: evaluation.capReasons,
-        decisionBand: evaluation.decisionBand,
-        liveValidationQuestions: evaluation.liveValidationQuestions,
-      },
-    },
-    {
-      kind: "evidence_provenance",
-      ref: null,
-      payload: { evidenceProvenance: evaluation.evidenceProvenance },
-    },
-    {
-      kind: "alternate_seats",
-      ref: null,
-      payload: { alternateSeatSignals: evaluation.alternateSeatSignals },
-    },
-    {
-      kind: "ro_diagnostic",
-      ref: null,
-      payload: { ...evaluation.roDiagnostic },
-    },
   ];
 
   for (const role of evaluation.roReads) {

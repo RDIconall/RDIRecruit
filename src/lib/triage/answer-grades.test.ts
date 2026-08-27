@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { summarizeAnswerGrades } from "./answer-grades";
+import { summarizeAnswerGrades } from "./answer-grades.ts";
 
 // Two SURFACE answers must never read as Strong — the failure mode that promoted
 // a weak EA applicant in the cross-role "best new" banner.
@@ -32,5 +32,25 @@ const allOwned = summarizeAnswerGrades([
 ]);
 assert.equal(allOwned.level, "strong");
 assert.match(allOwned.label, /3 owned concepts/);
+
+// AI as editor on experience-backed judgment still ranks as strong answers.
+const backedAi = summarizeAnswerGrades([
+  {
+    verdict: "AI",
+    present: ["pricing model", "scope tradeoffs"],
+    answerProvenance: "experience_backed",
+    authorshipConfidence: "likely_ai_assisted",
+    candidateEvidenceCredit: "high",
+  },
+  {
+    verdict: "OWNED",
+    present: ["closed loop"],
+    answerProvenance: "experience_backed",
+    authorshipConfidence: "high",
+    candidateEvidenceCredit: "high",
+  },
+]);
+assert.equal(backedAi.level, "strong");
+assert.doesNotMatch(backedAi.label, /AI-heavy/i);
 
 console.log("answer-grades.test.ts: ok");

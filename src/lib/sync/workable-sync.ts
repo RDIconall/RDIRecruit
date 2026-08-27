@@ -592,12 +592,13 @@ export async function recordEvent(
 ): Promise<string | null> {
   if (!hasSupabase()) return null;
   const supabase = getServiceSupabase();
-  const { data } = await supabase.from("events").insert({
+  const { data, error } = await supabase.from("events").insert({
     source,
     type,
     payload,
     processed: false,
   }).select("id").maybeSingle();
+  if (error) throw error;
   return (data?.id as string | undefined) ?? null;
 }
 

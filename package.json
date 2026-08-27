@@ -6,7 +6,7 @@
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --experimental-specifier-resolution=node --test tests/*.test.ts",
+    "test": "tsx --test tests/*.test.ts src/lib/triage/*.test.ts",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "db:migrate": "node scripts/apply-migrations.mjs"
@@ -28,6 +28,7 @@
     "react-dom": "^19.1.0",
     "tailwind-merge": "^3.3.0",
     "tesseract.js": "^7.0.0",
+    "tsx": "^4.20.5",
     "vercel": "^54.13.0",
     "zod": "^3.25.36"
   },

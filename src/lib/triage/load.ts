@@ -525,7 +525,7 @@ async function loadCrossRolePool(): Promise<TriagePool> {
       jobShortcode: CROSS_ROLE_SHORTCODE,
       jobUrl: "",
       healthState: `${candidates.length} across ${shortcodes.length} jobs`,
-      healthRead: `${interviewCount} interview-ready among new/active applicants — ranked by decision, value, and answer fit.`,
+      healthRead: `${interviewCount} interview-ready among new/active applicants — ranked by job match, then problem complexity.`,
       total: candidates.length,
     },
   };

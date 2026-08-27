@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
-import { recordEvent } from "@/lib/sync/workable-sync";
+import { markEventFailure, markEventProcessed, recordEvent } from "@/lib/sync/workable-sync";
+import { syncCandidateFromWebhook } from "@/lib/sync/incremental-sync";
+import { eventFailureStatus } from "@/lib/sync/event-queue";
 import { verifyWorkableSignature } from "@/lib/workable/client";
 
 // Workable SPI v3 only exposes two subscribable candidate events:
@@ -40,11 +42,34 @@ export async function POST(request: NextRequest) {
   };
 
   const eventType = payload.event_type ?? payload.type ?? "unknown";
-  const eventId = await recordEvent("workable", eventType, payload as Record<string, unknown>);
+  let eventId: string | null;
+  try {
+    eventId = await recordEvent("workable", eventType, payload as Record<string, unknown>);
+  } catch (error) {
+    console.error("Workable webhook enqueue failed", error);
+    return NextResponse.json({ ok: false }, { status: 500 });
+  }
 
-  return NextResponse.json({
-    ok: true,
-    queued: HANDLED_EVENTS.has(eventType),
-    eventId,
-  });
+  const candidateId = payload.data?.candidate?.id ?? payload.data?.id;
+  const jobShortcode = payload.data?.job?.shortcode;
+  if (candidateId && jobShortcode && HANDLED_EVENTS.has(eventType)) {
+    try {
+      await syncCandidateFromWebhook({ eventType, jobShortcode, candidateId });
+      if (eventId) await markEventProcessed(eventId);
+      return NextResponse.json({ ok: true, processed: true, eventId });
+    } catch (error) {
+      console.error("Workable webhook processing failed", error);
+      if (eventId) {
+        await markEventFailure(
+          eventId,
+          eventFailureStatus(error, 1),
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      return NextResponse.json({ ok: false, queued: true, eventId }, { status: 500 });
+    }
+  }
+
+  if (eventId) await markEventProcessed(eventId);
+  return NextResponse.json({ ok: true, queued: false, eventId });
 }

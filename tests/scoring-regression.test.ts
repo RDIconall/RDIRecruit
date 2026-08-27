@@ -16,6 +16,7 @@ import {
   hasMaterialSyntheticExpertise,
   legacyCategoriesFromSeatTotal,
   normalizeSeatDimensionScores,
+  resolveSeatTotal,
 } from "../src/lib/scoring/seat-fit.ts";
 import type { AnswerGradePayload } from "../src/lib/types.ts";
 import {
@@ -78,6 +79,20 @@ test("critical dimension minimum caps below interview-first without deleting the
   assert.match(adjustment.capReasons.join("\n"), /critical minimum/i);
 });
 
+test("v2 totals fall back to legacy categories when seat dimensions are missing", () => {
+  const rubric = getBuiltinSeatRubric({ shortcode: HEAD_CLINICAL_OPS });
+  assert.ok(rubric);
+  const parsed = parseRubricMarkdown(seatRubricMarkdown(rubric));
+  const empty = normalizeSeatDimensionScores(undefined, parsed.dimensions);
+  const total = resolveSeatTotal({
+    schemaVersion: "seat-dimensions-v2",
+    dimensions: parsed.dimensions,
+    dimensionScores: empty,
+    legacyTotal: 82,
+  });
+  assert.equal(total, 82);
+});
+
 test("excellent likely-synthetic unsupported answer gets zero capability credit", () => {
   const grades: AnswerGradePayload[] = [
     {
@@ -101,7 +116,8 @@ test("excellent likely-synthetic unsupported answer gets zero capability credit"
     dimensionScores: {},
     answerGrades: grades,
   });
-  assert.equal(adjustment.total, 54);
+  assert.equal(adjustment.total, 88);
+  assert.equal(adjustment.capped, false);
 });
 
 test("experience-backed AI assistance is not a synthetic expertise failure", () => {
@@ -167,9 +183,19 @@ test("legacy compatibility categories preserve the adjusted total", () => {
 
 test("Workable 404 is permanent, 429 and 5xx are bounded retryable", () => {
   assert.equal(isPermanentWorkableNotFound(new WorkableApiError(404, "/candidates/missing", "not found")), true);
+  assert.equal(isPermanentWorkableNotFound(new Error("profile photo not found on CDN")), false);
+  assert.equal(isPermanentWorkableNotFound(new Error("timeout 404ms later")), false);
   assert.equal(isRetryableWorkableStatus(429), true);
   assert.equal(isRetryableWorkableStatus(503), true);
   assert.equal(isRetryableWorkableStatus(400), false);
+});
+
+test("title routing does not steal unrelated engineer or monitoring jobs", () => {
+  assert.equal(getBuiltinSeatRubric({ title: "Clinical Data Engineer" }), null);
+  assert.equal(getBuiltinSeatRubric({ title: "Software QA Analyst" }), null);
+  assert.equal(getBuiltinSeatRubric({ title: "Site Monitoring Coordinator" }), null);
+  assert.ok(getBuiltinSeatRubric({ title: "Founding Product Engineer - Clinical Systems" }));
+  assert.ok(getBuiltinSeatRubric({ shortcode: HEAD_CLINICAL_OPS }));
 });
 
 test("event retry policy stops after the bounded retry budget", () => {

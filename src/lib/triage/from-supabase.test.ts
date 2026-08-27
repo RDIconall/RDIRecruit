@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import type { AnswerGradePayload, CandidateRow, ScoreRow } from "../types";
-import { deriveDecisionDetail, mapCandidate, type MapInput } from "./from-supabase";
+import type { AnswerGradePayload, CandidateRow, ScoreRow } from "../types.ts";
+import { deriveDecisionDetail, mapCandidate, type MapInput } from "./from-supabase.ts";
 
 const candidateRow: CandidateRow = {
   workable_id: "cand_1",
@@ -165,6 +165,64 @@ const strongView = mapCandidate(input());
 assert.equal(strongView.specRead.level, "strong");
 assert.equal(strongView.interviewGate?.clears, true);
 assert.equal(strongView.survivor, true);
+
+function syntheticGrade(): AnswerGradePayload {
+  return {
+    ...grade("AI"),
+    answerQuality: "excellent",
+    answerProvenance: "unsupported",
+    authorshipConfidence: "likely_synthetic",
+    candidateEvidenceCredit: "zero",
+    present: [],
+  };
+}
+
+// Polished AI answers with no career origin are Backup, never Interview or Reject.
+const unsupportedAi = deriveDecisionDetail(
+  input({
+    score: score(90),
+    evals: {
+      ...input().evals,
+      answerGrades: [syntheticGrade(), syntheticGrade(), syntheticGrade()],
+    },
+  }),
+);
+assert.equal(unsupportedAi.decision, "backup");
+assert.notEqual(unsupportedAi.decision, "reject");
+assert.match(unsupportedAi.bar.reason ?? "", /does not support/i);
+
+// One too-good unsupported answer is enough to leave the interview list.
+const oneFake = deriveDecisionDetail(
+  input({
+    evals: {
+      ...input().evals,
+      answerGrades: [grade("OWNED"), grade("OWNED"), syntheticGrade()],
+    },
+  }),
+);
+assert.equal(oneFake.decision, "backup");
+
+// AI-assisted writing that the résumé can explain stays Interview.
+const backedAi = deriveDecisionDetail(
+  input({
+    evals: {
+      ...input().evals,
+      answerGrades: [
+        {
+          ...grade("AI"),
+          answerQuality: "excellent",
+          answerProvenance: "experience_backed",
+          authorshipConfidence: "likely_ai_assisted",
+          candidateEvidenceCredit: "high",
+          present: ["deviation logging"],
+        },
+        grade("OWNED"),
+        grade("OWNED"),
+      ],
+    },
+  }),
+);
+assert.equal(backedAi.decision, "interview");
 
 // No score row at all: a stale model "interview" cannot ride through on the
 // absence of a disqualifier. This is the shape that kept a weak applicant billed

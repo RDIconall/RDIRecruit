@@ -32,6 +32,7 @@ import {
   CONSIDER_BAND_MIN,
   type InterviewBar,
 } from "./interview-bar";
+import { hasMaterialSyntheticExpertise } from "../scoring/seat-fit";
 import {
   analyzeTenureStability,
   applyTenureDecisionGate,
@@ -258,6 +259,7 @@ function interviewBarFor(input: MapInput): InterviewBar {
     answersLevel: summarizeAnswerGrades(input.evals.answerGrades).level,
     refusedToAnswer: refusedToAnswerFrom(input.application, input.evals.answerGrades),
     hasLiveEvidence: input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
+    unsupportedExpertise: hasMaterialSyntheticExpertise(input.evals.answerGrades),
   });
 }
 
@@ -864,12 +866,9 @@ function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
 }
 
 /**
- * The value read is what orders the interview list (see rankWeight), so a model
- * that calls a file "strong" puts it at the top — which is how a weak applicant
- * ended up billed as the best new candidate. A "strong" verdict has to be backed
- * by the evidence we can actually check: the answers and the rubric grading. When
- * it isn't, keep the model's own words in the detail but stop the headline and the
- * ordering from claiming more than the file earns.
+ * The value read is a salary-vs-strength headline, not the interview-list order.
+ * Rank order is job-description match, then problem complexity (see rankWeight).
+ * A model "strong" value still has to be backed by answers and rubric grading.
  */
 function groundValueRead(value: ValueRead, answers: VerdictRead, spec: VerdictRead): ValueRead {
   if (value.level !== "strong") return value;

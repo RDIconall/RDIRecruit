@@ -4,7 +4,7 @@ import {
   detectPipelinePhase,
   hasInterviewEvidence,
   nextActionForPhase,
-} from "./pipeline-phase";
+} from "./pipeline-phase.ts";
 
 assert.equal(hasInterviewEvidence({ activity: [] }), false);
 assert.equal(

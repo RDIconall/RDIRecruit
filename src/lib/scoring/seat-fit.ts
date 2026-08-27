@@ -78,11 +78,6 @@ export function applySeatGates(input: {
     capReasons.push(input.integrityGate.note || "Integrity gate failed.");
   }
 
-  if (hasMaterialSyntheticExpertise(input.answerGrades)) {
-    total = Math.min(total, 54);
-    capReasons.push("Excellent answer was unsupported by career evidence and likely synthetic; no capability credit.");
-  }
-
   const failedGate = hasFailingGate(input.otherGateResults ?? undefined);
   if (failedGate) {
     total = Math.min(total, 54);
@@ -129,6 +124,22 @@ export function legacyCategoriesFromSeatTotal(
   });
 
   return out;
+}
+
+/** Prefer seat-dimension totals, but never persist a 0 when the model only filled legacy buckets. */
+export function resolveSeatTotal(input: {
+  schemaVersion: RubricSchemaVersion;
+  dimensions: SeatDimension[];
+  dimensionScores: SeatDimensionScores;
+  legacyTotal: number;
+}): number {
+  if (input.schemaVersion !== "seat-dimensions-v2" || !input.dimensions.length) {
+    return Math.max(0, Math.min(100, Math.round(input.legacyTotal)));
+  }
+  const dimensionTotal = totalFromSeatDimensions(input.dimensionScores);
+  const allZero = input.dimensions.every((d) => (input.dimensionScores[d.key] ?? 0) === 0);
+  if (allZero && input.legacyTotal > 0) return Math.max(0, Math.min(100, Math.round(input.legacyTotal)));
+  return Math.max(0, Math.min(100, Math.round(dimensionTotal)));
 }
 
 export function rubricSchemaForDimensions(dimensions: SeatDimension[]): RubricSchemaVersion {
