@@ -42,7 +42,15 @@ export function countAnswerVerdicts(
     }
     const v = (g.verdict ?? "").toUpperCase();
     if (v === "AI") {
-      ai++;
+      const backed =
+        g.answerProvenance === "experience_backed" || g.answerProvenance === "adjacent_plausible";
+      const credited = g.candidateEvidenceCredit === "high" || g.candidateEvidenceCredit === "partial";
+      if (backed && credited) {
+        owned++;
+        if (Array.isArray(g.present)) ownedConcepts += g.present.filter(Boolean).length;
+      } else {
+        ai++;
+      }
     } else if (v === "OWNED") {
       owned++;
       if (Array.isArray(g.present)) ownedConcepts += g.present.filter(Boolean).length;

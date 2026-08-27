@@ -10,14 +10,28 @@ const GROUP_LABEL: Record<Decision, string> = {
 };
 
 /**
- * Ordering signal within a group. The interview list is worked top-down, so it is
- * ordered by the strength-vs-salary value read first, then by raw fit; the other
- * groups fall back to fit alone.
+ * Proven problem complexity from the RO capability read (résumé work, not prose).
+ * IV/V work ranks above III, then II. Missing reads add nothing.
  */
-/** Ordering signal within a decision group — also used for cross-role "best new". */
-export function rankWeight(c: Candidate): number {
-  const value = c.value ? valueWeight(c.value.level) * 10 : 0;
-  return value + fitWeight(c.answersRead.level) + fitWeight(c.specRead.level);
+export function complexityWeight(roLevel: string | null | undefined): number {
+  const s = (roLevel ?? "").toUpperCase();
+  if (s.includes("IV") || /(^|[^A-Z])V([^A-Z]|$)/.test(s)) return 3;
+  if (s.includes("III")) return 2;
+  if (s.includes("II")) return 1;
+  return 0;
+}
+
+/**
+ * Ordering inside a decision group. Interview is worked top-down:
+ * job-description match first, then complexity of problems actually solved,
+ * then answers and salary-value as tie-breakers. Never a displayed score.
+ */
+export function rankWeight(c: Pick<Candidate, "value" | "answersRead" | "specRead" | "roLevel">): number {
+  const spec = fitWeight(c.specRead.level) * 1000;
+  const complexity = complexityWeight(c.roLevel) * 100;
+  const answers = fitWeight(c.answersRead.level) * 10;
+  const value = c.value ? valueWeight(c.value.level) : 0;
+  return spec + complexity + answers + value;
 }
 
 const DECISION_PRIORITY: Record<Decision, number> = {

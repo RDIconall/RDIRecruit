@@ -19,7 +19,5 @@ export function isRetryableWorkableStatus(status: number): boolean {
 export function isPermanentWorkableNotFound(error: unknown): boolean {
   if (error instanceof WorkableApiError) return error.status === 404;
   const maybeStatus = (error as { status?: unknown } | null)?.status;
-  if (maybeStatus === 404) return true;
-  const message = error instanceof Error ? error.message : String(error);
-  return /\b404\b/.test(message) || /not found/i.test(message);
+  return maybeStatus === 404;
 }

@@ -40,6 +40,11 @@ export interface InterviewBarInput {
   /** Screening answers were dash-filled or left effectively blank. */
   refusedToAnswer: boolean;
   /**
+   * At least one answer displays expertise the career record cannot explain
+   * and reads as likely synthetic. That file is a Backup, not an Interview.
+   */
+  unsupportedExpertise?: boolean;
+  /**
    * Live interview / screen evidence is on file. Past triage the calendar
    * question is already settled, so this bar no longer applies: Advance / Hold /
    * Pass is driven by what the candidate showed live.
@@ -59,6 +64,15 @@ const CLEARS: InterviewBar = { clears: true, reason: null, caveat: null };
 
 export function assessInterviewBar(input: InterviewBarInput): InterviewBar {
   if (input.hasLiveEvidence) return CLEARS;
+
+  if (input.unsupportedExpertise) {
+    return {
+      clears: false,
+      reason:
+        "Application answers display expertise the career record does not support — fluent writing, not proven capability. Hold as backup.",
+      caveat: "Verify live whether they have actually done this work before spending interview time.",
+    };
+  }
 
   if (input.refusedToAnswer) {
     return {

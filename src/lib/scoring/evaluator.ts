@@ -31,7 +31,7 @@ import {
   applySeatGates,
   legacyCategoriesFromSeatTotal,
   normalizeSeatDimensionScores,
-  totalFromSeatDimensions,
+  resolveSeatTotal,
 } from "./seat-fit";
 
 const MODEL = "claude-sonnet-4-6";
@@ -348,7 +348,7 @@ VERDICT BANDS — the total you assign IS the founder-facing call. The "summary"
 - 70–84 → CONSIDER (holds the level, watch the caveat)
 - 55–69 → HOLD (borderline — needs more evidence before a call)
 - 0–54 → DENY (below the seat requirement)
-Set the category scores first, sum them, see which band the total falls in, then write the summary as the justification of THAT band — referencing the seat's rubric criteria and the How-We-Evaluate method by name. Do not write an upbeat or selling summary for a total in the HOLD or DENY band.
+Set the seat-dimension scores first when they are provided (they are the hiring total). Sum them, see which band that total falls in, then write the summary as the justification of THAT band. Legacy category scores are compatibility-only. Do not write an upbeat or selling summary for a total in the HOLD or DENY band.
 
 Return this exact JSON shape (fill every field; arrays may be empty but must be present):
 {
@@ -568,9 +568,9 @@ function clampCategories(
 
 function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): EvaluatorOutput {
   const legacyCategoryScores = clampCategories(parsed.categoryScores, input.weights);
+  const stability = analyzeTenureStability(input.roles);
   // Deterministic tenure cap — LLM soft-balling short stints must not inflate the total.
   if (typeof legacyCategoryScores.tenure === "number" && typeof input.weights.tenure === "number") {
-    const stability = analyzeTenureStability(input.roles);
     legacyCategoryScores.tenure = capTenureCategoryScore(
       legacyCategoryScores.tenure,
       input.weights.tenure,
@@ -587,10 +587,22 @@ function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): Eva
       ? normalizeSeatDimensionScores(parsed.seatDimensionScores, dimensions)
       : {};
 
-  const rawSeatTotal =
-    rubricSchemaVersion === "seat-dimensions-v2"
-      ? totalFromSeatDimensions(seatDimensionScores)
-      : Object.values(legacyCategoryScores).reduce((sum, v) => sum + v, 0);
+  const legacyTotal = Object.values(legacyCategoryScores).reduce((sum, v) => sum + v, 0);
+  const usedDimensionFallback =
+    rubricSchemaVersion === "seat-dimensions-v2" &&
+    dimensions.length > 0 &&
+    dimensions.every((d) => (seatDimensionScores[d.key] ?? 0) === 0) &&
+    legacyTotal > 0;
+  let rawSeatTotal = resolveSeatTotal({
+    schemaVersion: rubricSchemaVersion,
+    dimensions,
+    dimensionScores: seatDimensionScores,
+    legacyTotal,
+  });
+  if (rubricSchemaVersion === "seat-dimensions-v2" && !usedDimensionFallback) {
+    const reduction = 10 - capTenureCategoryScore(10, 10, stability);
+    rawSeatTotal = Math.max(0, rawSeatTotal - reduction);
+  }
 
   const answerGrades = normalizeAnswerGrades(parsed.answerGrades ?? []);
   const integrityGate = normalizeIntegrityGate(parsed.integrityGate);

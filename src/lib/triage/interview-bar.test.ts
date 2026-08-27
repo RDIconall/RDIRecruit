@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { applyInterviewBar, applyInterviewGate, assessInterviewBar } from "./interview-bar";
+import { applyInterviewBar, applyInterviewGate, assessInterviewBar } from "./interview-bar.ts";
 
 const strongFile = {
   total: 88,
@@ -27,6 +27,14 @@ assert.equal(applyInterviewBar("blocked", borderline), "blocked");
 
 // Answers that own nothing (surface / evasive / AI-written) cannot be interviewed
 // on, even with a total that clears the seat's bar.
+const unsupportedExpertise = assessInterviewBar({
+  ...strongFile,
+  unsupportedExpertise: true,
+});
+assert.equal(unsupportedExpertise.clears, false);
+assert.match(unsupportedExpertise.reason ?? "", /does not support/i);
+assert.equal(applyInterviewBar("interview", unsupportedExpertise), "backup");
+
 const surfaceAnswers = assessInterviewBar({ ...strongFile, answersLevel: "weak" });
 assert.equal(surfaceAnswers.clears, false);
 assert.equal(applyInterviewBar("interview", surfaceAnswers), "backup");

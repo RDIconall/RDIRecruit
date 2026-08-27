@@ -7,7 +7,7 @@ import {
   parseResumeDate,
   roleFromPeriodSpan,
   roleTenureMonths,
-} from "./tenure-stability";
+} from "./tenure-stability.ts";
 
 const NOW = new Date("2026-07-01T12:00:00Z");
 

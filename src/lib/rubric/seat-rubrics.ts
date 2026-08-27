@@ -41,7 +41,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Head of Clinical Operations & Study Delivery",
     mission:
       "Take a difficult clinical study, diagnose the real constraint, recover delivery, and build the clinical operations system so routine CEO/COO intervention is no longer required.",
-    aliases: [/head of clinical/i, /clinical operations/i, /study delivery/i],
+    aliases: [/head of clinical/i, /head of clinical operations/i, /study delivery/i],
     dimensions: [
       dim("study_diagnosis_rescue", "Study diagnosis & rescue", 20, "Personally entered troubled studies, found the root constraint, changed the plan, and recovered enrollment/timeline/data/site/sample execution.", ["failing study inherited", "root constraint named", "personal decision/change", "measurable recovery"]),
       dim("end_to_end_delivery", "End-to-end clinical delivery ownership", 20, "Owned meaningful portions of protocol, startup, sites, enrollment, monitoring, samples, data, and closeout.", ["timelines", "budgets", "recruitment/sites/vendors", "samples/data/regulatory or quality interfaces"], 8),
@@ -91,7 +91,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Founding Product Engineer - Clinical Systems",
     mission:
       "Own the technical/product system RDI runs on: understand workflow, decide what to build, code it, ship it, operate it, and remain accountable when it fails.",
-    aliases: [/founding product engineer/i, /clinical systems/i, /software/i, /engineer/i],
+    aliases: [/founding product engineer/i, /product engineer/i, /clinical systems engineer/i],
     dimensions: [
       dim("production_system_ownership", "Production system ownership", 25, "Owned consequential production systems with real users and reliability/data/financial/regulatory consequences after launch.", ["production ownership", "real users", "post-launch accountability", "consequential data/financial/regulatory/safety impact"], 1),
       dim("architecture_reliability", "Architecture + reliability", 20, "Evidence of architecture, testing, CI/CD, observability, incidents, migrations, distributed systems, error handling, and production debugging.", ["architecture", "testing/CI/CD", "observability/incidents", "migrations/root cause"]),
@@ -140,7 +140,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Clinical Monitoring Standards Lead",
     mission:
       "Be the master of RDI's monitoring craft: personally capable of the work, able to teach it, inspect it, and build systems that keep every study audit-ready.",
-    aliases: [/monitoring standards/i, /\bcra\b/i, /clinical research associate/i, /monitoring/i],
+    aliases: [/monitoring standards/i, /principal cra/i, /clinical research associate/i, /clinical monitoring/i],
     dimensions: [
       dim("hands_on_monitoring", "Hands-on monitoring mastery", 25, "Actually monitored studies and can inspect consent, source, CRF, compliance, deviations, queries, reports, and site files.", ["monitoring performed personally", "source/consent/CRF/protocol/deviation inspection", "site file/report quality"]),
       dim("audit_readiness_systems", "Audit readiness / inspection systems", 20, "Maintained or built systems keeping multiple studies inspection-ready.", ["audit prep/inspection response", "TMF/site files/CAPA", "documentation completeness"]),
