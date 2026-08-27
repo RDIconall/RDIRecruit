@@ -374,6 +374,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   if (standing) facts.push({ k: "Pool standing", v: standing });
 
   const blockedReadiness = c.decision === "blocked" && c.readiness && !c.readiness.ready ? c.readiness : null;
+  const awaitingAnalysis = c.decision === "blocked" && !blockedReadiness;
 
   const reviewed = reviewedList(c, activity.length);
   const hasAssessment = !!(c.assessment && (c.assessment.bio || c.assessment.application || c.assessment.commute));
@@ -570,6 +571,49 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
                 : blockedReadiness.resumeMissingFromSource
                   ? "Re-check Workable for a résumé"
                   : "Resync from Workable & retry"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Materials are all on file, but no analysis has ever run for this file.
+          Re-syncing does nothing here — the fix is to grade it. */}
+      {awaitingAnalysis && (
+        <div
+          style={{
+            margin: "0 0 18px",
+            background: APP.accentSoft,
+            border: `1px solid ${APP.accentBorder}`,
+            borderRadius: 10,
+            padding: narrow ? "14px 16px" : "16px 18px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 10,
+          }}
+        >
+          <div style={mono({ fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: APP.accent })}>
+            Review blocked · waiting on analysis
+          </div>
+          <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.5, color: APP.ink2 }}>
+            The materials are on file — nothing is missing. This candidate has just never been
+            analysed, so there is no read to show yet. Run the analysis to grade them.
+          </p>
+          <div>
+            <button
+              onClick={() => wsApi.runDeep(id)}
+              disabled={busy}
+              style={mono({
+                cursor: busy ? "default" : "pointer",
+                background: busy ? APP.hair : APP.accent,
+                color: busy ? APP.muted : "#fff",
+                border: "none",
+                borderRadius: 5,
+                padding: "6px 14px",
+                fontSize: 12.5,
+                fontWeight: 600,
+              })}
+            >
+              {busy ? "Analyzing…" : "Run analysis"}
             </button>
           </div>
         </div>

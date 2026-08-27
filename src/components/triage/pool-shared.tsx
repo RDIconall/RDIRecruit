@@ -11,8 +11,8 @@ import {
   valueDot,
   verdictDot,
   workableStageLabel,
-  describeMissingInputs,
 } from "@/lib/triage/app-theme";
+import { blockedReason } from "@/lib/triage/blocked-reason";
 import { standingLabel } from "@/lib/triage/ranking";
 import { formatAsk } from "@/lib/triage/format";
 import type { Candidate, Decision, ProcessStatus, ValueLevel, ValueRead, VerdictRead } from "@/lib/triage/types";
@@ -47,23 +47,14 @@ const VALUE_LABEL: Record<ValueLevel, string> = {
  * interview-ready"). Ordinal only — never a numeric score.
  */
 export function StandingLine({ c }: { c: Candidate }) {
-  if (c.decision === "blocked" && c.readiness && !c.readiness.ready) {
-    if (c.readiness.resumeMissingFromSource) {
-      return (
-        <div
-          style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
-          title="Review blocked — no résumé on file in Workable, nothing to grade"
-        >
-          Blocked · no résumé on file
-        </div>
-      );
-    }
+  if (c.decision === "blocked") {
+    const reason = blockedReason(c.readiness);
     return (
       <div
         style={mono({ fontSize: 11, color: APP.weak, lineHeight: 1.3, ...ellipsis })}
-        title={`Review blocked — waiting on ${describeMissingInputs(c.readiness.missing)}`}
+        title={reason.title}
       >
-        Blocked · waiting on {describeMissingInputs(c.readiness.missing)}
+        Blocked · {reason.short}
       </div>
     );
   }

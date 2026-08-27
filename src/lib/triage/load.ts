@@ -572,23 +572,39 @@ async function buildCrossRolePool(
     return candidate;
   });
 
-  for (const c of candidates) {
-    if (c.decision !== "blocked") continue;
-    const app = appsByCandidate.get(c.id);
-    const inputs: GradingInputs = {
-      candidateId: c.id,
-      jobShortcode: c.jobShortcode || "",
-      answers: (app?.answers as Record<string, string> | null) ?? null,
-      resumeText: (app?.resume_text as string | null) ?? null,
-      resumeStoragePath: null,
-      resumeUrl: (app?.resume_url as string | null) ?? null,
-      coverLetter: (app?.cover_letter as string | null) ?? null,
-      parsedExperienceCount: Array.isArray(app?.parsed_experience) ? app!.parsed_experience.length : 0,
-      jobSpec: "",
-      rubric: "",
-      methodology,
-    };
-    c.readiness = computeReadiness(inputs);
+  // Readiness must be computed against each candidate's OWN job spec. This used
+  // to pass empty strings, so every blocked candidate in the cross-role view
+  // reported "waiting on job spec" even when the spec was present — a fake
+  // diagnosis that hid the real reason (usually: never analysed).
+  const blocked = candidates.filter((c) => c.decision === "blocked");
+  if (blocked.length) {
+    const rubricByJob = new Map<string, { specMd: string; rubricMd: string }>();
+    for (const shortcode of new Set(blocked.map((c) => c.jobShortcode || ""))) {
+      if (!shortcode) continue;
+      try {
+        rubricByJob.set(shortcode, await getJobRubric(shortcode));
+      } catch (error) {
+        console.error(`Failed to load rubric for ${shortcode}`, error);
+      }
+    }
+    for (const c of blocked) {
+      const app = appsByCandidate.get(c.id);
+      const jobRubric = rubricByJob.get(c.jobShortcode || "");
+      const inputs: GradingInputs = {
+        candidateId: c.id,
+        jobShortcode: c.jobShortcode || "",
+        answers: (app?.answers as Record<string, string> | null) ?? null,
+        resumeText: (app?.resume_text as string | null) ?? null,
+        resumeStoragePath: null,
+        resumeUrl: (app?.resume_url as string | null) ?? null,
+        coverLetter: (app?.cover_letter as string | null) ?? null,
+        parsedExperienceCount: Array.isArray(app?.parsed_experience) ? app!.parsed_experience.length : 0,
+        jobSpec: jobRubric?.specMd ?? "",
+        rubric: jobRubric?.rubricMd ?? "",
+        methodology,
+      };
+      c.readiness = computeReadiness(inputs);
+    }
   }
   assignPoolStanding(candidates, (id) => Boolean(workspace.dq[id]));
 
