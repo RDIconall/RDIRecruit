@@ -279,4 +279,32 @@ assert.equal(demotedView.decision, "backup");
 assert.notEqual(demotedView.why, "Best operator in the pool.");
 assert.equal(demotedView.value.level, "fair");
 
+// A scored candidate must never read as "Review blocked" just because the
+// separate invest_head narrative row is missing. The score IS the rubric read;
+// the narrative is a presentation artefact. A partial write (or a truncated
+// evaluations fetch) used to blank the decision for fully-graded people.
+const scoredNoInvest = deriveDecisionDetail(
+  input({
+    score: score(88),
+    evals: { ...input().evals, invest: null },
+  }),
+);
+assert.notEqual(scoredNoInvest.decision, "blocked");
+assert.equal(scoredNoInvest.decision, "interview");
+
+// Same for a mid-band file: it degrades to backup, still not blocked.
+const midNoInvest = deriveDecisionDetail(
+  input({
+    score: score(68),
+    evals: { ...input().evals, invest: null },
+  }),
+);
+assert.equal(midNoInvest.decision, "backup");
+
+// Genuinely nothing graded is still blocked — that is a real waiting state.
+const nothingGraded = deriveDecisionDetail(
+  input({ score: null, evals: { ...input().evals, invest: null } }),
+);
+assert.equal(nothingGraded.decision, "blocked");
+
 console.log("from-supabase.test.ts: ok");
