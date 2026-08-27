@@ -40,6 +40,17 @@ export async function GET(
         redFlags: c.redFlags.map((f) => f.flag),
         decisionOverride: one.slice.decisionOverride ?? null,
         standing: c.standing ?? null,
+        // Present when the decision is "blocked": exactly which grading input is
+        // missing, so a stuck candidate can be diagnosed without reading the DB.
+        blocked:
+          c.decision === "blocked"
+            ? {
+                missing: c.readiness?.missing ?? [],
+                detail: c.readiness?.detail ?? null,
+                resumeMissingFromSource: Boolean(c.readiness?.resumeMissingFromSource),
+                hasScore: Boolean(detail.score),
+              }
+            : null,
       };
     }
   } catch (error) {

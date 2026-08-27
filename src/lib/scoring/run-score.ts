@@ -309,6 +309,15 @@ export async function scoreCandidate(
     .select("*")
     .single();
   if (scoreError) {
+    // The v2 columns only exist after the dynamic-seat migration. Rather than
+    // failing every scoring run on an unmigrated database (which leaves the
+    // candidate permanently unscored, and therefore "Review blocked"), fall back
+    // to the columns that have always existed.
+    gradeLog("score.insert.v2Failed", {
+      candidateId,
+      error: scoreError.message,
+      hint: "scores v2 columns missing? run /api/cron/migrate",
+    });
     const { data: legacyRow, error: legacyError } = await supabase
       .from("scores")
       .insert({
@@ -431,16 +440,28 @@ export async function scoreCandidate(
     });
   }
 
-  await supabase.from("evaluations").insert(
-    evalRows.map((row) => ({
-      candidate_id: candidateId,
-      kind: row.kind,
-      ref: row.ref,
-      payload: row.payload,
-      model_version: "claude-sonnet-4-6",
-      rubric_version: rubric.version,
-    })),
-  );
+  // Insert in batches and report failures. This write was previously unchecked,
+  // so a single rejected batch silently cost the candidate its invest_head row.
+  const EVAL_INSERT_BATCH = 50;
+  const rowsToInsert = evalRows.map((row) => ({
+    candidate_id: candidateId,
+    kind: row.kind,
+    ref: row.ref,
+    payload: row.payload,
+    model_version: "claude-sonnet-4-6",
+    rubric_version: rubric.version,
+  }));
+  for (let i = 0; i < rowsToInsert.length; i += EVAL_INSERT_BATCH) {
+    const batch = rowsToInsert.slice(i, i + EVAL_INSERT_BATCH);
+    const { error: evalError } = await supabase.from("evaluations").insert(batch);
+    if (evalError) {
+      gradeLog("score.evaluations.insertFailed", {
+        candidateId,
+        kinds: [...new Set(batch.map((r) => r.kind))].join(","),
+        error: evalError.message,
+      });
+    }
+  }
 
   await notifyStrongFit({
     candidateId,

@@ -160,12 +160,17 @@ function hasDiscrepancy(v: VerificationPayload | null): boolean {
  * stay internal — they pick the bucket but never reach the UI. Verdict bands
  * mirror the evaluator: 85+ ADVANCE · 70-84 CONSIDER · 55-69 HOLD · <55 DENY,
  * with integrity/verification gates layered on top.
+ *
+ * "Blocked" means there is genuinely no rubric read to reason from. It must NOT
+ * depend on the invest_head narrative row: that is a separate presentation
+ * artefact written after the score, so a partial write or a truncated
+ * evaluations fetch was blanking the decision for fully-graded candidates.
  */
 function ungatedDecision(input: MapInput): Decision {
   if (input.read?.decision) return normalizeDecision(input.read.decision);
 
   const { score, evals } = input;
-  if (!evals.invest || !score) return "blocked";
+  if (!score) return "blocked";
 
   const integrity = (evals.dig?.integrity ?? "").toLowerCase();
   if (integrity.startsWith("material")) return "reject";
@@ -177,7 +182,7 @@ function ungatedDecision(input: MapInput): Decision {
   // candidate is held as a backup with the thing-to-confirm surfaced as a caveat.
   if (hasDiscrepancy(evals.verification)) return "backup";
 
-  const salaryUnstated = !evals.invest.ask || (score.salary_value ?? "") === "unstated";
+  const salaryUnstated = !evals.invest?.ask || (score.salary_value ?? "") === "unstated";
   if (salaryUnstated && total < 82) return "backup";
   // The borderline (HOLD) band is NOT interview-ready — only a file that holds
   // the level for the seat goes on the list a human works top-down.
