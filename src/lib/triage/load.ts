@@ -130,6 +130,36 @@ async function fetchEvaluationsPaged(
   return out;
 }
 
+/**
+ * Same paging guard as fetchEvaluationsPaged, for the other per-candidate tables.
+ * Without it a large pool silently loses the newest candidates' answers, résumé
+ * text, and activity, so they render as "Review blocked" with nothing to read.
+ */
+async function fetchByCandidatePaged<T>(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  table: string,
+  columns: string,
+  ids: string[],
+  tieBreaker: string,
+): Promise<T[]> {
+  const PAGE = 1000;
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(columns)
+      .in("candidate_id", ids)
+      .order("candidate_id", { ascending: true })
+      .order(tieBreaker, { ascending: false })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    const rows = (data ?? []) as T[];
+    out.push(...rows);
+    if (rows.length < PAGE) break;
+  }
+  return out;
+}
+
 function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
   const byCandidate = new Map<string, EvalRow[]>();
   for (const row of rows) {
@@ -399,31 +429,42 @@ async function loadCrossRolePool(): Promise<TriagePool> {
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRes, evalRows, narrRes, evidenceRes, activityRes, workingFiles] = await Promise.all([
-    supabase.from("applications").select("candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url").in("candidate_id", ids),
+  const [appsRows, evalRows, narrRows, evidenceRows, activityRows, workingFiles] = await Promise.all([
+    fetchByCandidatePaged<{ candidate_id: string } & ApplicationLite>(
+      supabase,
+      "applications",
+      "candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url",
+      ids,
+      "candidate_id",
+    ),
     fetchEvaluationsPaged(supabase, ids),
-    supabase.from("narratives").select("candidate_id, segments, generated_at").in("candidate_id", ids).order("generated_at", { ascending: false }),
-    supabase.from("evidence").select("*").in("candidate_id", ids).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
-    supabase.from("activity").select("id, candidate_id, type, author, body, created_at").in("candidate_id", ids).order("created_at", { ascending: true }),
+    fetchByCandidatePaged<{ candidate_id: string; segments: NarrativeSegment[] }>(
+      supabase,
+      "narratives",
+      "candidate_id, segments, generated_at",
+      ids,
+      "generated_at",
+    ),
+    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchByCandidatePaged<ActivityRow>(
+      supabase,
+      "activity",
+      "id, candidate_id, type, author, body, created_at",
+      ids,
+      "created_at",
+    ),
     getWorkingFiles(ids),
   ]);
 
   const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of (activityRes.data ?? []) as ActivityRow[]) {
+  for (const r of [...activityRows].reverse()) {
     const list = activityByCandidate.get(r.candidate_id) ?? [];
     list.push(toActivityEntry(r));
     activityByCandidate.set(r.candidate_id, list);
   }
 
   const appsByCandidate = new Map<string, ApplicationLite>();
-  for (const a of (appsRes.data ?? []) as Array<{
-    candidate_id: string;
-    answers?: Record<string, string> | null;
-    cover_letter?: string | null;
-    parsed_experience?: ParsedExperienceEntry[] | null;
-    resume_text?: string | null;
-    resume_url?: string | null;
-  }>) {
+  for (const a of appsRows) {
     if (!appsByCandidate.has(a.candidate_id)) {
       appsByCandidate.set(a.candidate_id, {
         answers: a.answers ?? null,
@@ -437,11 +478,11 @@ async function loadCrossRolePool(): Promise<TriagePool> {
 
   const evalsByCandidate = groupEvaluations(evalRows);
   const narrByCandidate = new Map<string, NarrativeSegment[]>();
-  for (const n of (narrRes.data ?? []) as Array<{ candidate_id: string; segments: NarrativeSegment[] }>) {
+  for (const n of narrRows) {
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
   const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of (evidenceRes.data ?? []) as EvidenceRow[]) {
+  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
     const list = evidenceByCandidate.get(e.candidate_id) ?? [];
     list.push(e);
     evidenceByCandidate.set(e.candidate_id, list);
@@ -552,24 +593,42 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRes, evalRows, narrRes, evidenceRes, activityRes, workingFiles] = await Promise.all([
-    supabase.from("applications").select("candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url").in("candidate_id", ids),
+  const [appsRows, evalRows, narrRows, evidenceRows, activityRows, workingFiles] = await Promise.all([
+    fetchByCandidatePaged<{ candidate_id: string } & ApplicationLite>(
+      supabase,
+      "applications",
+      "candidate_id, answers, cover_letter, parsed_experience, resume_text, resume_url",
+      ids,
+      "candidate_id",
+    ),
     fetchEvaluationsPaged(supabase, ids),
-    supabase.from("narratives").select("candidate_id, segments, generated_at").in("candidate_id", ids).order("generated_at", { ascending: false }),
-    supabase.from("evidence").select("*").in("candidate_id", ids).in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
-    supabase.from("activity").select("id, candidate_id, type, author, body, created_at").in("candidate_id", ids).order("created_at", { ascending: true }),
+    fetchByCandidatePaged<{ candidate_id: string; segments: NarrativeSegment[] }>(
+      supabase,
+      "narratives",
+      "candidate_id, segments, generated_at",
+      ids,
+      "generated_at",
+    ),
+    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchByCandidatePaged<ActivityRow>(
+      supabase,
+      "activity",
+      "id, candidate_id, type, author, body, created_at",
+      ids,
+      "created_at",
+    ),
     getWorkingFiles(ids),
   ]);
 
   const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of (activityRes.data ?? []) as ActivityRow[]) {
+  for (const r of [...activityRows].reverse()) {
     const list = activityByCandidate.get(r.candidate_id) ?? [];
     list.push(toActivityEntry(r));
     activityByCandidate.set(r.candidate_id, list);
   }
 
   const appsByCandidate = new Map<string, ApplicationLite>();
-  for (const a of (appsRes.data ?? []) as Array<{ candidate_id: string } & ApplicationLite>) {
+  for (const a of appsRows) {
     if (!appsByCandidate.has(a.candidate_id))
       appsByCandidate.set(a.candidate_id, {
         answers: a.answers,
@@ -583,12 +642,12 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const evalsByCandidate = groupEvaluations(evalRows);
 
   const narrByCandidate = new Map<string, NarrativeSegment[]>();
-  for (const n of (narrRes.data ?? []) as Array<{ candidate_id: string; segments: NarrativeSegment[] }>) {
+  for (const n of narrRows) {
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
 
   const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of (evidenceRes.data ?? []) as EvidenceRow[]) {
+  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
     const list = evidenceByCandidate.get(e.candidate_id) ?? [];
     list.push(e);
     evidenceByCandidate.set(e.candidate_id, list);
