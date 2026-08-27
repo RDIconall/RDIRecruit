@@ -74,21 +74,63 @@ export async function fetchBoardExtras(
   return map;
 }
 
-function sortBoard(board: BoardCandidate[]): BoardCandidate[] {
+/** Newest application first; missing timestamps sort last. */
+function appliedAtMs(row: CandidateRow): number {
+  const t = Date.parse(row.created_at ?? "");
+  return Number.isFinite(t) ? t : -Infinity;
+}
+
+function isActive(item: BoardCandidate): boolean {
+  return !(
+    item.overlay?.status === "disqualified" ||
+    item.overlay?.status === "withdrawn" ||
+    item.candidate.disqualified
+  );
+}
+
+/**
+ * Board order: active candidates first, then the most recent applications.
+ * Recency leads because the pool is an inbox — a high score from months ago must
+ * not bury someone who applied today. Final ranking still happens in
+ * assignPoolStanding (job match, then problem complexity).
+ */
+export function sortBoard(board: BoardCandidate[]): BoardCandidate[] {
   return board.sort((a, b) => {
-    const aActive = !(
-      a.overlay?.status === "disqualified" ||
-      a.overlay?.status === "withdrawn" ||
-      a.candidate.disqualified
-    );
-    const bActive = !(
-      b.overlay?.status === "disqualified" ||
-      b.overlay?.status === "withdrawn" ||
-      b.candidate.disqualified
-    );
+    const aActive = isActive(a);
+    const bActive = isActive(b);
     if (aActive !== bActive) return aActive ? -1 : 1;
+    const recency = appliedAtMs(b.candidate) - appliedAtMs(a.candidate);
+    if (recency) return recency;
     return (b.score?.total ?? -1) - (a.score?.total ?? -1);
   });
+}
+
+/**
+ * PostgREST caps a single response, so an unpaged `select` silently returns only
+ * the first slice of a large pool — which is how the board ended up showing old
+ * applicants and never the new ones. Page explicitly, newest first.
+ */
+const CANDIDATE_PAGE = 1000;
+
+async function fetchCandidatesForJobs(jobShortcodes: string[]): Promise<CandidateRow[]> {
+  const supabase = getServiceSupabase();
+  const out: CandidateRow[] = [];
+  for (let from = 0; ; from += CANDIDATE_PAGE) {
+    const { data, error } = await supabase
+      .from("candidates")
+      .select("*")
+      .in("job_shortcode", jobShortcodes)
+      .order("created_at", { ascending: false })
+      .range(from, from + CANDIDATE_PAGE - 1);
+    if (error) {
+      console.error("Failed to page candidates", error);
+      break;
+    }
+    const rows = (data ?? []) as CandidateRow[];
+    out.push(...rows);
+    if (rows.length < CANDIDATE_PAGE) break;
+  }
+  return out;
 }
 
 async function hydrateBoard(candidates: CandidateRow[]): Promise<BoardCandidate[]> {
@@ -119,14 +161,9 @@ async function hydrateBoard(candidates: CandidateRow[]): Promise<BoardCandidate[
 export async function getBoardFromSupabase(jobShortcode: string): Promise<BoardCandidate[] | null> {
   if (!hasSupabase()) return null;
 
-  const supabase = getServiceSupabase();
-  const { data: candidates } = await supabase
-    .from("candidates")
-    .select("*")
-    .eq("job_shortcode", jobShortcode);
-
-  if (!candidates?.length) return null;
-  return sortBoard(await hydrateBoard(candidates as CandidateRow[]));
+  const candidates = await fetchCandidatesForJobs([jobShortcode]);
+  if (!candidates.length) return null;
+  return sortBoard(await hydrateBoard(candidates));
 }
 
 /** Same hydrate as single-job board, but across many published job shortcodes. */
@@ -135,14 +172,9 @@ export async function getBoardFromSupabaseForJobs(
 ): Promise<BoardCandidate[] | null> {
   if (!hasSupabase() || !jobShortcodes.length) return null;
 
-  const supabase = getServiceSupabase();
-  const { data: candidates } = await supabase
-    .from("candidates")
-    .select("*")
-    .in("job_shortcode", jobShortcodes);
-
-  if (!candidates?.length) return null;
-  return sortBoard(await hydrateBoard(candidates as CandidateRow[]));
+  const candidates = await fetchCandidatesForJobs(jobShortcodes);
+  if (!candidates.length) return null;
+  return sortBoard(await hydrateBoard(candidates));
 }
 
 export async function getPoolStatsForJob(jobShortcode: string) {
