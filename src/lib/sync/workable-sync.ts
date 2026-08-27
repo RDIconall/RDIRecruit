@@ -8,6 +8,7 @@ import {
   isPermanentWorkableNotFound,
   tombstoneMissingWorkableCandidate,
 } from "./failures";
+import { stalePublishedShortcodes } from "./job-status";
 
 // Only one bulk-scoring pass may run at a time. The 10-minute reconcile cron, a
 // manual sync, and webhook scoring can otherwise overlap, each re-scoring the same
@@ -87,6 +88,23 @@ export async function upsertJob(job: WorkableJob) {
   });
 }
 
+/** Refresh the mirrored job metadata without touching a stored posting body. */
+async function refreshJobMetadata(job: WorkableJob) {
+  if (!hasSupabase()) return;
+  const supabase = getServiceSupabase();
+  await supabase
+    .from("jobs")
+    .update({
+      title: job.title,
+      status: job.state,
+      department: job.department ?? null,
+      location: job.location?.location_str ?? null,
+      workable_updated_at: job.updated_at ?? null,
+      synced_at: new Date().toISOString(),
+    })
+    .eq("shortcode", job.shortcode);
+}
+
 export async function syncJobsFromWorkable() {
   const [jobs, archivedJobs] = await Promise.all([
     listJobs({ state: "published", limit: 100 }),
@@ -101,20 +119,27 @@ export async function syncJobsFromWorkable() {
   // body, so re-fetching a job we already have wastes a (rate-limited) Workable
   // call, and — worse — if that getJob is 429'd, the old fallback overwrote
   // jobs.raw with the body-less summary, WIPING a previously-good
-  // full_description and re-blocking grading. We therefore skip jobs that
-  // already have the body, and never clobber a stored body on failure.
+  // full_description and re-blocking grading. We therefore skip the body fetch
+  // for jobs that already have it, and never clobber a stored body on failure.
   const hasBody = new Map<string, boolean>();
+  const localPublished: string[] = [];
   if (hasSupabase()) {
     const supabase = getServiceSupabase();
-    const { data: existingJobs } = await supabase.from("jobs").select("shortcode, raw");
+    const { data: existingJobs } = await supabase.from("jobs").select("shortcode, raw, status");
     for (const row of existingJobs ?? []) {
       const raw = row.raw as { full_description?: string } | null;
       hasBody.set(row.shortcode as string, Boolean(raw?.full_description));
+      if ((row.status as string | null) === "published") localPublished.push(row.shortcode as string);
     }
   }
 
   for (const summary of jobs) {
-    if (hasBody.get(summary.shortcode)) continue;
+    // Skipping the body fetch must not skip the metadata refresh: a job whose
+    // title, location, or state changed in Workable has to be updated locally.
+    if (hasBody.get(summary.shortcode)) {
+      await refreshJobMetadata(summary);
+      continue;
+    }
     // Fetch the full job so the spec (full_description) is available. Only persist
     // when we actually got a posting body; otherwise upsert the summary so the job
     // exists, but never overwrite an existing body with a body-less summary.
@@ -126,6 +151,25 @@ export async function syncJobsFromWorkable() {
       await upsertJob(summary);
     }
   }
+
+  // Reconcile roles Workable no longer publishes (closed, on_hold, draft…).
+  // Without this they stay "published" locally forever and keep feeding old
+  // applicants into the cross-role inbox.
+  const stale = stalePublishedShortcodes({
+    localPublished,
+    published: jobs.map((j) => j.shortcode),
+    archived: archivedJobs.map((j) => j.shortcode),
+    publishedFetchOk: true,
+  });
+  if (stale.length && hasSupabase()) {
+    const supabase = getServiceSupabase();
+    const { error } = await supabase
+      .from("jobs")
+      .update({ status: "closed", synced_at: new Date().toISOString() })
+      .in("shortcode", stale);
+    if (error) console.error("Failed to reconcile stale published jobs", error);
+  }
+
   return jobs.length + archivedJobs.length;
 }
 

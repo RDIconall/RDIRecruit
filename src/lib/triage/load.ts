@@ -2,6 +2,7 @@ import "server-only";
 import { hasSupabase, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { getBoardFromSupabase, getBoardFromSupabaseForJobs } from "../data/board-queries";
+import { RECENT_WINDOW_DAYS, selectRecentApplicants } from "../data/recent";
 import { getPublishedJobs, getJobByShortcode } from "../jobs/service";
 import { wbJob } from "../workable/links";
 import { getJobRubric } from "../rubric/store";
@@ -392,8 +393,10 @@ function withCrossRoleOption(jobs: JobOption[]): JobOption[] {
 }
 
 /**
- * Cross-role pool: every published job's candidates in one ranked inbox so you
- * can answer "who's the best new applicant?" without switching jobs.
+ * Cross-role pool: the recent applications across every published job in one
+ * ranked inbox, so you can answer "who's the best new applicant?" without
+ * switching jobs. Scoped to RECENT_WINDOW_DAYS — loading the whole historical
+ * pool let old high-scoring candidates hold the top of the list permanently.
  */
 async function loadCrossRolePool(): Promise<TriagePool> {
   const jobSummaries = await getPublishedJobs();
@@ -410,8 +413,8 @@ async function loadCrossRolePool(): Promise<TriagePool> {
     };
   }
 
-  const board = await getBoardFromSupabaseForJobs(shortcodes);
-  if (!board?.length) {
+  const fullBoard = await getBoardFromSupabaseForJobs(shortcodes);
+  if (!fullBoard?.length) {
     return {
       ...emptyPool(CROSS_ROLE_SHORTCODE, jobs, "New across roles", emptyRubric, FALLBACK_STAGES),
       crossRole: true,
@@ -425,6 +428,7 @@ async function loadCrossRolePool(): Promise<TriagePool> {
       },
     };
   }
+  const board = selectRecentApplicants(fullBoard);
 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
@@ -565,8 +569,8 @@ async function loadCrossRolePool(): Promise<TriagePool> {
       title: "New across roles",
       jobShortcode: CROSS_ROLE_SHORTCODE,
       jobUrl: "",
-      healthState: `${candidates.length} across ${shortcodes.length} jobs`,
-      healthRead: `${interviewCount} interview-ready among new/active applicants — ranked by job match, then problem complexity.`,
+      healthState: `${candidates.length} across ${shortcodes.length} open jobs`,
+      healthRead: `Applications from the last ${RECENT_WINDOW_DAYS} days across ${shortcodes.length} open jobs · ${interviewCount} interview-ready — ranked by job match, then problem complexity.`,
       total: candidates.length,
     },
   };
