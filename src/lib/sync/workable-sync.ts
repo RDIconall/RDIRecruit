@@ -8,7 +8,10 @@ import {
   isPermanentWorkableNotFound,
   tombstoneMissingWorkableCandidate,
 } from "./failures";
-import { stalePublishedShortcodes } from "./job-status";
+import { stalePublishedShortcodes, shouldCloseJob } from "./job-status";
+
+/** Bound the confirmation fetches so a reconcile cannot exhaust the rate limit. */
+const MAX_JOB_CLOSURE_CHECKS = 25;
 
 // Only one bulk-scoring pass may run at a time. The 10-minute reconcile cron, a
 // manual sync, and webhook scoring can otherwise overlap, each re-scoring the same
@@ -153,21 +156,29 @@ export async function syncJobsFromWorkable() {
   }
 
   // Reconcile roles Workable no longer publishes (closed, on_hold, draft…).
-  // Without this they stay "published" locally forever and keep feeding old
-  // applicants into the cross-role inbox.
-  const stale = stalePublishedShortcodes({
+  // Absence from the published list is only a hint — confirm each against the
+  // job's real state before writing, because closing a job hides its whole pool.
+  const closureCandidates = stalePublishedShortcodes({
     localPublished,
     published: jobs.map((j) => j.shortcode),
     archived: archivedJobs.map((j) => j.shortcode),
     publishedFetchOk: true,
   });
-  if (stale.length && hasSupabase()) {
+  if (closureCandidates.length && hasSupabase()) {
     const supabase = getServiceSupabase();
-    const { error } = await supabase
-      .from("jobs")
-      .update({ status: "closed", synced_at: new Date().toISOString() })
-      .in("shortcode", stale);
-    if (error) console.error("Failed to reconcile stale published jobs", error);
+    for (const shortcode of closureCandidates.slice(0, MAX_JOB_CLOSURE_CHECKS)) {
+      try {
+        const job = await getJob(shortcode);
+        if (!shouldCloseJob(job?.state)) continue;
+        await supabase
+          .from("jobs")
+          .update({ status: job.state, synced_at: new Date().toISOString() })
+          .eq("shortcode", shortcode);
+      } catch (error) {
+        // Leave the job exactly as-is; a failed check must never close a role.
+        console.error(`Could not confirm job state for ${shortcode}`, error);
+      }
+    }
   }
 
   return jobs.length + archivedJobs.length;

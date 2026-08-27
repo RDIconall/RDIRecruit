@@ -6,7 +6,10 @@
  * kept feeding their old applicants into the inbox.
  *
  * Returns the locally-published shortcodes Workable no longer reports as
- * published, so they can be reconciled to closed.
+ * published. These are only CANDIDATES for closure: absence from a list is weak
+ * evidence (a partial page, a rate limit, a locally-created job), so each one
+ * must be confirmed against the job's actual state before anything is written.
+ * Closing a job hides its whole pool, so this side never guesses.
  */
 export function stalePublishedShortcodes(input: {
   localPublished: string[];
@@ -21,4 +24,14 @@ export function stalePublishedShortcodes(input: {
   const live = new Set(input.published);
   const archived = new Set(input.archived);
   return input.localPublished.filter((code) => !live.has(code) && !archived.has(code));
+}
+
+/**
+ * Confirmation step: only Workable explicitly reporting a non-published state
+ * justifies closing a job locally. An unknown/empty state leaves it alone.
+ */
+export function shouldCloseJob(state: string | null | undefined): boolean {
+  const s = (state ?? "").trim().toLowerCase();
+  if (!s) return false;
+  return s !== "published";
 }
