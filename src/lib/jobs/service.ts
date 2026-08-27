@@ -35,10 +35,36 @@ async function jobsFromSupabase(): Promise<JobSummary[]> {
   }));
 }
 
+async function nonArchivedJobsFromSupabase(): Promise<JobSummary[]> {
+  if (!hasSupabase()) return [];
+  const supabase = getServiceSupabase();
+  const { data } = await supabase
+    .from("jobs")
+    .select("shortcode, title, status, department, location")
+    .neq("status", "archived")
+    .order("title");
+  return (data ?? []).map((row) => ({
+    shortcode: row.shortcode,
+    title: row.title,
+    status: row.status ?? "published",
+    department: row.department ?? undefined,
+    location: row.location ?? undefined,
+  }));
+}
+
 /** Read path: Supabase cache only. Workable fills cache via sync, not page loads. */
 export const getPublishedJobs = cache(async (): Promise<JobSummary[]> => {
   const cached = await jobsFromSupabase();
   if (cached.length) return cached;
+
+  // No published job is usually a sync artefact (a bad status write, a job state
+  // we do not recognise), and it blanks the whole app. Fall back to any
+  // non-archived job so the pool still loads while the next sync corrects status.
+  const fallback = await nonArchivedJobsFromSupabase();
+  if (fallback.length) {
+    console.warn("No published jobs found; falling back to non-archived jobs");
+    return fallback;
+  }
 
   if (hasWorkable()) {
     try {

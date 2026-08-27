@@ -2,7 +2,8 @@ import "server-only";
 import { hasSupabase, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { getBoardFromSupabase, getBoardFromSupabaseForJobs } from "../data/board-queries";
-import { RECENT_WINDOW_DAYS, selectRecentApplicants } from "../data/recent";
+import { RECENT_MINIMUM, RECENT_WINDOW_DAYS, selectRecentApplicants } from "../data/recent";
+import { chunkIds } from "../data/chunk";
 import { getPublishedJobs, getJobByShortcode } from "../jobs/service";
 import { wbJob } from "../workable/links";
 import { getJobRubric } from "../rubric/store";
@@ -10,6 +11,7 @@ import type { WorkspaceSlice } from "./types";
 import { INTERVIEW_EVIDENCE_TYPES } from "../sync/candidate-hash";
 import type {
   AnswerGradePayload,
+  BoardCandidate,
   DigInPayload,
   EvidenceRow,
   InvestPayload,
@@ -114,19 +116,26 @@ async function fetchEvaluationsPaged(
 ): Promise<EvalRow[]> {
   const PAGE = 1000;
   const out: EvalRow[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from("evaluations")
-      .select("candidate_id, kind, payload, created_at, id")
-      .in("candidate_id", ids)
-      .order("candidate_id", { ascending: true })
-      .order("created_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as EvalRow[];
-    out.push(...rows);
-    if (rows.length < PAGE) break;
+  for (const batch of chunkIds(ids)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("evaluations")
+        .select("candidate_id, kind, payload, created_at, id")
+        .in("candidate_id", batch)
+        .order("candidate_id", { ascending: true })
+        .order("created_at", { ascending: true })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        // Degrade: a candidate with no evaluations renders as "Review blocked",
+        // which is far better than failing the whole pool page.
+        console.error("Failed to load evaluations batch", error);
+        break;
+      }
+      const rows = (data ?? []) as EvalRow[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
   }
   return out;
 }
@@ -145,18 +154,22 @@ async function fetchByCandidatePaged<T>(
 ): Promise<T[]> {
   const PAGE = 1000;
   const out: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from(table)
-      .select(columns)
-      .in("candidate_id", ids)
-      .order("candidate_id", { ascending: true })
-      .order(tieBreaker, { ascending: false })
-      .range(from, from + PAGE - 1);
-    if (error) throw error;
-    const rows = (data ?? []) as T[];
-    out.push(...rows);
-    if (rows.length < PAGE) break;
+  for (const batch of chunkIds(ids)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from(table)
+        .select(columns)
+        .in("candidate_id", batch)
+        .order(tieBreaker, { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error(`Failed to load ${table} batch`, error);
+        break;
+      }
+      const rows = (data ?? []) as T[];
+      out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
   }
   return out;
 }
@@ -413,22 +426,47 @@ async function loadCrossRolePool(): Promise<TriagePool> {
     };
   }
 
-  const fullBoard = await getBoardFromSupabaseForJobs(shortcodes);
+  const fullBoard = await getBoardFromSupabaseForJobs(shortcodes, {
+    since: new Date(Date.now() - RECENT_WINDOW_DAYS * 24 * 60 * 60 * 1000),
+  });
   if (!fullBoard?.length) {
-    return {
-      ...emptyPool(CROSS_ROLE_SHORTCODE, jobs, "New across roles", emptyRubric, FALLBACK_STAGES),
-      crossRole: true,
-      meta: {
-        title: "New across roles",
-        jobShortcode: CROSS_ROLE_SHORTCODE,
-        jobUrl: "",
-        healthState: "No candidates",
-        healthRead: "No candidates synced across published jobs yet.",
-        total: 0,
-      },
-    };
+    // Nothing recent: fall back to the newest applications so the inbox still
+    // works on a quiet pool instead of rendering empty.
+    const recentFallback = await getBoardFromSupabaseForJobs(shortcodes, { max: RECENT_MINIMUM });
+    if (!recentFallback?.length) {
+      return {
+        ...emptyPool(CROSS_ROLE_SHORTCODE, jobs, "New across roles", emptyRubric, FALLBACK_STAGES),
+        crossRole: true,
+        meta: {
+          title: "New across roles",
+          jobShortcode: CROSS_ROLE_SHORTCODE,
+          jobUrl: "",
+          healthState: "No candidates",
+          healthRead: "No candidates synced across published jobs yet.",
+          total: 0,
+        },
+      };
+    }
+    return buildCrossRolePool(recentFallback, { jobs, titleByShortcode, shortcodes, methodology });
   }
-  const board = selectRecentApplicants(fullBoard);
+  return buildCrossRolePool(selectRecentApplicants(fullBoard), {
+    jobs,
+    titleByShortcode,
+    shortcodes,
+    methodology,
+  });
+}
+
+async function buildCrossRolePool(
+  board: BoardCandidate[],
+  ctx: {
+    jobs: JobOption[];
+    titleByShortcode: Map<string, string>;
+    shortcodes: string[];
+    methodology: string;
+  },
+): Promise<TriagePool> {
+  const { jobs, titleByShortcode, shortcodes, methodology } = ctx;
 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();

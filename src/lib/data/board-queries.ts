@@ -2,6 +2,7 @@ import { getServiceSupabase } from "../supabase/server";
 import { hasSupabase } from "../env";
 import type { BoardCandidate, CandidateRow, RoAssessmentRow, ScoreRow } from "../types";
 import { fetchOverlays } from "./overlay";
+import { chunkIds } from "./chunk";
 
 function latestByCandidate<T extends { candidate_id: string; created_at?: string }>(
   rows: T[],
@@ -16,7 +17,7 @@ function latestByCandidate<T extends { candidate_id: string; created_at?: string
   return map;
 }
 
-/** Batch-fetch latest scores + RO assessments (2 queries total, not 2×N). */
+/** Batch-fetch latest scores + RO assessments, chunked to bounded id batches. */
 export async function fetchScoresForCandidates(
   candidateIds: string[],
 ): Promise<Map<string, { score: ScoreRow | null; ro: RoAssessmentRow | null }>> {
@@ -26,14 +27,22 @@ export async function fetchScoresForCandidates(
   if (!hasSupabase() || !candidateIds.length) return result;
 
   const supabase = getServiceSupabase();
+  const scoreRows: ScoreRow[] = [];
+  const roRows: RoAssessmentRow[] = [];
 
-  const [{ data: scoreRows }, { data: roRows }] = await Promise.all([
-    supabase.from("scores").select("*").in("candidate_id", candidateIds),
-    supabase.from("ro_assessments").select("*").in("candidate_id", candidateIds),
-  ]);
+  for (const batch of chunkIds(candidateIds)) {
+    const [scores, ros] = await Promise.all([
+      supabase.from("scores").select("*").in("candidate_id", batch),
+      supabase.from("ro_assessments").select("*").in("candidate_id", batch),
+    ]);
+    if (scores.error) console.error("Failed to load scores batch", scores.error);
+    if (ros.error) console.error("Failed to load RO batch", ros.error);
+    scoreRows.push(...((scores.data ?? []) as ScoreRow[]));
+    roRows.push(...((ros.data ?? []) as RoAssessmentRow[]));
+  }
 
-  const latestScores = latestByCandidate((scoreRows ?? []) as ScoreRow[]);
-  const latestRo = latestByCandidate((roRows ?? []) as RoAssessmentRow[]);
+  const latestScores = latestByCandidate(scoreRows);
+  const latestRo = latestByCandidate(roRows);
 
   for (const id of candidateIds) {
     result.set(id, {
@@ -55,15 +64,20 @@ export async function fetchBoardExtras(
   if (!hasSupabase() || !candidateIds.length) return map;
 
   const supabase = getServiceSupabase();
-  const { data: evalRows } = await supabase
-    .from("evaluations")
-    .select("candidate_id, payload, created_at")
-    .eq("kind", "invest_head")
-    .in("candidate_id", candidateIds);
+  const rows: Array<{ candidate_id: string; payload: Record<string, unknown>; created_at: string }> = [];
+  for (const batch of chunkIds(candidateIds)) {
+    const { data, error } = await supabase
+      .from("evaluations")
+      .select("candidate_id, payload, created_at")
+      .eq("kind", "invest_head")
+      .in("candidate_id", batch);
+    if (error) console.error("Failed to load board extras batch", error);
+    rows.push(
+      ...((data ?? []) as Array<{ candidate_id: string; payload: Record<string, unknown>; created_at: string }>),
+    );
+  }
 
-  const latestEval = latestByCandidate(
-    (evalRows ?? []) as Array<{ candidate_id: string; payload: Record<string, unknown>; created_at: string }>,
-  );
+  const latestEval = latestByCandidate(rows);
   for (const [id, row] of latestEval) {
     const payload = row.payload as { summary?: string; ask?: string | null } | undefined;
     map.set(id, {
@@ -106,29 +120,44 @@ export function sortBoard(board: BoardCandidate[]): BoardCandidate[] {
 }
 
 /**
- * PostgREST caps a single response, so an unpaged `select` silently returns only
+ * PostgREST caps a single response, so an unpaged `select` silently returned only
  * the first slice of a large pool — which is how the board ended up showing old
- * applicants and never the new ones. Page explicitly, newest first.
+ * applicants and never the new ones. Page explicitly, newest first, and bound the
+ * total so one enormous job cannot stall the page.
  */
 const CANDIDATE_PAGE = 1000;
 
-async function fetchCandidatesForJobs(jobShortcodes: string[]): Promise<CandidateRow[]> {
+/** Hard ceiling on candidates hydrated for a single view. */
+export const MAX_BOARD_CANDIDATES = 1500;
+
+async function fetchCandidatesForJobs(
+  jobShortcodes: string[],
+  options?: { since?: Date; max?: number },
+): Promise<CandidateRow[]> {
   const supabase = getServiceSupabase();
+  const max = options?.max ?? MAX_BOARD_CANDIDATES;
   const out: CandidateRow[] = [];
-  for (let from = 0; ; from += CANDIDATE_PAGE) {
-    const { data, error } = await supabase
+
+  for (let from = 0; from < max; from += CANDIDATE_PAGE) {
+    const to = Math.min(from + CANDIDATE_PAGE, max) - 1;
+    let query = supabase
       .from("candidates")
       .select("*")
-      .in("job_shortcode", jobShortcodes)
+      .in("job_shortcode", jobShortcodes);
+    // Filter recency in the database: pulling every historical application just
+    // to drop it in memory is what made the cross-role inbox slow and fragile.
+    if (options?.since) query = query.gte("created_at", options.since.toISOString());
+
+    const { data, error } = await query
       .order("created_at", { ascending: false })
-      .range(from, from + CANDIDATE_PAGE - 1);
+      .range(from, to);
     if (error) {
       console.error("Failed to page candidates", error);
       break;
     }
     const rows = (data ?? []) as CandidateRow[];
     out.push(...rows);
-    if (rows.length < CANDIDATE_PAGE) break;
+    if (rows.length < to - from + 1) break;
   }
   return out;
 }
@@ -169,10 +198,11 @@ export async function getBoardFromSupabase(jobShortcode: string): Promise<BoardC
 /** Same hydrate as single-job board, but across many published job shortcodes. */
 export async function getBoardFromSupabaseForJobs(
   jobShortcodes: string[],
+  options?: { since?: Date; max?: number },
 ): Promise<BoardCandidate[] | null> {
   if (!hasSupabase() || !jobShortcodes.length) return null;
 
-  const candidates = await fetchCandidatesForJobs(jobShortcodes);
+  const candidates = await fetchCandidatesForJobs(jobShortcodes, options);
   if (!candidates.length) return null;
   return sortBoard(await hydrateBoard(candidates));
 }

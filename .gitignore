@@ -33,3 +33,6 @@ next-env.d.ts
 # IDE
 .idea/
 .vscode/
+
+# clerk configuration (can include secrets)
+/.clerk/

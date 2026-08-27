@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { stalePublishedShortcodes } from "./job-status.ts";
+import { shouldCloseJob, stalePublishedShortcodes } from "./job-status.ts";
 
 // A job closed in Workable appears in neither the published nor the archived
 // list, so its local row kept status "published" forever and stayed in the
@@ -35,5 +35,18 @@ assert.deepEqual(
   }),
   [],
 );
+
+// Closing a job hides its entire pool, so absence from a list is only a
+// candidate — Workable must explicitly report a non-published state.
+assert.equal(shouldCloseJob("closed"), true);
+assert.equal(shouldCloseJob("draft"), true);
+assert.equal(shouldCloseJob("on_hold"), true);
+assert.equal(shouldCloseJob("archived"), true);
+assert.equal(shouldCloseJob("published"), false);
+assert.equal(shouldCloseJob("Published"), false);
+// Unknown state (failed fetch, missing field) must never close a live job.
+assert.equal(shouldCloseJob(""), false);
+assert.equal(shouldCloseJob(null), false);
+assert.equal(shouldCloseJob(undefined), false);
 
 console.log("job-status.test.ts: ok");

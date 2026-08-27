@@ -1,6 +1,7 @@
 import "server-only";
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
+import { chunkIds } from "../data/chunk";
 import type { DecisionRead, WorkspaceSlice } from "./types";
 
 export interface WorkingFileRow {
@@ -30,13 +31,15 @@ export async function getWorkingFiles(
   if (!hasSupabase() || !candidateIds.length) return map;
 
   const supabase = getServiceSupabase();
-  const { data } = await supabase
-    .from("candidate_working_files")
-    .select("*")
-    .in("candidate_id", candidateIds);
-
-  for (const row of (data ?? []) as WorkingFileRow[]) {
-    map.set(row.candidate_id, normalize(row));
+  for (const batch of chunkIds(candidateIds)) {
+    const { data, error } = await supabase
+      .from("candidate_working_files")
+      .select("*")
+      .in("candidate_id", batch);
+    if (error) console.error("Failed to load working files batch", error);
+    for (const row of (data ?? []) as WorkingFileRow[]) {
+      map.set(row.candidate_id, normalize(row));
+    }
   }
   return map;
 }

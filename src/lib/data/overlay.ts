@@ -1,5 +1,6 @@
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
+import { chunkIds } from "./chunk";
 import type { BoardCandidate } from "../types";
 
 export type OverlayStatus = "active" | "disqualified" | "withdrawn";
@@ -33,13 +34,15 @@ export async function fetchOverlays(
   if (!hasSupabase() || !candidateIds.length) return map;
 
   const supabase = getServiceSupabase();
-  const { data } = await supabase
-    .from("candidate_overlay")
-    .select("*")
-    .in("candidate_id", candidateIds);
-
-  for (const row of (data ?? []) as CandidateOverlayRow[]) {
-    map.set(row.candidate_id, row);
+  for (const batch of chunkIds(candidateIds)) {
+    const { data, error } = await supabase
+      .from("candidate_overlay")
+      .select("*")
+      .in("candidate_id", batch);
+    if (error) console.error("Failed to load overlay batch", error);
+    for (const row of (data ?? []) as CandidateOverlayRow[]) {
+      map.set(row.candidate_id, row);
+    }
   }
   return map;
 }
