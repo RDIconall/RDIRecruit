@@ -5,6 +5,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { hasAnthropic } from "@/lib/env";
 import { csvToRawContacts } from "@/lib/radar/csv";
 import { draftOutreach, unsubscribeFooter } from "@/lib/radar/outreach";
+import { enrichContactEmails } from "@/lib/radar/enrich";
 import { runProviders } from "@/lib/radar/providers";
 import { scoreContact } from "@/lib/radar/score";
 import { planSourcingSearches } from "@/lib/radar/sourcing";
@@ -126,6 +127,33 @@ export async function runEnrichmentAction(input: {
       duplicates,
       providers: results.map((r) => ({ provider: r.provider, configured: r.configured, count: r.contacts.length, error: r.error })),
     };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Enrichment failed" };
+  }
+}
+
+/**
+ * Fetch the contact details a provider only hands over on a second, credit-
+ * consuming call. Sourcing deliberately stops before this step, so nothing
+ * spends credits until a human asks for it.
+ */
+export async function enrichEmailsAction(input: {
+  pipeline: Pipeline;
+  searchId?: string | null;
+  contactIds?: string[];
+  limit?: number;
+}): Promise<{
+  ok: boolean;
+  attempted?: number;
+  emailsFound?: number;
+  errors?: { provider: string; message: string }[];
+  error?: string;
+}> {
+  try {
+    await requireAuth();
+    const result = await enrichContactEmails(input);
+    revalidate();
+    return { ok: true, ...result };
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : "Enrichment failed" };
   }

@@ -14,14 +14,33 @@ function linkedinSlug(url: string | null): string | null {
 
 /**
  * Stable dedupe key for a person across sources. Email wins (most reliable),
- * then LinkedIn slug, then a name|company fallback. Used by the unique index on
- * radar_contacts so re-imports merge instead of duplicating.
+ * then LinkedIn slug, then the provider's own record id, then a name|company
+ * fallback. Used by the unique index on radar_contacts so re-imports merge
+ * instead of duplicating.
+ *
+ * The provider-ref tier matters because provider SEARCH results carry no email
+ * — without it, every re-run of the same search would insert fresh rows for
+ * people whose name or company happens to be missing.
  */
-export function dedupeKey(c: { email?: string | null; linkedinUrl?: string | null; fullName?: string | null; firstName?: string | null; lastName?: string | null; company?: string | null }): string | null {
+export function dedupeKey(c: {
+  email?: string | null;
+  linkedinUrl?: string | null;
+  fullName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  company?: string | null;
+  source?: string | null;
+  providerRef?: string | null;
+}): string | null {
   const email = clean(c.email)?.toLowerCase();
   if (email) return `email:${email}`;
   const slug = linkedinSlug(clean(c.linkedinUrl));
   if (slug) return `li:${slug}`;
+  const providerRef = clean(c.providerRef);
+  if (providerRef) {
+    const provider = (clean(c.source) ?? "provider").toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return `ref:${provider}:${providerRef.toLowerCase()}`;
+  }
   const name = clean(c.fullName) || [clean(c.firstName), clean(c.lastName)].filter(Boolean).join(" ");
   const company = clean(c.company);
   if (name && company) return `nc:${name.toLowerCase()}|${company.toLowerCase()}`;
@@ -63,6 +82,7 @@ export interface NormalizedContact {
   emailStatus: EmailStatus;
   raw: Record<string, unknown>;
   dedupeKey: string | null;
+  providerRef: string | null;
 }
 
 export function normalizeContact(raw: RawContact): NormalizedContact {
@@ -82,5 +102,10 @@ export function normalizeContact(raw: RawContact): NormalizedContact {
     emailStatus: guessEmailStatus(email, raw.emailStatus),
     raw: raw.raw ?? {},
   };
-  return { ...base, dedupeKey: dedupeKey({ ...base }) };
+  const providerRef = clean(raw.providerRef);
+  return {
+    ...base,
+    dedupeKey: dedupeKey({ ...base, providerRef }),
+    providerRef,
+  };
 }

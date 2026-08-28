@@ -6,6 +6,7 @@ import { normalizeContact } from "./normalize";
 import {
   EMPTY_CRITERIA,
   type ConsentStatus,
+  type EnrichedContactDetails,
   type OutreachStatus,
   type Pipeline,
   type RadarContact,
@@ -110,6 +111,7 @@ function mapContact(r: Record<string, unknown>): RadarContact {
     optOutReason: (r.opt_out_reason as string) ?? null,
     owner: (r.owner as string) ?? null,
     dedupeKey: (r.dedupe_key as string) ?? null,
+    providerRef: (r.provider_ref as string) ?? null,
     raw: (r.raw && typeof r.raw === "object" ? (r.raw as Record<string, unknown>) : {}),
     createdAt: String(r.created_at ?? ""),
     updatedAt: String(r.updated_at ?? ""),
@@ -238,6 +240,7 @@ export async function upsertContact(
           email: n.email ?? undefined,
           phone: n.phone ?? undefined,
           profile_summary: n.profileSummary ?? undefined,
+          provider_ref: n.providerRef ?? undefined,
           updated_at: new Date().toISOString(),
         })
         .eq("id", existing.id);
@@ -265,6 +268,7 @@ export async function upsertContact(
       email_status: n.emailStatus,
       owner: opts.owner ?? null,
       dedupe_key: n.dedupeKey,
+      provider_ref: n.providerRef,
     })
     .select("id")
     .single();
@@ -297,6 +301,59 @@ export async function upsertMany(
     else duplicates++;
   }
   return { inserted, duplicates, ids };
+}
+
+/**
+ * Contacts that came from a provider search but still have no email, so the
+ * provider's (credit-consuming) enrichment call is the only way to reach them.
+ */
+export async function listContactsNeedingEmail(opts: {
+  pipeline: Pipeline;
+  searchId?: string | null;
+  limit?: number;
+}): Promise<RadarContact[]> {
+  let q = db()
+    .from("radar_contacts")
+    .select("*")
+    .contains("pipeline", [opts.pipeline])
+    .is("email", null)
+    .not("provider_ref", "is", null)
+    .eq("opt_out", false)
+    .order("created_at", { ascending: false })
+    .limit(opts.limit ?? 50);
+  if (opts.searchId) q = q.eq("search_id", opts.searchId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []).map(mapContact);
+}
+
+/**
+ * Write provider enrichment back onto a contact. Only fills blanks — a human
+ * edit or an already-known email is never overwritten by provider data.
+ */
+export async function applyEnrichment(
+  contactId: string,
+  details: EnrichedContactDetails,
+): Promise<void> {
+  const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
+  if (details.email) {
+    patch.email = details.email.toLowerCase();
+    patch.email_status = details.emailStatus ?? "valid";
+    patch.dedupe_key = `email:${details.email.toLowerCase()}`;
+  }
+  if (details.phone) patch.phone = details.phone;
+  if (details.fullName) patch.full_name = details.fullName;
+  if (details.firstName) patch.first_name = details.firstName;
+  if (details.lastName) patch.last_name = details.lastName;
+  if (details.linkedinUrl) patch.linkedin_url = details.linkedinUrl;
+
+  const { error } = await db().from("radar_contacts").update(patch).eq("id", contactId);
+  if (error) {
+    // A dedupe-key collision means this person already exists under their real
+    // email; leave the existing row as the winner and drop the enrichment.
+    if ((error as { code?: string }).code === "23505") return;
+    throw error;
+  }
 }
 
 export async function getContact(id: string): Promise<RadarContact | null> {

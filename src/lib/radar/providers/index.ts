@@ -1,8 +1,10 @@
 import "server-only";
 import { hasApollo, hasSeamless } from "../../env";
-import type { RawContact, SearchCriteria } from "../types";
-import { searchApollo } from "./apollo";
-import { searchSeamless } from "./seamless";
+import type { EnrichedContactDetails, RawContact, SearchCriteria } from "../types";
+import { enrichApollo, searchApollo } from "./apollo";
+import { enrichSeamless, searchSeamless } from "./seamless";
+
+export { splitLocationTerms } from "./locations";
 
 export interface ProviderResult {
   provider: string;
@@ -59,4 +61,54 @@ async function safe(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+/** Which provider owns a stored contact, read off the `source` we recorded. */
+export function providerOf(source: string | null | undefined): "seamless" | "apollo" | null {
+  const s = (source ?? "").toLowerCase();
+  if (s.includes("seamless")) return "seamless";
+  if (s.includes("apollo")) return "apollo";
+  return null;
+}
+
+export interface EnrichmentOutcome {
+  details: EnrichedContactDetails[];
+  errors: { provider: string; message: string }[];
+}
+
+/**
+ * Run each provider's enrichment call for the refs that belong to it. Both
+ * providers charge credits here, which is why this is a separate step from
+ * search rather than part of it.
+ */
+export async function runEnrichment(targets: {
+  seamless: string[];
+  apollo: string[];
+}): Promise<EnrichmentOutcome> {
+  const details: EnrichedContactDetails[] = [];
+  const errors: { provider: string; message: string }[] = [];
+
+  if (hasSeamless() && targets.seamless.length) {
+    try {
+      details.push(...(await enrichSeamless(targets.seamless)));
+    } catch (error) {
+      errors.push({
+        provider: "Seamless.AI",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  if (hasApollo() && targets.apollo.length) {
+    try {
+      details.push(...(await enrichApollo(targets.apollo)));
+    } catch (error) {
+      errors.push({
+        provider: "Apollo",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { details, errors };
 }
