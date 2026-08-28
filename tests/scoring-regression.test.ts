@@ -17,6 +17,7 @@ import {
   legacyCategoriesFromSeatTotal,
   normalizeSeatDimensionScores,
   resolveSeatTotal,
+  totalFromSeatDimensions,
 } from "../src/lib/scoring/seat-fit.ts";
 import type { AnswerGradePayload } from "../src/lib/types.ts";
 import {
@@ -91,6 +92,53 @@ test("v2 totals fall back to legacy categories when seat dimensions are missing"
     legacyTotal: 82,
   });
   assert.equal(total, 82);
+});
+
+test("dimension scores survive key drift from the model", () => {
+  const rubric = getBuiltinSeatRubric({ shortcode: HEAD_CLINICAL_OPS });
+  assert.ok(rubric);
+  const parsed = parseRubricMarkdown(seatRubricMarkdown(rubric));
+  const keys = parsed.dimensions.map((d) => d.key);
+
+  // The model rarely echoes the slug byte-for-byte: it drops filler words, uses
+  // the label, or changes separators. An exact-match lookup scored every one of
+  // these 0, which silently turned strong candidates into rejects.
+  const drifted: Record<string, number> = {
+    "Study Diagnosis & Rescue": 18,
+    "end-to-end-clinical-delivery-ownership": 17,
+    hands_on_clinical_operating_depth: 13,
+    "Operating system + team building": 12,
+    client_commercial_judgment: 8,
+    decisiveness_adaptability: 8,
+    ivd_site_sample_data_integration: 4,
+    builder_motivation_rdi_environment: 4,
+  };
+
+  const scores = normalizeSeatDimensionScores(drifted, parsed.dimensions);
+  assert.equal(totalFromSeatDimensions(scores), 84);
+  for (const key of keys) {
+    assert.ok(scores[key]! > 0, `${key} should have been matched, got 0`);
+  }
+});
+
+test("a mostly-unmatched model response falls back instead of scoring near zero", () => {
+  const rubric = getBuiltinSeatRubric({ shortcode: HEAD_CLINICAL_OPS });
+  assert.ok(rubric);
+  const parsed = parseRubricMarkdown(seatRubricMarkdown(rubric));
+
+  // Only one of eight dimensions came back. Summing that alone reads as a 4/100
+  // candidate; the legacy total is the honest number to use.
+  const sparse = normalizeSeatDimensionScores(
+    { builder_motivation_rdi_environment: 4 },
+    parsed.dimensions,
+  );
+  const total = resolveSeatTotal({
+    schemaVersion: "seat-dimensions-v2",
+    dimensions: parsed.dimensions,
+    dimensionScores: sparse,
+    legacyTotal: 78,
+  });
+  assert.equal(total, 78);
 });
 
 test("excellent likely-synthetic unsupported answer gets zero capability credit", () => {
