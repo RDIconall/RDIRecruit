@@ -122,6 +122,7 @@ export interface RadarContact {
   optOutReason?: string | null;
   owner?: string | null;
   dedupeKey?: string | null;
+  providerRef?: string | null;
   raw?: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
@@ -143,6 +144,28 @@ export interface RawContact {
   phone?: string | null;
   source: string;
   profileSummary?: string | null;
+  emailStatus?: EmailStatus;
+  raw?: Record<string, unknown>;
+  /**
+   * The provider's own id for this record, needed to enrich it later. Both
+   * Seamless and Apollo return contact details only from a SECOND call keyed on
+   * this ref (Seamless `searchResultId`, Apollo person `id`), so a search result
+   * without it can never be turned into an email address.
+   */
+  providerRef?: string | null;
+  /** Provider says an email exists behind enrichment (Apollo `has_email`). */
+  hasEmail?: boolean;
+}
+
+/** Contact details that only arrive from a provider's enrichment call. */
+export interface EnrichedContactDetails {
+  providerRef: string;
+  email?: string | null;
+  phone?: string | null;
+  fullName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  linkedinUrl?: string | null;
   emailStatus?: EmailStatus;
   raw?: Record<string, unknown>;
 }

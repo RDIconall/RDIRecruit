@@ -220,6 +220,13 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
             </div>
           )}
           <div style={{ flex: 1 }} />
+          <a
+            href="/radar"
+            style={{ fontSize: 13, color: APP.ink2, textDecoration: "none", fontWeight: 600, flexShrink: 0 }}
+          >
+            Radar
+          </a>
+          <div style={{ width: 1, height: 18, background: APP.hair, flexShrink: 0 }} />
           {pool.meta.jobUrl ? (
             <a
               href={pool.meta.jobUrl}
