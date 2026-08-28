@@ -30,7 +30,7 @@ import { alternateSeatRubricBlock, isGenericMultiRoleShortcode } from "../rubric
 import {
   applySeatGates,
   legacyCategoriesFromSeatTotal,
-  normalizeSeatDimensionScores,
+  matchSeatDimensionScores,
   resolveSeatTotal,
 } from "./seat-fit";
 
@@ -582,33 +582,42 @@ function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): Eva
     input.rubricSchemaVersion === "seat-dimensions-v2" && dimensions.length
       ? "seat-dimensions-v2"
       : "legacy-v1";
-  const seatDimensionScores =
+  const dimensionMatch =
     rubricSchemaVersion === "seat-dimensions-v2"
-      ? normalizeSeatDimensionScores(parsed.seatDimensionScores, dimensions)
-      : {};
+      ? matchSeatDimensionScores(parsed.seatDimensionScores, dimensions)
+      : { scores: {}, matched: 0 };
+  const seatDimensionScores = dimensionMatch.scores;
 
   const legacyTotal = Object.values(legacyCategoryScores).reduce((sum, v) => sum + v, 0);
-  const usedDimensionFallback =
-    rubricSchemaVersion === "seat-dimensions-v2" &&
-    dimensions.length > 0 &&
-    dimensions.every((d) => (seatDimensionScores[d.key] ?? 0) === 0) &&
-    legacyTotal > 0;
-  let rawSeatTotal = resolveSeatTotal({
+  const rawSeatTotal = resolveSeatTotal({
     schemaVersion: rubricSchemaVersion,
     dimensions,
     dimensionScores: seatDimensionScores,
     legacyTotal,
   });
-  if (rubricSchemaVersion === "seat-dimensions-v2" && !usedDimensionFallback) {
-    const reduction = 10 - capTenureCategoryScore(10, 10, stability);
-    rawSeatTotal = Math.max(0, rawSeatTotal - reduction);
+  // The dimension total already reflects tenure through the rubric's own
+  // dimensions, so only apply the deterministic cap when it is genuinely the
+  // dimension total being used (not the legacy fallback, which is capped above).
+  const usedDimensionTotal =
+    rubricSchemaVersion === "seat-dimensions-v2" && rawSeatTotal !== legacyTotal;
+  const tenureAdjustedTotal = usedDimensionTotal
+    ? Math.max(0, rawSeatTotal - (10 - capTenureCategoryScore(10, 10, stability)))
+    : rawSeatTotal;
+
+  if (rubricSchemaVersion === "seat-dimensions-v2" && dimensionMatch.matched < dimensions.length) {
+    gradeLog("score.dimensions.partial", {
+      name: input.name,
+      matched: dimensionMatch.matched,
+      expected: dimensions.length,
+      usedLegacyFallback: !usedDimensionTotal,
+    });
   }
 
   const answerGrades = normalizeAnswerGrades(parsed.answerGrades ?? []);
   const integrityGate = normalizeIntegrityGate(parsed.integrityGate);
   const otherGateResults = normalizeGateResults(parsed.otherGateResults ?? []);
   const gateAdjustment = applySeatGates({
-    rawTotal: rawSeatTotal,
+    rawTotal: tenureAdjustedTotal,
     dimensions,
     dimensionScores: seatDimensionScores,
     integrityGate,
@@ -919,10 +928,10 @@ function heuristicEvaluate(input: EvaluatorInput): EvaluatorOutput {
   const dimensions = input.dimensions ?? [];
   const seatDimensionScores =
     input.rubricSchemaVersion === "seat-dimensions-v2" && dimensions.length
-      ? normalizeSeatDimensionScores(
+      ? matchSeatDimensionScores(
           Object.fromEntries(dimensions.map((d) => [d.key, Math.round((d.weight * total) / 100)])),
           dimensions,
-        )
+        ).scores
       : {};
 
   const roReads = input.roles.map((r) => ({

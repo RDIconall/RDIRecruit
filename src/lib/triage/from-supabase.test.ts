@@ -307,4 +307,41 @@ const nothingGraded = deriveDecisionDetail(
 );
 assert.equal(nothingGraded.decision, "blocked");
 
+// A merely-unproven candidate is a Backup, not a Reject. The seat rubrics score
+// against demanding evidence bars, so a low total on its own says "not proven",
+// not "do not interview" — auto-rejecting on it buried real people.
+const lowButClean = deriveDecisionDetail(input({ score: score(48) }));
+assert.equal(lowButClean.decision, "backup");
+
+// Concrete evidence still rejects: a material integrity finding…
+const materialIntegrity = deriveDecisionDetail(
+  input({
+    score: score(48),
+    evals: {
+      ...input().evals,
+      dig: {
+        quality: "Weak",
+        mix: "",
+        integrity: "Material",
+        integrityNote: "Claimed a role the record contradicts.",
+        careerRead: "",
+        resolve: [],
+      },
+    },
+  }),
+);
+assert.equal(materialIntegrity.decision, "reject");
+
+// …and a low file whose answers own nothing.
+const lowAndWeak = deriveDecisionDetail(
+  input({
+    score: score(40),
+    evals: {
+      ...input().evals,
+      answerGrades: [grade("SURFACE"), grade("EVASIVE"), grade("SURFACE")],
+    },
+  }),
+);
+assert.equal(lowAndWeak.decision, "reject");
+
 console.log("from-supabase.test.ts: ok");

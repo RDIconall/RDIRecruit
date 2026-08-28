@@ -154,6 +154,19 @@ function hasDiscrepancy(v: VerificationPayload | null): boolean {
   return (v.claims ?? []).some((c) => (c.verdict ?? "").toUpperCase() === "DISCREPANCY");
 }
 
+// A file is only put on the do-not-interview list when something concrete says
+// so: a material integrity finding, or genuinely empty answers. A low total on
+// its own is NOT enough. The seat rubrics score against demanding evidence bars,
+// so a merely-unproven candidate lands low without being a "no" — calling that a
+// reject buried real people on the cut list.
+function hasRejectEvidence(input: MapInput, total: number): boolean {
+  const integrity = (input.evals.dig?.integrity ?? "").toLowerCase();
+  if (integrity.startsWith("material")) return true;
+  if (refusedToAnswerFrom(input.application, input.evals.answerGrades)) return true;
+  const answers = summarizeAnswerGrades(input.evals.answerGrades);
+  return total < 55 && answers.level === "weak";
+}
+
 /**
  * The call before the deterministic gates: a stored model read when there is
  * one, otherwise derived from the cached evaluation. The numeric `total`/bands
@@ -172,11 +185,9 @@ function ungatedDecision(input: MapInput): Decision {
   const { score, evals } = input;
   if (!score) return "blocked";
 
-  const integrity = (evals.dig?.integrity ?? "").toLowerCase();
-  if (integrity.startsWith("material")) return "reject";
-
   const total = score.total ?? 0;
-  if (total < 55) return "reject";
+  if (hasRejectEvidence(input, total)) return "reject";
+  if (total < 55) return "backup";
 
   // A discrepancy or an unstated salary no longer earns its own status — the
   // candidate is held as a backup with the thing-to-confirm surfaced as a caveat.

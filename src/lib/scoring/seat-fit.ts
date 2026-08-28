@@ -26,16 +26,67 @@ export function decisionBand(total: number): DecisionBand {
   return "PASS";
 }
 
+/**
+ * Match the model's dimension keys to the rubric's, tolerantly.
+ *
+ * The keys are slugified from the rubric markdown, and the model rarely echoes
+ * them byte-for-byte — it uses the label, changes separators, or drops filler
+ * words. An exact-match lookup scored every near-miss 0, so a strong candidate
+ * could total 37 instead of 84 and land in the reject band. Match on the key or
+ * the label, ignoring case, punctuation, and "and".
+ */
+function normalizeKey(value: string): string {
+  return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
+}
+
+function looseKey(value: string): string {
+  return normalizeKey(value).replace(/\band\b/g, "").replace(/and/g, "");
+}
+
+export interface SeatDimensionMatch {
+  scores: SeatDimensionScores;
+  /** How many of the rubric's dimensions the model actually supplied. */
+  matched: number;
+}
+
+export function matchSeatDimensionScores(
+  raw: Partial<SeatDimensionScores> | undefined,
+  dimensions: SeatDimension[],
+): SeatDimensionMatch {
+  const exact = new Map<string, string>();
+  const normalized = new Map<string, string>();
+  const loose = new Map<string, string>();
+  for (const d of dimensions) {
+    exact.set(d.key, d.key);
+    for (const candidate of [d.key, d.label]) {
+      if (!normalized.has(normalizeKey(candidate))) normalized.set(normalizeKey(candidate), d.key);
+      if (!loose.has(looseKey(candidate))) loose.set(looseKey(candidate), d.key);
+    }
+  }
+
+  const resolved = new Map<string, number>();
+  for (const [rawKey, rawValue] of Object.entries(raw ?? {})) {
+    const target =
+      exact.get(rawKey) ?? normalized.get(normalizeKey(rawKey)) ?? loose.get(looseKey(rawKey));
+    if (!target || resolved.has(target)) continue;
+    const value = Number(rawValue);
+    if (!Number.isFinite(value)) continue;
+    resolved.set(target, value);
+  }
+
+  const scores: SeatDimensionScores = {};
+  for (const d of dimensions) {
+    const value = resolved.get(d.key) ?? 0;
+    scores[d.key] = Math.max(0, Math.min(d.weight, Math.round(value)));
+  }
+  return { scores, matched: resolved.size };
+}
+
 export function normalizeSeatDimensionScores(
   raw: Partial<SeatDimensionScores> | undefined,
   dimensions: SeatDimension[],
 ): SeatDimensionScores {
-  const out: SeatDimensionScores = {};
-  for (const d of dimensions) {
-    const value = Number(raw?.[d.key] ?? 0);
-    out[d.key] = Math.max(0, Math.min(d.weight, Math.round(Number.isFinite(value) ? value : 0)));
-  }
-  return out;
+  return matchSeatDimensionScores(raw, dimensions).scores;
 }
 
 export function totalFromSeatDimensions(scores: SeatDimensionScores): number {
@@ -126,20 +177,26 @@ export function legacyCategoriesFromSeatTotal(
   return out;
 }
 
-/** Prefer seat-dimension totals, but never persist a 0 when the model only filled legacy buckets. */
+/**
+ * Prefer seat-dimension totals, but never persist a number the model did not
+ * actually produce. If most dimensions came back unmatched or unscored, summing
+ * what remains understates the candidate badly — a single 4-point dimension
+ * reads as a 4/100 reject. Fall back to the legacy total in that case.
+ */
 export function resolveSeatTotal(input: {
   schemaVersion: RubricSchemaVersion;
   dimensions: SeatDimension[];
   dimensionScores: SeatDimensionScores;
   legacyTotal: number;
 }): number {
+  const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
   if (input.schemaVersion !== "seat-dimensions-v2" || !input.dimensions.length) {
-    return Math.max(0, Math.min(100, Math.round(input.legacyTotal)));
+    return clamp(input.legacyTotal);
   }
-  const dimensionTotal = totalFromSeatDimensions(input.dimensionScores);
-  const allZero = input.dimensions.every((d) => (input.dimensionScores[d.key] ?? 0) === 0);
-  if (allZero && input.legacyTotal > 0) return Math.max(0, Math.min(100, Math.round(input.legacyTotal)));
-  return Math.max(0, Math.min(100, Math.round(dimensionTotal)));
+  const scored = input.dimensions.filter((d) => (input.dimensionScores[d.key] ?? 0) > 0).length;
+  const enoughCoverage = scored >= Math.ceil(input.dimensions.length / 2);
+  if (!enoughCoverage && input.legacyTotal > 0) return clamp(input.legacyTotal);
+  return clamp(totalFromSeatDimensions(input.dimensionScores));
 }
 
 export function rubricSchemaForDimensions(dimensions: SeatDimension[]): RubricSchemaVersion {
