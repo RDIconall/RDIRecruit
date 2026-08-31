@@ -1,9 +1,11 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
+import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic, publicBaseUrl } from "../env";
 import type { OutreachDraft, Pipeline, RadarContact } from "./types";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = CLAUDE_JUDGMENT_MODEL;
 
 function pitch(pipeline: Pipeline): string {
   if (pipeline === "bd") {
@@ -63,6 +65,7 @@ export async function draftOutreach(
       system: [{ type: "text", text: buildSystemPrompt(pipeline, senderName), cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: buildUserPrompt(contact) }],
     });
+    logClaudeUsage("radar.outreach", MODEL, response.usage, { pipeline });
     const text = response.content[0]?.type === "text" ? response.content[0].text : "{}";
     const match = text.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(match?.[0] ?? "{}") as Partial<OutreachDraft>;

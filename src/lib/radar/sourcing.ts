@@ -1,9 +1,11 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
+import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
 import { EMPTY_CRITERIA, type Pipeline, type SearchCriteria } from "./types";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = CLAUDE_JUDGMENT_MODEL;
 
 export interface SourcingPlan {
   title: string;
@@ -111,6 +113,7 @@ export async function planSourcingSearches(input: {
       system: systemPrompt(input.pipeline, input.scorecardMd),
       messages: [{ role: "user", content: brief || fallbackPlan(input.pipeline, brief).searches[0].criteria.mustHave.join("\n") }],
     });
+    logClaudeUsage("radar.sourcing", MODEL, response.usage, { pipeline: input.pipeline });
     const text = response.content[0]?.type === "text" ? response.content[0].text : "{}";
     const match = text.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(match?.[0] ?? "{}") as Record<string, unknown>;

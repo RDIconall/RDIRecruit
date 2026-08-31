@@ -1,3 +1,4 @@
+import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
 import { hasAnthropic, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { upsertOverlay } from "../data/overlay";
@@ -300,7 +301,7 @@ export async function scoreCandidate(
     decision_band: evaluation.decisionBand,
     total: evaluation.total,
     salary_value: evaluation.salaryValue,
-    model_version: "claude-sonnet-4-6",
+    model_version: CLAUDE_JUDGMENT_MODEL,
     confidence: evaluation.confidence,
   };
   let { data: scoreRow, error: scoreError } = await supabase
@@ -326,7 +327,7 @@ export async function scoreCandidate(
         category_scores: evaluation.categoryScores,
         total: evaluation.total,
         salary_value: evaluation.salaryValue,
-        model_version: "claude-sonnet-4-6",
+        model_version: CLAUDE_JUDGMENT_MODEL,
         confidence: evaluation.confidence,
       })
       .select("*")
@@ -448,7 +449,7 @@ export async function scoreCandidate(
     kind: row.kind,
     ref: row.ref,
     payload: row.payload,
-    model_version: "claude-sonnet-4-6",
+    model_version: CLAUDE_JUDGMENT_MODEL,
     rubric_version: rubric.version,
   }));
   for (let i = 0; i < rowsToInsert.length; i += EVAL_INSERT_BATCH) {

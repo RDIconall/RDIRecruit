@@ -1,8 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_EXTRACTION_MODEL } from "../ai/models";
+import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic, hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = CLAUDE_EXTRACTION_MODEL;
 export const GLOBAL_SCOPE = "global";
 
 export interface CalibrationDoc {
@@ -141,6 +143,7 @@ EXISTING ROLE CALIBRATION (${input.jobShortcode}):
       system: DISTILL_SYSTEM,
       messages: [{ role: "user", content: userPrompt }],
     });
+    logClaudeUsage("calibration.distill", MODEL, response.usage, { jobShortcode: input.jobShortcode });
     const text = response.content[0]?.type === "text" ? response.content[0].text : "{}";
     const match = text.match(/\{[\s\S]*\}/);
     result = JSON.parse(match?.[0] ?? "{}") as DistillResult;

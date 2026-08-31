@@ -1,8 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_EXTRACTION_MODEL } from "../ai/models";
+import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
 import type { ParsedResumeReview } from "./types";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = CLAUDE_EXTRACTION_MODEL;
 
 function heuristicParse(text: string, workableExperience: unknown[]): ParsedResumeReview {
   const roles = (workableExperience as Array<{
@@ -83,6 +85,7 @@ Return JSON only:
     messages: [{ role: "user", content: prompt }],
   });
 
+  logClaudeUsage("resume.parse", MODEL, response.usage, {});
   const raw = response.content[0]?.type === "text" ? response.content[0].text : "{}";
   const match = raw.match(/\{[\s\S]*\}/);
   let parsed: Omit<ParsedResumeReview, "modelVersion" | "parsedAt">;
