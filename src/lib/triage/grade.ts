@@ -1,7 +1,5 @@
 import "server-only";
 import { gradeLog } from "./grade-log";
-import { loadPoolRoster } from "./load";
-import { recalculateRead } from "./recalc";
 import {
   describeMissing,
   prepareGradingInputs,
@@ -66,7 +64,7 @@ export function blockedRead(missing: ReadinessInput[]): DecisionRead {
  */
 export async function gradeCandidate(req: GradeRequest): Promise<GradeResult> {
   const prepared = req.prepared ?? (await prepareGradingInputs(req.candidate.id, req.jobShortcode));
-  const { inputs, readiness } = prepared;
+  const { readiness } = prepared;
 
   if (!readiness.ready) {
     gradeLog("grade.blocked", {
@@ -77,26 +75,22 @@ export async function gradeCandidate(req: GradeRequest): Promise<GradeResult> {
     return { read: blockedRead(readiness.missing), readiness, blocked: true };
   }
 
-  const poolRoster = await loadPoolRoster(req.jobShortcode, req.candidate.id);
-
-  const read = await recalculateRead({
-    candidate: req.candidate,
-    workingFile: req.workingFile,
-    materials: req.materials,
-    corrections: req.corrections,
-    transcript: req.transcript,
-    replies: req.replies,
-    reviewer: req.reviewer,
-    rubric: inputs.rubric,
-    jobSpec: inputs.jobSpec,
-    methodology: inputs.methodology,
-    poolRoster,
+  // One canonical call produces both the internal score projections and the
+  // founder-facing working-file read. All human edits were persisted before this
+  // entry point, so scoreCandidate includes them in the input fingerprint and
+  // reuses an identical completed/in-flight analysis rather than buying another.
+  const { scoreCandidate } = await import("../scoring/run-score");
+  const result = await scoreCandidate(req.candidate.id, {
+    force: true,
+    replace: true,
+    trigger: req.reviewer?.label ? `human:${req.reviewer.label}` : "human_reanalysis",
   });
+  const read = "read" in result ? (result.read ?? null) : null;
 
   gradeLog("grade.done", {
     candidateId: req.candidate.id,
     decision: read?.decision ?? null,
-    poolSize: poolRoster.length,
+    canonical: true,
   });
 
   return { read, readiness, blocked: false };

@@ -29,6 +29,7 @@ import type {
   VerificationPayload,
 } from "../types";
 import { alternateSeatRubricBlock, isGenericMultiRoleShortcode } from "../rubric/seat-rubrics";
+import type { AssessmentNarrative, CareerRead, RubricFit } from "../triage/types";
 import {
   applySeatGates,
   legacyCategoriesFromSeatTotal,
@@ -88,6 +89,22 @@ export interface EvaluatorOutput {
   verification: VerificationPayload;
   answerGrades: AnswerGradePayload[];
   composeQuestions: Array<{ q: string; why: string }>;
+
+  /**
+   * Founder-facing prose produced in the same call as the score. Decisions and
+   * next actions are deliberately not model fields: projection code derives them
+   * from the normalized gates/total and pipeline phase so the pool and dossier
+   * cannot disagree.
+   */
+  triage: {
+    why: string;
+    risk: string;
+    caveat?: string;
+    timelineNote?: string;
+    careerRead?: CareerRead;
+    assessment?: AssessmentNarrative;
+    rubricFit?: RubricFit;
+  };
 
   // claim ↔ source → score_inputs
   claims: Array<{
@@ -367,6 +384,19 @@ Return this exact JSON shape (fill every field; arrays may be empty but must be 
   "digIn": { "quality": "Good|OK|Weak|AI-generated", "mix": "e.g. '1 owned (technical) · 2 intent answers, on point'", "integrity": "Clear|Minor|Material", "integrityNote": "what to watch, or empty", "careerRead": "one-line career read · portability to RDI risk", "resolve": ["things to settle live — put any live verification probe for unsupported expertise here"] },
   "verification": { "read": "Clean|Minor flags|Material discrepancy|Unverified (no profile)", "claims": [{ "category": "", "application": "what the application says", "profile": "what the profile says", "verdict": "CONFIRMED|DISCREPANCY|UNVERIFIABLE", "note": "" }] },
   "answerGrades": [{ "question": "the answer's question, copied EXACTLY as the key appears in APPLICATION ANSWERS so it can be matched back", "verdict": "AI|OWNED|SURFACE|EVASIVE", "answerProvenance": "experience_backed|adjacent_plausible|unsupported|contradicted", "authorshipConfidence": "high|uncertain|likely_ai_assisted|likely_synthetic", "candidateEvidenceCredit": "high|partial|low|zero", "present": ["specific concepts or methods demonstrated at OWNED depth only"], "provenanceNote": "where the capability appears to originate, or why it is unsupported", "note": "2-4 sentences: quote the decisive phrase, explain the verdict, name what is missing if not OWNED or provenance-backed — never a comparison to other candidates", "kind": "screen|intent" }],
+  "triage": {
+    "why": "one or two sentences: the decisive evidence-grounded reason for the call; no numeric score",
+    "risk": "the single main risk or thing a human must settle",
+    "caveat": "what must still be confirmed, or empty",
+    "timelineNote": "what materially changed with new evidence, or empty",
+    "careerRead": { "path": "career-path read", "positive": "strongest positive", "risk": "main risk", "implication": "decision implication" },
+    "assessment": {
+      "bio": "complete recruiter biography in 2-4 short paragraphs: education, career progression, biggest grounded accomplishment and capability level; omit facts not stated",
+      "application": "1-2 short paragraphs against the seat spec, separating answer quality from capability provenance and covering salary and writing consistency",
+      "commute": "where they live and a realistic drive-time estimate to the office; say relocation is required when far away"
+    },
+    "rubricFit": { "verdict": "Strong fit|Partial fit|Weak fit|Misaligned", "summary": "2-3 sentences against this seat's rubric", "strengths": ["grounded rubric strength"], "gaps": ["grounded rubric gap"] }
+  },
   "claims": [{ "category": "principal|environment|scope|writing|tenure|local", "claim": "the assertion", "sourceType": "resume|answer|application_field", "sourceRef": "where", "quote": "verbatim support" }]
 }
 
@@ -460,29 +490,22 @@ function sanitizeInputForSafety(input: EvaluatorInput): EvaluatorInput {
 }
 
 /**
- * One Claude call for the evaluation. Returns the reassembled text (every text
- * block joined, so a leading empty block can't hide the JSON) plus the stop reason
- * so the caller can distinguish a real read from a refusal/empty reply.
+ * Shared request contract for synchronous and Message Batch transport.
+ * Two cached prefix blocks are ordered stable-to-less-stable: the global method
+ * stays warm across a run, then the seat brief stays warm across that seat. Only
+ * candidate materials are fresh input.
  */
-async function callEvaluator(
-  client: Anthropic,
+export function buildEvaluatorRequest(
   input: EvaluatorInput,
-  hardened: boolean,
-): Promise<{ text: string; stopReason: string | null }> {
+  hardened = false,
+): Anthropic.MessageCreateParamsNonStreaming {
+  const safeInput = hardened ? sanitizeInputForSafety(input) : input;
   const userContent = hardened
-    ? buildUserPrompt(input) + REFUSAL_RETRY_SUFFIX
-    : buildUserPrompt(input);
-  const response = await client.messages.create({
+    ? buildUserPrompt(safeInput) + REFUSAL_RETRY_SUFFIX
+    : buildUserPrompt(safeInput);
+  return {
     model: MODEL,
     max_tokens: 8000,
-    // Two cached prefix blocks, ordered stable-to-less-stable so a rubric edit
-    // invalidates only the second one:
-    //   1. the global method doc + output contract — identical for every candidate
-    //      in every job, so it stays warm across a whole run;
-    //   2. the seat brief (rubric, weights, calibration, output schema) —
-    //      identical for every candidate on this seat.
-    // A batch pays the 1.25x write once and then reads both at 0.1x. Only the
-    // candidate's own materials are billed as fresh input.
     system: [
       {
         type: "text",
@@ -496,7 +519,15 @@ async function callEvaluator(
       },
     ],
     messages: [{ role: "user", content: userContent }],
-  });
+  };
+}
+
+async function callEvaluator(
+  client: Anthropic,
+  input: EvaluatorInput,
+  hardened: boolean,
+): Promise<{ text: string; stopReason: string | null }> {
+  const response = await client.messages.create(buildEvaluatorRequest(input, hardened));
   logClaudeUsage("scoring.evaluator", MODEL, response.usage, {
     seat: input.seat.jobShortcode ?? null,
     hardened,
@@ -506,6 +537,24 @@ async function callEvaluator(
     .map((block) => (block.type === "text" ? block.text : ""))
     .join("\n");
   return { text, stopReason: response.stop_reason ?? null };
+}
+
+export function parseEvaluatorMessage(
+  message: Pick<Anthropic.Message, "content" | "stop_reason">,
+  input: EvaluatorInput,
+): EvaluatorOutput | null {
+  if (message.stop_reason === "refusal") return null;
+  const text = message.content
+    .map((block) => (block.type === "text" ? block.text : ""))
+    .join("\n");
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const parsed = JSON.parse(match[0]) as Partial<EvaluatorOutput>;
+    return isUsableEvaluation(parsed) ? normalize(parsed, input) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function evaluateCandidate(input: EvaluatorInput): Promise<EvaluatorOutput> {
@@ -735,7 +784,72 @@ function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): Eva
     },
     answerGrades,
     composeQuestions: parsed.composeQuestions ?? [],
+    triage: normalizeTriage(parsed.triage, parsed),
     claims: (parsed.claims ?? []).filter((c) => c && c.claim),
+  };
+}
+
+function normalizeTriage(
+  value: unknown,
+  fallback: Partial<EvaluatorOutput>,
+): EvaluatorOutput["triage"] {
+  const v = value && typeof value === "object" ? (value as Record<string, unknown>) : {};
+  const text = (key: string) => (typeof v[key] === "string" ? (v[key] as string).trim() : "");
+  const career = v.careerRead && typeof v.careerRead === "object"
+    ? (v.careerRead as Record<string, unknown>)
+    : null;
+  const assessment = v.assessment && typeof v.assessment === "object"
+    ? (v.assessment as Record<string, unknown>)
+    : null;
+  const rubric = v.rubricFit && typeof v.rubricFit === "object"
+    ? (v.rubricFit as Record<string, unknown>)
+    : null;
+  const str = (source: Record<string, unknown> | null, key: string) =>
+    source && typeof source[key] === "string" ? (source[key] as string).trim() : "";
+  const list = (source: Record<string, unknown> | null, key: string) =>
+    source && Array.isArray(source[key])
+      ? (source[key] as unknown[]).map(String).map((x) => x.trim()).filter(Boolean).slice(0, 12)
+      : [];
+
+  const careerRead = career
+    ? {
+        path: str(career, "path"),
+        positive: str(career, "positive"),
+        risk: str(career, "risk"),
+        implication: str(career, "implication"),
+      }
+    : undefined;
+  const normalizedAssessment = assessment
+    ? {
+        bio: str(assessment, "bio"),
+        application: str(assessment, "application"),
+        commute: str(assessment, "commute"),
+      }
+    : undefined;
+  const rubricFit = rubric
+    ? {
+        verdict: str(rubric, "verdict"),
+        summary: str(rubric, "summary"),
+        strengths: list(rubric, "strengths"),
+        gaps: list(rubric, "gaps"),
+        generatedAt: new Date().toISOString(),
+      }
+    : undefined;
+
+  return {
+    why: text("why") || fallback.summary || "Candidate analysis completed.",
+    risk:
+      text("risk") ||
+      fallback.digIn?.integrityNote ||
+      fallback.digIn?.resolve?.[0] ||
+      "Confirm the decisive claims live.",
+    ...(text("caveat") ? { caveat: text("caveat") } : {}),
+    ...(text("timelineNote") ? { timelineNote: text("timelineNote") } : {}),
+    ...(careerRead && Object.values(careerRead).some(Boolean) ? { careerRead } : {}),
+    ...(normalizedAssessment && Object.values(normalizedAssessment).some(Boolean)
+      ? { assessment: normalizedAssessment }
+      : {}),
+    ...(rubricFit && (rubricFit.verdict || rubricFit.summary) ? { rubricFit } : {}),
   };
 }
 
@@ -1094,6 +1208,10 @@ function heuristicEvaluate(input: EvaluatorInput): EvaluatorOutput {
     composeQuestions: [
       { q: "Walk me through the most ambiguous problem you owned end to end last year.", why: "Baseline judgment anchor." },
     ],
+    triage: {
+      why: "Heuristic placeholder; a canonical model analysis has not completed.",
+      risk: "The candidate has not received a full evidence-grounded read.",
+    },
     claims: roReads.slice(0, 3).map((r) => ({
       category: "scope" as CategoryKey,
       claim: r.read,

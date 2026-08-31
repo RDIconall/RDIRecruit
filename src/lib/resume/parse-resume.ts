@@ -1,12 +1,10 @@
-import Anthropic from "@anthropic-ai/sdk";
-import { CLAUDE_EXTRACTION_MODEL } from "../ai/models";
-import { logClaudeUsage } from "../ai/usage";
-import { env, hasAnthropic } from "../env";
 import type { ParsedResumeReview } from "./types";
 
-const MODEL = CLAUDE_EXTRACTION_MODEL;
-
-function heuristicParse(text: string, workableExperience: unknown[]): ParsedResumeReview {
+function heuristicParse(
+  text: string,
+  workableExperience: unknown[],
+  workableEducation: unknown[],
+): ParsedResumeReview {
   const roles = (workableExperience as Array<{
     title?: string;
     company?: string;
@@ -28,7 +26,19 @@ function heuristicParse(text: string, workableExperience: unknown[]): ParsedResu
     chronologySummary: "Parsed from Workable structured fields — run full résumé ingest for line-level review.",
     dateFlags: [],
     roles,
-    education: [],
+    education: (workableEducation as Array<{
+      school?: string;
+      degree?: string;
+      field?: string;
+      start?: string;
+      end?: string;
+    }>).map((entry) => ({
+      school: entry.school ?? "School",
+      degree: entry.degree ?? null,
+      field: entry.field ?? null,
+      start: entry.start?.slice(0, 7) ?? null,
+      end: entry.end?.slice(0, 7) ?? null,
+    })),
     gaps: [],
     modelVersion: "heuristic",
     parsedAt: new Date().toISOString(),
@@ -41,71 +51,13 @@ export async function parseResumeIntelligently(input: {
   workableExperience?: unknown[];
   workableEducation?: unknown[];
 }): Promise<ParsedResumeReview> {
-  if (!hasAnthropic() || input.resumeText.length < 80) {
-    return heuristicParse(input.resumeText, input.workableExperience ?? []);
-  }
-
-  const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
-
-  const prompt = `You are parsing a hiring résumé for RDI Trials. Extract a structured chronology ONCE — job-relevant only.
-
-Candidate: ${input.candidateName}
-
-Résumé text:
-"""
-${input.resumeText.slice(0, 14000)}
-"""
-
-Workable structured experience (may be incomplete — prefer résumé lines when they disagree, flag discrepancies):
-${JSON.stringify(input.workableExperience ?? [], null, 2)}
-
-Workable education:
-${JSON.stringify(input.workableEducation ?? [], null, 2)}
-
-Rules:
-- Dates as YYYY-MM when possible.
-- Detect gaps between roles ≥3 months; label honestly (e.g. "~9 months between roles — likely job search").
-- Never extract protected-class attributes (age, race, religion, photos, etc.).
-- chronologySummary: 2-3 sentence intelligent read of their career climb, date consistency, and anything a recruiter should verify live.
-- dateFlags: array of NEEDS YOU items (overlaps, missing dates, title inflation vs tenure).
-- Each role needs resumeLine: the exact or near-exact résumé line for source highlighting.
-
-Return JSON only:
-{
-  "chronologySummary": string,
-  "dateFlags": string[],
-  "roles": [{"title","company","start","end","current":bool,"bullets":[],"resumeLine","stratumHint"}],
-  "education": [{"school","degree","field","start","end"}],
-  "gaps": [{"start","end","months","label","assumption":bool}]
-}`;
-
-  const response = await client.messages.create({
-    model: MODEL,
-    max_tokens: 4000,
-    messages: [{ role: "user", content: prompt }],
-  });
-
-  logClaudeUsage("resume.parse", MODEL, response.usage, {});
-  const raw = response.content[0]?.type === "text" ? response.content[0].text : "{}";
-  const match = raw.match(/\{[\s\S]*\}/);
-  let parsed: Omit<ParsedResumeReview, "modelVersion" | "parsedAt">;
-  try {
-    parsed = JSON.parse(match?.[0] ?? "{}") as Omit<ParsedResumeReview, "modelVersion" | "parsedAt">;
-  } catch {
-    // Claude occasionally returns truncated/invalid JSON (e.g. long résumés hit
-    // max_tokens mid-array). Don't let that abort the whole ingest — the résumé
-    // text already extracted fine; fall back to the structured-field heuristic
-    // so resume_text + storage stay populated and the decision still re-derives.
-    return heuristicParse(input.resumeText, input.workableExperience ?? []);
-  }
-
-  return {
-    chronologySummary: parsed.chronologySummary ?? "Résumé chronology parsed at ingest.",
-    dateFlags: parsed.dateFlags ?? [],
-    roles: parsed.roles ?? [],
-    education: parsed.education ?? [],
-    gaps: parsed.gaps ?? [],
-    modelVersion: MODEL,
-    parsedAt: new Date().toISOString(),
-  };
+  // Résumé extraction is intentionally deterministic. The one canonical
+  // candidate analysis reads the full résumé text and performs the actual hiring
+  // judgment; buying a second model call merely to reshape Workable's structured
+  // fields violated the one-call-per-material-version contract.
+  return heuristicParse(
+    input.resumeText,
+    input.workableExperience ?? [],
+    input.workableEducation ?? [],
+  );
 }

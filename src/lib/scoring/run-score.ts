@@ -1,4 +1,5 @@
 import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
+import { enqueueCanonicalAnalysis, runCanonicalAnalysis } from "../analysis/run";
 import { hasAnthropic, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { upsertOverlay } from "../data/overlay";
@@ -9,13 +10,19 @@ import {
   experienceFromParsedResume,
   educationFromParsedResume,
 } from "../resume/narrative-from-parse";
-import { evaluateCandidate } from "./evaluator";
+import type { EvaluatorOutput } from "./evaluator";
 import { getActiveRubric } from "../rubric/service";
 import { getCalibrationForJob } from "../calibration/service";
 import { getActiveMethodDoc } from "../evaluation/method";
 import { getJobRubric } from "../rubric/store";
 import { computeReadiness, type GradingInputs } from "../triage/readiness";
 import { gradeLog } from "../triage/grade-log";
+import { getWorkingFile, upsertWorkingFile } from "../triage/store";
+import { decisionReadFromEvaluation } from "../analysis/decision";
+import { analysisFingerprint } from "../analysis/fingerprint";
+import { markAnalysisProjected } from "../analysis/store";
+import { loadOneCandidate } from "../triage/load";
+import { renderWorkingFile } from "../triage/working-file";
 import type { ParsedResumeReview } from "../resume/types";
 import type { CategoryKey } from "../types";
 
@@ -91,7 +98,14 @@ function deriveCareerContext(
 
 export async function scoreCandidate(
   candidateId: string,
-  options?: { force?: boolean; replace?: boolean },
+  options?: {
+    force?: boolean;
+    replace?: boolean;
+    transport?: "sync" | "enqueue";
+    evaluation?: EvaluatorOutput;
+    expectedInputHash?: string;
+    trigger?: string;
+  },
 ) {
   const supabase = getServiceSupabase();
 
@@ -152,6 +166,15 @@ export async function scoreCandidate(
   const { loadInterviewEvidenceText, loadRecruiterCommentsText } = await import("../sync/rescore");
   const interviewEvidence = await loadInterviewEvidenceText(candidateId);
   const recruiterComments = await loadRecruiterCommentsText(candidateId);
+  const workingFile = await getWorkingFile(candidateId);
+  const workspaceTranscript = workingFile?.workspace.transcript?.trim() ?? "";
+  const correctionContext = (workingFile?.workspace.corrections ?? [])
+    .map((item) => `${item.reviewerLabel ?? "Reviewer"}: ${item.text}`)
+    .join("\n");
+  const replyContext = Object.entries(workingFile?.workspace.replies ?? {})
+    .filter(([, value]) => value)
+    .map(([key, value]) => `${key}: ${value}`)
+    .join("\n");
 
   // The two documents the grader reads for this seat: the global "How We
   // Evaluate" method + this job's rubric (weights + prose). Plus learned calibration.
@@ -235,14 +258,14 @@ export async function scoreCandidate(
     raw: jobRow?.raw as Record<string, unknown> | null,
   });
 
-  const evaluation = await evaluateCandidate({
+  const evaluatorInput = {
     name: candidate.name ?? "Candidate",
     resumeText,
     roles: experience,
     answers,
     coverLetter: application?.cover_letter,
-    interviewEvidence,
-    recruiterComments,
+    interviewEvidence: [interviewEvidence, workspaceTranscript].filter(Boolean).join("\n\n"),
+    recruiterComments: [recruiterComments, correctionContext, replyContext].filter(Boolean).join("\n"),
     publicProfile: null,
     seat,
     weights: rubric.weights,
@@ -254,7 +277,43 @@ export async function scoreCandidate(
     globalCalibration: calibration.global,
     roleCalibration: calibration.role,
     careerContext,
+  };
+  const currentInputHash = analysisFingerprint({
+    candidateId,
+    model: CLAUDE_JUDGMENT_MODEL,
+    input: evaluatorInput,
   });
+  if (options?.expectedInputHash && options.expectedInputHash !== currentInputHash) {
+    return { obsolete: true, reason: "candidate_inputs_changed" as const };
+  }
+
+  if (options?.transport === "enqueue") {
+    const queued = await enqueueCanonicalAnalysis(
+      candidateId,
+      evaluatorInput,
+      options.trigger ?? (options.replace ? "stale" : "new_candidate"),
+    );
+    return {
+      queued: queued.status !== "completed",
+      completed: queued.status === "completed",
+      analysisId: queued.id,
+    };
+  }
+
+  let evaluation = options?.evaluation;
+  let canonicalAnalysisId: string | null = null;
+  if (!evaluation) {
+    const canonical = await runCanonicalAnalysis(
+      candidateId,
+      evaluatorInput,
+      options?.trigger ?? "synchronous",
+    );
+    if (canonical.state === "pending") {
+      return { queued: true, analysisId: canonical.analysisId };
+    }
+    canonicalAnalysisId = canonical.analysisId;
+    evaluation = canonical.evaluation;
+  }
 
   // Guard: never persist a heuristic placeholder as a candidate's review. It comes
   // from the no-model-key path or a transient parse failure, and writing it leaves a
@@ -464,6 +523,40 @@ export async function scoreCandidate(
     }
   }
 
+  // The same canonical response powers the founder-facing working file. This
+  // replaces the second, separate triage/recalc Claude call and guarantees that
+  // the score-derived pool call and the dossier prose came from one analysis.
+  const decisionRead = decisionReadFromEvaluation(
+    evaluation,
+    Boolean(evaluatorInput.interviewEvidence?.trim()),
+    CLAUDE_JUDGMENT_MODEL,
+  );
+  const one = await loadOneCandidate(candidateId);
+  if (one) {
+    const projectedCandidate = {
+      ...one.candidate,
+      decision: decisionRead.decision,
+      why: decisionRead.why || one.candidate.why,
+      flag: decisionRead.risk || one.candidate.flag,
+      next: decisionRead.next || one.candidate.next,
+      careerRead: decisionRead.careerRead ?? one.candidate.careerRead,
+      assessment: decisionRead.assessment ?? one.candidate.assessment,
+      assessedAt: decisionRead.assessment
+        ? decisionRead.recalculatedAt ?? one.candidate.assessedAt
+        : one.candidate.assessedAt,
+      rubricFit: decisionRead.rubricFit ?? one.candidate.rubricFit,
+    };
+    const content = renderWorkingFile(projectedCandidate, one.slice, {
+      workableUrl: one.workableUrl,
+      disqualified: one.disqualified,
+    });
+    await upsertWorkingFile(
+      candidateId,
+      { content, read: decisionRead, workspace: { decisionOverride: null } },
+      "Canonical candidate analysis",
+    );
+  }
+
   await notifyStrongFit({
     candidateId,
     candidateName: candidate.name ?? "Candidate",
@@ -471,7 +564,9 @@ export async function scoreCandidate(
     jobShortcode: candidate.job_shortcode ?? "",
   });
 
-  return { score: scoreRow, total: evaluation.total };
+  if (canonicalAnalysisId) await markAnalysisProjected(canonicalAnalysisId);
+
+  return { score: scoreRow, total: evaluation.total, read: decisionRead };
 }
 
 // Re-export so callers depending on these keep working.
