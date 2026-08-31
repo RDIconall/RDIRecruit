@@ -43,10 +43,18 @@ export async function rescoreJobWithActiveRubric(
     if (Date.now() - started > budgetMs) break;
     const batch = ids.slice(i, i + concurrency);
     const results = await Promise.allSettled(
-      batch.map((id) => scoreCandidate(id, { replace: true })),
+      batch.map((id) =>
+        scoreCandidate(id, {
+          replace: true,
+          transport: "enqueue",
+          trigger: "rubric_changed",
+        }),
+      ),
     );
     rescored += results.filter((r) => r.status === "fulfilled").length;
   }
+  const { processCanonicalAnalysisBatches } = await import("@/lib/analysis/batch");
+  await processCanonicalAnalysisBatches();
 
   return { ok: true as const, rescored, remaining: Math.max(0, ids.length - rescored) };
 }

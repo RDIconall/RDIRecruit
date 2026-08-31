@@ -19,7 +19,14 @@ export async function rescoreCandidateOnNewEvidence(
   }
 
   const { scoreCandidate } = await import("../scoring/run-score");
-  const result = await scoreCandidate(candidateId, { force: true, replace: true });
+  const result = await scoreCandidate(candidateId, {
+    force: true,
+    replace: true,
+    transport: "enqueue",
+    trigger: reason,
+  });
+  const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
+  const batch = await processCanonicalAnalysisBatches();
 
   const supabase = getServiceSupabase();
   await supabase.from("audit_log").insert({
@@ -30,7 +37,7 @@ export async function rescoreCandidateOnNewEvidence(
     detail: { reason },
   });
 
-  return { scored: true, result };
+  return { scored: false, queued: true, result, batch };
 }
 
 export async function loadInterviewEvidenceText(candidateId: string): Promise<string> {

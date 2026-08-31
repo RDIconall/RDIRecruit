@@ -360,8 +360,11 @@ export async function scoreCandidateIfNew(candidateId: string) {
   if (existingScore) return { scored: false, reason: "already_scored" as const };
 
   const { scoreCandidate } = await import("../scoring/run-score");
-  await scoreCandidate(candidateId);
-  return { scored: true };
+  await scoreCandidate(candidateId, {
+    transport: "enqueue",
+    trigger: "candidate_created",
+  });
+  return { scored: false, queued: true };
 }
 
 export async function scoreUnscoredBatch(candidateIds: string[], concurrency = 3) {
@@ -385,14 +388,20 @@ export async function scoreUnscoredBatch(candidateIds: string[], concurrency = 3
     await Promise.all(
       batch.map(async (candidateId) => {
         try {
-          await scoreCandidate(candidateId);
-          scored += 1;
+          const result = await scoreCandidate(candidateId, {
+            transport: "enqueue",
+            trigger: "bulk_unscored",
+          });
+          if ("completed" in result && result.completed) scored += 1;
         } catch (error) {
           console.error(`Score failed for ${candidateId}`, error);
         }
       }),
     );
   }
+
+  const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
+  await processCanonicalAnalysisBatches();
 
   return { scored, skipped: candidateIds.length - toScore.length };
 }
@@ -483,7 +492,14 @@ export async function scoreUnscoredAcrossJobs(options?: {
   }
 
   try {
-    return await runScoreUnscoredPass(options);
+    const queued = await runScoreUnscoredPass(options);
+    const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
+    const batch = await processCanonicalAnalysisBatches();
+    return {
+      scored: batch.completed,
+      failed: queued.failed + batch.failed,
+      remaining: batch.pending + queued.remaining,
+    };
   } finally {
     await supabaseLock.rpc("release_scoring_lock");
   }
@@ -590,8 +606,12 @@ async function runScoreUnscoredPass(options?: {
               console.error(`Hydrate failed for ${entry.id}`, hydrateError);
             }
           }
-          await scoreCandidate(entry.id, entry.stale ? { replace: true } : undefined);
-          scored += 1;
+          const result = await scoreCandidate(entry.id, {
+            ...(entry.stale ? { replace: true } : {}),
+            transport: "enqueue",
+            trigger: entry.stale ? "scoring_epoch" : "new_candidate",
+          });
+          if ("completed" in result && result.completed) scored += 1;
         } catch (error) {
           failed += 1;
           console.error(`Score failed for ${entry.id}`, error);

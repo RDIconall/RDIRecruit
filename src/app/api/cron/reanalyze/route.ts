@@ -1,35 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env, hasAnthropic, hasSupabase } from "@/lib/env";
 import { getBoardFromSupabase } from "@/lib/data/board-queries";
-import { getWorkingFiles, upsertWorkingFile } from "@/lib/triage/store";
-import { loadOneCandidate } from "@/lib/triage/load";
+import { getWorkingFiles } from "@/lib/triage/store";
 import { assembleGradingInputs, computeReadiness } from "@/lib/triage/readiness";
-import { gradeCandidate } from "@/lib/triage/grade";
-import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
-import type { Candidate, DecisionRead } from "@/lib/triage/types";
+import { scoreCandidate } from "@/lib/scoring/run-score";
+import { processCanonicalAnalysisBatches } from "@/lib/analysis/batch";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
-
-const UPDATED_BY = "Bulk reanalyze (new rubric & spec)";
-
-/** Mirror of the private applyRead in actions/triage.ts: stamp the fresh read onto
- * the mapped candidate so the rendered .md matches the persisted read. */
-function applyRead(candidate: Candidate, read: DecisionRead): Candidate {
-  return {
-    ...candidate,
-    decision: read.decision,
-    why: read.why || candidate.why,
-    flag: read.risk || candidate.flag,
-    next: read.next || candidate.next,
-    redFlags: read.flags ?? candidate.redFlags,
-    reanalysis: read.reanalysis ?? candidate.reanalysis,
-    careerRead: read.careerRead ?? candidate.careerRead,
-    assessment: read.assessment ?? candidate.assessment,
-    assessedAt: read.assessment ? read.recalculatedAt ?? candidate.assessedAt : candidate.assessedAt,
-    rubricFit: read.rubricFit ?? candidate.rubricFit,
-  };
-}
 
 /**
  * Bulk re-derive triage decision reads for a job's pool with the CURRENT
@@ -137,39 +115,17 @@ export async function GET(request: NextRequest) {
     try {
       const inputs = await assembleGradingInputs(id, job!);
       const readiness = computeReadiness(inputs);
-      const one = await loadOneCandidate(id);
-      if (!one) {
-        failed += 1;
+      if (!readiness.ready) {
+        blocked += 1;
         return;
       }
-      const baseContent = renderWorkingFile(one.candidate, one.slice, {
-        workableUrl: one.workableUrl,
-        disqualified: one.disqualified,
+      const result = await scoreCandidate(id, {
+        force: true,
+        replace: true,
+        transport: "enqueue",
+        trigger: "bulk_reanalyze",
       });
-      const result = await gradeCandidate({
-        candidate: one.candidate,
-        jobShortcode: job!,
-        workingFile: baseContent,
-        materials: renderCandidateMaterials(one.candidate),
-        corrections: one.slice.corrections ?? [],
-        transcript: one.slice.transcript ?? "",
-        replies: one.slice.replies ?? {},
-        prepared: { inputs, readiness },
-      });
-      const read = result.read;
-      if (!read) {
-        // Transient Claude failure: leave the prior read untouched, retry next pass.
-        failed += 1;
-        return;
-      }
-      const candidate = applyRead(one.candidate, read);
-      const content = renderWorkingFile(candidate, one.slice, {
-        workableUrl: one.workableUrl,
-        disqualified: one.disqualified,
-      });
-      await upsertWorkingFile(id, { content, read }, UPDATED_BY);
-      if (result.blocked) blocked += 1;
-      else graded += 1;
+      if ("completed" in result && result.completed) graded += 1;
     } catch (error) {
       console.error(`reanalyze: failed for ${id}`, error);
       failed += 1;
@@ -183,6 +139,8 @@ export async function GET(request: NextRequest) {
     const batch = targets.slice(i, i + concurrency);
     await Promise.allSettled(batch.map((id) => regradeOne(id)));
   }
+  const batch = await processCanonicalAnalysisBatches();
+  graded += batch.completed;
 
   return NextResponse.json({
     ok: true,
@@ -197,5 +155,6 @@ export async function GET(request: NextRequest) {
     skippedDisqualified,
     skippedOverride,
     alreadyFresh,
+    batch,
   });
 }

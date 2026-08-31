@@ -212,7 +212,11 @@ export async function recaptureMissingAnswers(options?: {
         hydrate: true,
       });
       result.rehydrated += 1;
-      await scoreCandidate(entry.id, { replace: true });
+      await scoreCandidate(entry.id, {
+        replace: true,
+        transport: "enqueue",
+        trigger: "answers_backfill",
+      });
       result.rescored += 1;
     } catch (err) {
       result.failed += 1;
@@ -225,6 +229,10 @@ export async function recaptureMissingAnswers(options?: {
   }
 
   result.remaining = Math.max(0, queue.length - processed);
+  if (result.rescored > 0) {
+    const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
+    await processCanonicalAnalysisBatches();
+  }
   return result;
 }
 
