@@ -17,10 +17,6 @@
       "schedule": "5-59/10 * * * *"
     },
     {
-      "path": "/api/cron/radar-enrich",
-      "schedule": "*/15 * * * *"
-    },
-    {
       "path": "/api/cron/daily-summary",
       "schedule": "0 14 * * *"
     }

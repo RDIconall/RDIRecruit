@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
 import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
+import { isRadarEnabled } from "./enabled";
 import { EMPTY_CRITERIA, type Pipeline, type SearchCriteria } from "./types";
 
 const MODEL = CLAUDE_JUDGMENT_MODEL;
@@ -103,7 +104,7 @@ export async function planSourcingSearches(input: {
   scorecardMd: string;
 }): Promise<SourcingPlan> {
   const brief = input.brief.trim();
-  if (!hasAnthropic()) return fallbackPlan(input.pipeline, brief);
+  if (!isRadarEnabled() || !hasAnthropic()) return fallbackPlan(input.pipeline, brief);
 
   try {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });

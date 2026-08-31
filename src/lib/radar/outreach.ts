@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
 import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic, publicBaseUrl } from "../env";
+import { isRadarEnabled } from "./enabled";
 import type { OutreachDraft, Pipeline, RadarContact } from "./types";
 
 const MODEL = CLAUDE_JUDGMENT_MODEL;
@@ -56,7 +57,7 @@ export async function draftOutreach(
   pipeline: Pipeline,
   senderName: string,
 ): Promise<OutreachDraft | null> {
-  if (!hasAnthropic()) return null;
+  if (!isRadarEnabled() || !hasAnthropic()) return null;
   try {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
     const response = await client.messages.create({

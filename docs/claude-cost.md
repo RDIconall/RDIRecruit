@@ -19,8 +19,8 @@ prompt and a large structured response:
 | `triage/recalc.ts` | Correction / transcript / deep analysis / bulk reanalyze | Engine rules + methodology + spec + rubric + roster + working file | 4,500 |
 | `triage/chat.ts` | Every war-room chat turn | Working file + materials + rubric + roster, plus history | 1,500 |
 | `resume/parse-resume.ts` | Résumé ingest | Résumé text | 4,000 |
-| `radar/score.ts` | Every unscored sourcing contact (cron, 15 min) | Scorecard + profile | 1,800 |
-| `radar/sourcing.ts` · `radar/outreach.ts` | User action | Small | 1,800 / 1,200 |
+| `radar/score.ts` | Every unscored sourcing contact (cron, 15 min) — **off** | Scorecard + profile | 1,800 |
+| `radar/sourcing.ts` · `radar/outreach.ts` | User action — **off** | Small | 1,800 / 1,200 |
 | `calibration/service.ts` | Reviewer correction | Two calibration docs | 1,500 |
 | `board/summary.ts` | Every scoring batch, per published job | Top six candidates | 400 |
 | `scoring/engine.ts` | Never — unreachable | — | 2,000 |
@@ -137,6 +137,10 @@ model-tier saving.
 
 Grep Vercel logs for `"scope":"claude"` and `scoring.evaluator.batch` to confirm
 automated work is landing on the batch path.
+
+**Talent Radar is off.** The `/api/cron/radar-enrich` schedule is removed and the
+product is gated by `RADAR_ENABLED = false` in `src/lib/radar/enabled.ts`. Existing
+opt-out links at `/api/radar/unsubscribe` still work.
 
 ## What is still on the table
 

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env, hasAnthropic, hasSupabase } from "@/lib/env";
+import { isRadarEnabled } from "@/lib/radar/enabled";
 import { getActiveScorecard, loadContacts, saveScore } from "@/lib/radar/store";
 import { scoreContact } from "@/lib/radar/score";
 import type { Pipeline } from "@/lib/radar/types";
@@ -10,12 +11,17 @@ export const dynamic = "force-dynamic";
 // Background enrichment: scores any not-yet-scored contacts against the active
 // scorecard, time-budgeted so it stays within a serverless invocation. Public
 // route gated by CRON_SECRET (mirrors the other /api/cron/* handlers).
+// Removed from vercel.json while Talent Radar is off; the handler still no-ops
+// if someone hits it manually.
 const BUDGET_MS = 50_000;
 
 export async function GET(request: NextRequest) {
   const authz = request.headers.get("authorization");
   if (env.CRON_SECRET && authz !== `Bearer ${env.CRON_SECRET}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (!isRadarEnabled()) {
+    return NextResponse.json({ ok: true, skipped: "talent_radar_disabled", scored: 0 });
   }
   if (!hasSupabase()) return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
   if (!hasAnthropic()) return NextResponse.json({ ok: true, skipped: "no ANTHROPIC_API_KEY", scored: 0 });

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { hasAnthropic } from "@/lib/env";
 import { csvToRawContacts } from "@/lib/radar/csv";
+import { isRadarEnabled, RADAR_DISABLED_MESSAGE } from "@/lib/radar/enabled";
 import { draftOutreach, unsubscribeFooter } from "@/lib/radar/outreach";
 import { runProviders } from "@/lib/radar/providers";
 import { scoreContact } from "@/lib/radar/score";
@@ -35,6 +36,7 @@ import type {
 } from "@/lib/radar/types";
 
 async function requireAuth(): Promise<string> {
+  if (!isRadarEnabled()) throw new Error(RADAR_DISABLED_MESSAGE);
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
   return userId;

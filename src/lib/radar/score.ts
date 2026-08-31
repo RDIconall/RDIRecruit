@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
 import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
+import { isRadarEnabled } from "./enabled";
 import { computeOverall, dimensionsFor } from "./scorecard";
 import type { Pipeline, RadarContact, ScoreDimension } from "./types";
 
@@ -75,7 +76,7 @@ export async function scoreContact(
   pipeline: Pipeline,
   scorecardMd: string,
 ): Promise<ScoreResult | null> {
-  if (!hasAnthropic()) return null;
+  if (!isRadarEnabled() || !hasAnthropic()) return null;
 
   try {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });

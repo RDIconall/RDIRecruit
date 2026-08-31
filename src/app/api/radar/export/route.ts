@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { hasSupabase } from "@/lib/env";
 import { contactsToCsv } from "@/lib/radar/csv";
+import { isRadarEnabled, RADAR_DISABLED_MESSAGE } from "@/lib/radar/enabled";
 import { loadContacts } from "@/lib/radar/store";
 import type { Pipeline } from "@/lib/radar/types";
 
@@ -10,6 +11,9 @@ export const dynamic = "force-dynamic";
 
 // Authenticated CSV export of the current pipeline/search view.
 export async function GET(request: NextRequest) {
+  if (!isRadarEnabled()) {
+    return NextResponse.json({ error: RADAR_DISABLED_MESSAGE }, { status: 410 });
+  }
   const { userId } = await auth();
   if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!hasSupabase()) return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
