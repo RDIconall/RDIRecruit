@@ -26,6 +26,9 @@ npm-debug.log*
 # Vercel
 .vercel
 
+# Supabase CLI connection/build metadata
+supabase/.temp/
+
 # TypeScript
 next-env.d.ts
 *.tsbuildinfo
