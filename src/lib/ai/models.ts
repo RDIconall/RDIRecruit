@@ -10,10 +10,9 @@ import { env } from "../env";
  *   candidate evaluation, the triage decision read, the live candidate chat, the
  *   sourcing score. The quality of these reads IS the product, so they run on the
  *   strongest general model we're willing to pay for.
- * - `extraction` — mechanical structure-from-text and short editorial copy:
- *   pulling a dated chronology out of résumé text, distilling one reviewer note
- *   into one rule, writing a two-sentence pipeline paragraph. There is no hiring
- *   judgment in these; they are half the price on Haiku and fast.
+ * - `extraction` — mechanical structure-from-text work such as distilling one
+ *   reviewer note into one durable calibration rule. There is no hiring judgment
+ *   in these calls; they are half the price on Haiku and fast.
  *
  * Both are overridable per deploy (CLAUDE_MODEL_JUDGMENT / CLAUDE_MODEL_EXTRACTION)
  * so a model can be pinned or rolled back without shipping a release.

@@ -59,7 +59,7 @@ It is gated behind Clerk auth and runs entirely server-side, so the API key neve
 | `src/app/actions/triage.ts` | Server actions: persist edits, disqualify, recalculate, download `.md` |
 | `src/lib/data/` | Board/overlay queries (`board`, `board-queries`, `overlay`) reused as the data layer |
 | `src/lib/workable/` | Workable client + link helpers (reused connector) |
-| `supabase/migrations/` | `001`–`008` original schema; **`009_working_files.sql`** adds `candidate_working_files` (additive) |
+| `supabase/migrations/` | Additive schema history, including working files and the durable canonical Claude analysis/batch queue |
 | `src/app/api/` | Workable webhook, cron reconcile/migrate, Fireflies/Gmail ingest, candidate resume (preserved server infra) |
 | `archive/` | Previous scoring-centric UI, components, and docs |
 

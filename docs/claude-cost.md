@@ -48,19 +48,19 @@ paid full input price for the same several thousand tokens 200 times over.
 
 **Model tier.** Everything ran on `claude-sonnet-4-6` at $3/$15 per MTok, now a
 legacy generation. Judgment calls move to `claude-sonnet-5` at $2/$10 — a third
-cheaper for the same work. Résumé chronology parsing and calibration-note
-distilling carry no hiring judgment, so they move to `claude-haiku-4-5` at $1/$5.
+cheaper for the same work. Calibration-note distilling carries no hiring judgment,
+so it moves to `claude-haiku-4-5` at $1/$5. Résumé chronology is reshaped
+deterministically from Workable's fields; the canonical analysis already reads the
+full résumé, so a separate parsing call bought no additional hiring judgment.
 All model IDs now resolve through `src/lib/ai/models.ts` and can be pinned per
 deploy with `CLAUDE_MODEL_JUDGMENT` / `CLAUDE_MODEL_EXTRACTION`.
 
 **Prompt caching of everything job-level.** The evaluator now sends two cached
 prefix blocks — the global method doc (identical across every job, so it stays warm
 for a whole run) then the seat brief (identical across every candidate on a seat).
-The triage recalc does the same with methodology + spec + rubric + roster, about
-7,000 tokens that were previously fresh on every single re-analysis. Only the
-candidate's own file is billed at full input price. The chat marks its final turn
-so a long conversation reads its own history back at a tenth of the price instead
-of re-paying for it each turn.
+Only the candidate's own file is billed at full input price. The chat marks its
+final turn so a long conversation reads its own history back at a tenth of the
+price instead of re-paying for it each turn.
 
 **Output trimmed to what is read.** The dead fields above are gone from the
 requested schema. Answer grades now carry only the question key and the UI joins
@@ -81,6 +81,27 @@ was in `archive/legacy-ui` — excluded from `tsconfig` and not routed by Next, 
 the paragraph was never displayed. `scoring/engine.ts` held a second Claude call
 from the retired feature-extraction path with no importer anywhere in the repo.
 
+**One canonical candidate analysis.** The evaluator now also returns the
+founder-facing decision prose, assessment and rubric read. The old
+`triage/recalc.ts` second full-candidate call is gone. A normalized result is
+written once to `candidate_analyses`, then projected into the compatibility tables
+(`scores`, `evaluations`, `ro_assessments`, `candidate_overlay`) and
+`candidate_working_files`. Every surface therefore derives from one response.
+
+**Supabase fingerprint deduplication.** The canonical row is unique on candidate
+plus a SHA-256 fingerprint of the model, source materials, evidence, human
+corrections, active methodology, rubric and calibration. Duplicate Workable
+events, repeated cron passes and repeated buttons reuse a completed or in-flight
+row. New interview evidence legitimately creates one new analysis version.
+
+**Message Batches for automated work.** Initial analysis, scoring-epoch refreshes,
+bulk rubric recomputes, résumé-answer backfills and evidence webhooks enqueue
+durable rows and submit them through Anthropic Message Batches at 50% pricing.
+`claude_batches` holds the provider lifecycle so the ten-minute cron can submit,
+return, then poll and stream results in a later invocation. A result is durable
+before projections run; if a projection fails, the next cron replays it without
+another Claude call.
+
 ## Estimated effect
 
 Per-call estimates for a typical candidate (résumé ~12k characters, six answers, a
@@ -88,14 +109,15 @@ populated rubric and calibration, no interview transcript):
 
 | Path | Before | After | Change |
 | --- | --- | --- | --- |
-| Candidate evaluation | ~$0.12 | ~$0.046 | −60% |
-| Triage decision read | ~$0.088 | ~$0.046 | −48% |
-| Résumé parse | ~$0.038 | ~$0.013 | −67% |
+| Canonical candidate analysis (interactive) | ~$0.21 across two calls | ~$0.055 in one call | −74% |
+| Canonical candidate analysis (batch) | ~$0.21 across two calls | ~$0.028 in one batch request | −87% |
+| Résumé parse | ~$0.038 | $0 | −100% |
 | Board summary (per job, per batch) | ~$0.005 | $0 | −100% |
 
-End to end, a new applicant arriving from Workable cost about $0.16 in parse plus
-evaluation and now costs about $0.06. A bulk reanalyze of a 200-candidate pool
-drops from roughly $18 to roughly $9.
+End to end, a new applicant arriving from Workable cost about $0.16 before anyone
+opened the deep read, and roughly $0.25 after the second read. It now costs roughly
+$0.03 in the automated batch path. A bulk reanalyze of a 200-candidate pool drops
+from roughly $18 to roughly $5.50.
 
 The caching gain scales with batch size and is close to zero for a single isolated
 call — the first candidate in a pass pays a 1.25x write premium and every candidate
@@ -104,34 +126,11 @@ regardless.
 
 ## What is still on the table
 
-Ordered by size of the remaining prize.
-
-**Batch API, for another 50%.** The two bulk paths — `scoreUnscoredAcrossJobs` and
-`/api/cron/reanalyze` — are already asynchronous, time-budgeted and resumable,
-which is exactly the shape the Message Batches API wants. Batch requests are half
-price and stack with caching. This is the largest remaining lever and the reason it
-was not done here: it needs a submit/poll/persist loop rather than a synchronous
-call, so it is a real change to `workable-sync.ts` and the reanalyze route.
-
-**Consolidate the two full candidate reads.** `scoring/evaluator.ts` and
-`triage/recalc.ts` are both complete reads of the same candidate against the same
-rubric, producing overlapping narratives. Today they fire from different triggers
-so nothing pays for both automatically, but running deep analysis on a
-freshly-synced candidate does pay both. Merging them would remove the larger of the
-two calls outright, and would also remove a real source of disagreement between the
-score-derived decision and the working-file read.
-
-**Coalesce evidence-triggered re-scores.** `rescoreCandidateOnNewEvidence` runs a
-full re-evaluation with `force: true, replace: true` from four separate triggers
-(interview paste, async-video action, Fireflies webhook, VideoAsk webhook). A
-VideoAsk webhook plus the Fireflies transcript for the same interview means two
-full evaluations minutes apart. A short debounce keyed on candidate id, or a dirty
-flag drained by the existing cron, would roughly halve this path.
-
-**One-hour cache TTL on bulk passes.** The five-minute cache is refreshed on every
-read, so a continuous batch stays warm — but a pass that stalls on rate limits
-re-writes the whole prefix. A one-hour TTL costs 2x on the write and the same 0.1x
-on reads, which is cheaper for any pass that runs longer than a few minutes.
+**One-hour cache TTL on large batches.** The five-minute cache is refreshed on
+every read, but Anthropic does not guarantee batch request execution order or
+spacing. A one-hour TTL costs 2x on the first write and the same 0.1x on reads.
+Usage logs now show `cacheRead`, so this should be enabled only if production data
+shows batch requests missing the five-minute cache.
 
 **Confirm `score_inputs` is still wanted.** The `claims` array is still generated
 with verbatim supporting quotes, and it is read only by a legacy candidate-detail
