@@ -129,23 +129,6 @@ export async function incrementalSync(mode: SyncMode = "incremental"): Promise<S
     const batch = await scoreUnscoredAcrossJobs({ budgetMs });
     result.scored += batch.scored;
     result.remaining = batch.remaining;
-
-    // 3) Refresh the editorial board summary for jobs whose reads just changed.
-    if (batch.scored > 0 && hasSupabase()) {
-      try {
-        const { regenerateBoardSummary } = await import("../board/summary");
-        const supabase = getServiceSupabase();
-        const { data: jobs } = await supabase
-          .from("jobs")
-          .select("shortcode, title")
-          .eq("status", "published");
-        for (const job of jobs ?? []) {
-          await regenerateBoardSummary(job.shortcode as string, job.title as string | undefined);
-        }
-      } catch (error) {
-        console.error("Board summary refresh failed", error);
-      }
-    }
   }
 
   await writeSyncState("last_incremental", {
@@ -185,22 +168,6 @@ export async function rescoreOnly(budgetMs = 240_000): Promise<{ scored: number;
   // rate limits. With the delete-after-eval fix a rate-limited candidate simply
   // keeps its prior score and is retried next pass, so failures are harmless.
   const batch = await scoreUnscoredAcrossJobs({ budgetMs, concurrency: 10 });
-
-  if (batch.scored > 0) {
-    try {
-      const { regenerateBoardSummary } = await import("../board/summary");
-      const supabase = getServiceSupabase();
-      const { data: jobs } = await supabase
-        .from("jobs")
-        .select("shortcode, title")
-        .eq("status", "published");
-      for (const job of jobs ?? []) {
-        await regenerateBoardSummary(job.shortcode as string, job.title as string | undefined);
-      }
-    } catch (error) {
-      console.error("Board summary refresh failed", error);
-    }
-  }
 
   return { scored: batch.scored, remaining: batch.remaining };
 }
