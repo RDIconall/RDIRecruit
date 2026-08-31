@@ -7,6 +7,7 @@ import { getServiceSupabase } from "../supabase/server";
 import { parseEvaluatorMessage } from "../scoring/evaluator";
 import { scoreCandidate } from "../scoring/run-score";
 import { batchRequestForAnalysis } from "./batch-request";
+import { isDefiniteBatchRejection } from "./batch-policy";
 import {
   completeCandidateAnalysis,
   claimCandidateAnalysis,
@@ -237,34 +238,53 @@ async function submitPending(client: Anthropic): Promise<number> {
   } catch (error) {
     await Promise.all(
       reserved.map((row) =>
-        markAnalysisUncertain(row.id, error instanceof Error ? error.message : String(error)),
+        isDefiniteBatchRejection(error)
+          ? failCandidateAnalysis(row.id, error instanceof Error ? error.message : String(error))
+          : markAnalysisUncertain(row.id, error instanceof Error ? error.message : String(error)),
       ),
     );
     throw error;
   }
 
-  const now = new Date().toISOString();
-  const { error: batchError } = await supabase.from("claude_batches").insert({
-    id: batch.id,
-    status: batch.processing_status,
-    request_count: reserved.length,
-    request_counts: batch.request_counts,
-    created_at: batch.created_at,
-    expires_at: batch.expires_at,
-    ended_at: batch.ended_at,
-    updated_at: now,
-  });
-  if (batchError) throw new Error(`Failed to persist Claude batch: ${batchError.message}`);
-
-  const { data: attached, error } = await supabase.rpc("attach_candidate_analyses_to_batch", {
-    p_batch_id: batch.id,
-    p_analysis_ids: reserved.map((row) => row.id),
-  });
-  if (error) throw new Error(`Failed to attach analyses to Claude batch: ${error.message}`);
-  if (Number(attached) !== reserved.length) {
-    throw new Error(`Attached ${attached ?? 0}/${reserved.length} analyses to Claude batch ${batch.id}`);
+  let persistError: unknown = null;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const now = new Date().toISOString();
+      const { error: batchError } = await supabase.from("claude_batches").upsert({
+        id: batch.id,
+        status: batch.processing_status,
+        request_count: reserved.length,
+        request_counts: batch.request_counts,
+        created_at: batch.created_at,
+        expires_at: batch.expires_at,
+        ended_at: batch.ended_at,
+        updated_at: now,
+      });
+      if (batchError) throw batchError;
+      const { data: attached, error } = await supabase.rpc("attach_candidate_analyses_to_batch", {
+        p_batch_id: batch.id,
+        p_analysis_ids: reserved.map((row) => row.id),
+      });
+      if (error) throw error;
+      if (Number(attached) !== reserved.length) {
+        throw new Error(`Attached ${attached ?? 0}/${reserved.length} analyses`);
+      }
+      return Number(attached);
+    } catch (error) {
+      persistError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250 * 2 ** attempt));
+    }
   }
-  return Number(attached);
+
+  // Anthropic accepted the purchase but its id could not be made durable. Cancel
+  // best-effort and quarantine the fingerprints; never automatically resubmit an
+  // ambiguous accepted batch.
+  await client.messages.batches.cancel(batch.id).catch(() => undefined);
+  const detail = `Provider batch ${batch.id} accepted but local persistence failed: ${
+    persistError instanceof Error ? persistError.message : String(persistError)
+  }`;
+  await Promise.all(reserved.map((row) => markAnalysisUncertain(row.id, detail)));
+  throw new Error(detail);
 }
 
 /**

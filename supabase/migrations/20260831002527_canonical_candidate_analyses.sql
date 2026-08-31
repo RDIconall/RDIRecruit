@@ -126,7 +126,12 @@ begin
    where id = any(p_analysis_ids)
      and batch_id is null
      and status = 'processing';
-  get diagnostics attached = row_count;
+  select count(*)::integer
+    into attached
+    from public.candidate_analyses
+   where id = any(p_analysis_ids)
+     and batch_id = p_batch_id
+     and status = 'submitted';
   return attached;
 end;
 $$;
