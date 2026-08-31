@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env } from "@/lib/env";
+import { applyPendingMigrations } from "@/lib/db/apply-migrations";
 import { incrementalSync, rescoreOnly } from "@/lib/sync/incremental-sync";
 
+export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
@@ -16,6 +18,12 @@ export async function GET(request: NextRequest) {
   const scoreOnly = request.nextUrl.searchParams.get("scoreOnly") === "1";
 
   try {
+    // Schema must exist before enqueue/batch work. Cheap when already applied.
+    try {
+      await applyPendingMigrations();
+    } catch (error) {
+      console.error("Reconcile could not apply pending migrations", error);
+    }
     if (scoreOnly) {
       const result = await rescoreOnly();
       return NextResponse.json({ ok: true, mode: "scoreOnly", ...result });

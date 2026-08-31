@@ -485,10 +485,13 @@ export async function scoreUnscoredAcrossJobs(options?: {
   });
   if (lockError) {
     console.error("Failed to acquire scoring lock", lockError);
-    return { scored: 0, failed: 0, remaining: 0 };
   }
-  if (!claimed) {
-    return { scored: 0, failed: 0, remaining: 0 };
+  if (lockError || !claimed) {
+    // Still drain Message Batches so an overlapping Workable pass cannot strand
+    // pending fingerprints on the more expensive synchronous path.
+    const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
+    const batch = await processCanonicalAnalysisBatches();
+    return { scored: batch.completed, failed: batch.failed, remaining: batch.pending };
   }
 
   try {

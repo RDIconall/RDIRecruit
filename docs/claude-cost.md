@@ -124,6 +124,20 @@ call — the first candidate in a pass pays a 1.25x write premium and every cand
 after it reads at 0.1x. The output trim and the model change apply to every call
 regardless.
 
+## Production
+
+`candidate_analyses` and `claude_batches` must exist before automated scoring can
+use Message Batches. Apply additive SQL through `/api/cron/migrate` (now on the
+Vercel schedule) or the same helper at the start of reconcile. Do **not** bump a
+scoring epoch to “activate” this — that would re-purchase every existing read.
+
+Leave `CLAUDE_MODEL_JUDGMENT` / `CLAUDE_MODEL_EXTRACTION` unset so production
+stays on Sonnet 5 / Haiku 4.5. Pinning the old Sonnet 4.6 ids would undo the
+model-tier saving.
+
+Grep Vercel logs for `"scope":"claude"` and `scoring.evaluator.batch` to confirm
+automated work is landing on the batch path.
+
 ## What is still on the table
 
 **One-hour cache TTL on large batches.** The five-minute cache is refreshed on
