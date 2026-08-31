@@ -1,5 +1,7 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
+import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
 import { computeCommute } from "./commute";
 import { gradeLog } from "./grade-log";
@@ -7,7 +9,7 @@ import type { RosterEntry } from "./load";
 import { detectPipelinePhase, nextActionForPhase } from "./pipeline-phase";
 import type { AssessmentNarrative, CareerRead, CorrectionEntry, Candidate, Decision, DecisionRead, ReviewerKind, RubricFit, ValueRead } from "./types";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = CLAUDE_JUDGMENT_MODEL;
 
 // The RDI office candidates commute to (configurable via env, single source).
 // Used to ground Claude's fallback commute estimate.
@@ -90,6 +92,47 @@ The "careerRead" object is optional context — include it when you have enough 
 The "assessment" object MUST ALWAYS be included — it is the written candidate brief the recruiter reads. Ground every claim in the supplied materials (résumé, cover letter, answers, transcript). Prose only, never a numeric score.
 The "rubricFit" object MUST be included whenever a JOB RUBRIC and/or a ROLE SPEC is provided below. Grade strictly against the JOB RUBRIC's categories, hard gates, and pattern-recognition guidance when one is provided; when there is NO separate rubric, the ROLE SPEC is the grading basis — judge fit against the spec's responsibilities and requirements instead. Translate any point bands into the words-only verdict — NEVER output a numeric score. Omit "rubricFit" only when NEITHER a rubric nor a role spec is provided.`;
 
+/**
+ * The job-level half of the prompt: the org's methodology, this role's spec and
+ * rubric, and the pool roster. It is the same text for every candidate in a job —
+ * roughly 28k characters of it — so it goes into the cached system prefix instead
+ * of being re-sent as fresh input on every single re-analysis. A bulk pass over a
+ * pool pays for it once and then reads it at a tenth of the price.
+ *
+ * Nothing candidate-specific may go in here, or the cache stops hitting. The
+ * roster is the one judgement call: it changes when any candidate's decision
+ * changes, but it is identical across the candidates of one pass, which is exactly
+ * where the repetition was.
+ */
+function buildJobContextBlock(input: RecalcInput): string {
+  const rubricBlock = (input.rubric || "").trim()
+    ? `\n\nJOB RUBRIC (grade this candidate strictly against this — fill the "rubricFit" object):\n"""\n${input.rubric!.trim().slice(0, 7000)}\n"""`
+    : "";
+
+  const specBlock = (input.jobSpec || "").trim()
+    ? `\n\nROLE SPEC (what this job actually is):\n"""\n${input.jobSpec!.trim().slice(0, 3000)}\n"""`
+    : "";
+
+  const methodBlock = (input.methodology || "").trim()
+    ? `\n\nHOW WE HIRE (the org's evaluation methodology — reason exactly the way this says to):\n"""\n${input.methodology!.trim().slice(0, 9000)}\n"""`
+    : "";
+
+  const roster = input.poolRoster ?? [];
+  const rosterBlock = roster.length
+    ? `\n\nPOOL ROSTER (every OTHER active candidate in this job — your call is RELATIVE to these):\n${roster
+        .map(
+          (r) =>
+            `- ${r.name} — ${r.role || "—"}${r.company ? ` @ ${r.company}` : ""} · ${r.experience || "—"} · RO ${r.roLevel || "—"} · current call: ${r.decision}${r.why ? ` — ${r.why.slice(0, 160)}` : ""}`,
+        )
+        .join("\n")
+        .slice(0, 9000)}`
+    : "";
+
+  const body = `${methodBlock}${specBlock}${rubricBlock}${rosterBlock}`;
+  if (!body.trim()) return "";
+  return `SHARED CONTEXT FOR THIS SEAT — the same methodology, spec, rubric, and pool for every candidate on this job.${body}`;
+}
+
 function buildUserPrompt(input: RecalcInput): string {
   const { candidate, corrections, transcript, replies, workingFile } = input;
 
@@ -118,31 +161,8 @@ function buildUserPrompt(input: RecalcInput): string {
   const reps = Object.entries(replies).filter(([, v]) => v);
   const repsText = reps.length ? reps.map(([k, v]) => `- (${k}) ${v}`).join("\n") : "none";
 
-  const rubricBlock = (input.rubric || "").trim()
-    ? `\n\nJOB RUBRIC (grade this candidate strictly against this — fill the "rubricFit" object):\n"""\n${input.rubric!.trim().slice(0, 7000)}\n"""`
-    : "";
-
-  const specBlock = (input.jobSpec || "").trim()
-    ? `\n\nROLE SPEC (what this job actually is):\n"""\n${input.jobSpec!.trim().slice(0, 3000)}\n"""`
-    : "";
-
   const materialsBlock = (input.materials || "").trim()
     ? `\n\nVERBATIM SOURCE MATERIALS (the candidate's own words — quote/ground the bio, AI-use read, and writing-consistency read in these):\n"""\n${input.materials!.trim().slice(0, 18000)}\n"""`
-    : "";
-
-  const methodBlock = (input.methodology || "").trim()
-    ? `\n\nHOW WE HIRE (the org's evaluation methodology — reason exactly the way this says to):\n"""\n${input.methodology!.trim().slice(0, 9000)}\n"""`
-    : "";
-
-  const roster = input.poolRoster ?? [];
-  const rosterBlock = roster.length
-    ? `\n\nPOOL ROSTER (every OTHER active candidate in this job — your call is RELATIVE to these):\n${roster
-        .map(
-          (r) =>
-            `- ${r.name} — ${r.role || "—"}${r.company ? ` @ ${r.company}` : ""} · ${r.experience || "—"} · RO ${r.roLevel || "—"} · current call: ${r.decision}${r.why ? ` — ${r.why.slice(0, 160)}` : ""}`,
-        )
-        .join("\n")
-        .slice(0, 9000)}`
     : "";
 
   const phase = detectPipelinePhase({
@@ -195,9 +215,9 @@ REVIEWER REPLIES TO PRIOR AI COMMENTS:
 ${repsText}
 
 INTERVIEW / SCREEN TRANSCRIPT (post-application — weight heavily when present; decisive in POST-INTERVIEW):
-${(transcript || "none yet").slice(0, 24000)}${materialsBlock}${methodBlock}${specBlock}${rubricBlock}${rosterBlock}
+${(transcript || "none yet").slice(0, 24000)}${materialsBlock}
 
-Re-derive the decision read now for the PIPELINE PHASE above. If the human corrections or the transcript change the picture, change the decision accordingly. Position the call relative to the pool roster. Remember: decision vocabulary only, never a number.`;
+Re-derive the decision read now for the PIPELINE PHASE above, grading against the SHARED CONTEXT FOR THIS SEAT given earlier. If the human corrections or the transcript change the picture, change the decision accordingly. Position the call relative to the pool roster. Remember: decision vocabulary only, never a number.`;
 }
 
 export interface RecalcInput {
@@ -303,6 +323,7 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
 
   try {
     const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+    const jobContext = buildJobContextBlock(input);
     const response = await client.messages.create({
       model: MODEL,
       // Headroom: the read carries careerRead + rubricFit + the long-form written
@@ -310,8 +331,28 @@ export async function recalculateRead(input: RecalcInput): Promise<DecisionRead 
       // alone can run several hundred words, so give the JSON room to complete —
       // a truncated response breaks the parse and silently drops the re-analysis.
       max_tokens: 4500,
-      system: [{ type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } }],
+      // Two cached prefix blocks: the static decision-engine rules, then the
+      // seat's methodology + spec + rubric + roster. Both are identical across the
+      // candidates of a pass, so only this candidate's own file is fresh input.
+      system: [
+        { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+        ...(jobContext
+          ? [
+              {
+                type: "text" as const,
+                text: jobContext,
+                cache_control: { type: "ephemeral" as const },
+              },
+            ]
+          : []),
+      ],
       messages: [{ role: "user", content: buildUserPrompt(input) }],
+    });
+
+    logClaudeUsage("triage.recalc", MODEL, response.usage, {
+      candidateId: input.candidate.id,
+      pool: (input.poolRoster ?? []).length,
+      stopReason: response.stop_reason ?? null,
     });
 
     if (response.stop_reason === "max_tokens") {

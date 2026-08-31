@@ -1,10 +1,12 @@
 import "server-only";
 import Anthropic from "@anthropic-ai/sdk";
+import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
+import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
 import type { PipelinePhase } from "./pipeline-phase";
 import type { ChatMessage } from "./types";
 
-const MODEL = "claude-sonnet-4-6";
+const MODEL = CLAUDE_JUDGMENT_MODEL;
 
 const SHARED_RULES = `You are a senior recruiting partner inside RDI Trials' candidate tool, talking live with the hiring team (e.g. Conall or Lara) about ONE specific candidate (the FOCUS candidate). You are sharp, candid, and genuinely useful — a thinking partner, not a cheerleader.
 
@@ -65,6 +67,14 @@ const TOOLS: Anthropic.Tool[] = [
 const MAX_TOOL_ROUNDS = 4;
 const FETCHED_MATERIALS_CAP = 30000;
 
+/**
+ * The whole conversation is re-sent on every turn, so an all-afternoon war-room
+ * thread would bill its own history again and again. Keep the recent turns — which
+ * is what the human is actually referring to — and let the working file (already in
+ * the cached context block) carry the durable record.
+ */
+const MAX_HISTORY_MESSAGES = 24;
+
 function buildContextBlock(input: {
   candidateName?: string;
   workingFile: string;
@@ -96,11 +106,29 @@ ${(input.workingFile || "(empty)").slice(0, 16000)}
 
 /** Ensure the message list the API sees starts on a user turn and alternates cleanly. */
 function normalizeHistory(history: ChatMessage[]): { role: "user" | "assistant"; content: string }[] {
-  const trimmed = [...history];
+  const trimmed = history.filter((m) => m.content.trim()).slice(-MAX_HISTORY_MESSAGES);
   while (trimmed.length && trimmed[0].role !== "user") trimmed.shift();
-  return trimmed
-    .filter((m) => m.content.trim())
-    .map((m) => ({ role: m.role, content: m.content }));
+  return trimmed.map((m) => ({ role: m.role, content: m.content }));
+}
+
+/**
+ * Put a cache breakpoint on the final turn so the next message in the conversation
+ * reads the history back at a tenth of the input price instead of re-paying for it.
+ */
+function withConversationCacheBreakpoint(
+  messages: Anthropic.MessageParam[],
+): Anthropic.MessageParam[] {
+  const last = messages.at(-1);
+  if (!last || typeof last.content !== "string") return messages;
+  return [
+    ...messages.slice(0, -1),
+    {
+      role: last.role,
+      content: [
+        { type: "text", text: last.content, cache_control: { type: "ephemeral" } },
+      ] as Anthropic.TextBlockParam[],
+    },
+  ];
 }
 
 /**
@@ -132,8 +160,9 @@ export async function chatWithClaude(input: {
 }): Promise<string | null> {
   if (!hasAnthropic()) return null;
 
-  const messages: Anthropic.MessageParam[] = normalizeHistory(input.history);
-  if (!messages.length) return null;
+  const history = normalizeHistory(input.history);
+  if (!history.length) return null;
+  const messages: Anthropic.MessageParam[] = withConversationCacheBreakpoint(history);
 
   const canRetrieve = Boolean(input.fetchOtherCandidate && (input.roster || "").trim());
   const phase: PipelinePhase = input.phase ?? "triage";
@@ -157,6 +186,13 @@ export async function chatWithClaude(input: {
         system,
         messages,
         ...(canRetrieve ? { tools: TOOLS } : {}),
+      });
+
+      logClaudeUsage("triage.chat", MODEL, response.usage, {
+        phase,
+        round,
+        turns: history.length,
+        stopReason: response.stop_reason ?? null,
       });
 
       lastText =
