@@ -5,7 +5,7 @@
 
 **Canonical spec:** `spec/` now holds the **true triage handoff** — `spec/HANDOFF.md`, `spec/RDIRecruit (standalone).html`, and `spec/RDIRecruit.dc.html` (the ~108KB triage source with the Cut list, decision vocabulary, `buildMd`, and candidate page). The earlier ~82KB `spec/RDIRecruit.dc.html` was a stale legacy scoring mock and has been overwritten; `spec/README.md` marks the triage files canonical and the old `RDIRecruit_Build_Spec.md` legacy. This makes external review accurate.
 
-**Stack:** Next.js 16 (App Router) on Vercel · React 19 · TypeScript · Clerk (auth) · Supabase (Postgres) · Anthropic SDK (`claude-sonnet-4-6`, server-side only).
+**Stack:** Next.js 16 (App Router) on Vercel · React 19 · TypeScript · Clerk (auth) · Supabase (Postgres) · Anthropic SDK (server-side only; models resolve through `src/lib/ai/models.ts` — see `docs/claude-cost.md`).
 
 **The one hard rule that shapes the whole UI:** the triage product speaks **decision vocabulary only** — `Interview first · Short screen · Verify first · Hold · Cut · Review blocked`. There are **no numeric scores, tiers, points, percentages, or grades anywhere in the UI**. The `scores` table still exists and is used *internally* to pick a decision bucket, but no score value is ever placed in a field that reaches a screen.
 
