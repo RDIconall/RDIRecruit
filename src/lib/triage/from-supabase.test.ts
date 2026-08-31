@@ -344,4 +344,66 @@ const lowAndWeak = deriveDecisionDetail(
 );
 assert.equal(lowAndWeak.decision, "reject");
 
+// --- Answer text is joined from the application, not echoed by the model -------
+// The evaluator no longer repeats each answer back verbatim (that was paying
+// output rates to copy text we already store). The grade carries only the
+// question key, so the displayed answer has to be resolved from
+// applications.answers.
+const QUESTION = "How would you handle a missing source document?";
+const STORED_ANSWER = "I would escalate to the study lead and log the deviation.";
+
+function gradeWithoutAnswer(): AnswerGradePayload {
+  const { answer: _dropped, ...rest } = grade("OWNED");
+  return rest;
+}
+
+const joinedAnswers = mapCandidate(
+  input({
+    application: { answers: { [QUESTION]: STORED_ANSWER }, cover_letter: null, parsed_experience: [] },
+    evals: { ...input().evals, answerGrades: [gradeWithoutAnswer()] },
+  }),
+).answers;
+assert.equal(joinedAnswers.length, 1);
+assert.equal(joinedAnswers[0].q, QUESTION);
+assert.equal(joinedAnswers[0].a, STORED_ANSWER);
+
+// Claude rarely reproduces a key byte-for-byte, so matching tolerates case,
+// whitespace, and trailing punctuation drift.
+const fuzzyJoined = mapCandidate(
+  input({
+    application: {
+      answers: { "  How   would you handle a missing source document  ": STORED_ANSWER },
+      cover_letter: null,
+      parsed_experience: [],
+    },
+    evals: { ...input().evals, answerGrades: [gradeWithoutAnswer()] },
+  }),
+).answers;
+assert.equal(fuzzyJoined[0].a, STORED_ANSWER);
+
+// Rows written before the change still render: the stored echo is the fallback
+// when no application answer matches.
+const legacyEcho = mapCandidate(
+  input({
+    application: { answers: { "An unrelated question": "unrelated" }, cover_letter: null, parsed_experience: [] },
+    evals: { ...input().evals, answerGrades: [grade("OWNED")] },
+  }),
+).answers;
+assert.equal(legacyEcho[0].a, grade("OWNED").answer);
+
+// A dash-filled application is still detected as a refusal once the text comes
+// from the application rather than the grade payload.
+const refused = deriveDecisionDetail(
+  input({
+    score: score(88),
+    application: {
+      answers: { [QUESTION]: "—", "Why this role?": "-", "Salary expectation?": "n/a" },
+      cover_letter: null,
+      parsed_experience: [],
+    },
+    evals: { ...input().evals, answerGrades: [gradeWithoutAnswer()] },
+  }),
+);
+assert.equal(refused.decision, "reject");
+
 console.log("from-supabase.test.ts: ok");

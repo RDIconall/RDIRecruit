@@ -294,7 +294,12 @@ export interface VerificationPayload {
 /** answer_grade evaluation — one per screening answer. */
 export interface AnswerGradePayload {
   question: string;
-  answer: string;
+  /**
+   * The answer text, only present on rows written before the evaluator stopped
+   * echoing answers back verbatim. Current rows key off `question` and the text is
+   * joined from `applications.answers` at read time.
+   */
+  answer?: string;
   verdict: AnswerVerdict;
   answerQuality?: AnswerQuality;
   answerProvenance?: AnswerProvenance;

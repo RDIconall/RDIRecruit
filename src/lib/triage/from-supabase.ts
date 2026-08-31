@@ -497,7 +497,10 @@ export function refusedToAnswerFrom(
       if (typeof v === "string") values.push(v);
     }
   }
-  if (!values.length && grades.length) values.push(...grades.map((g) => g.answer ?? ""));
+  if (!values.length && grades.length) {
+    const resolve = answerTextResolver(application);
+    values.push(...grades.map((g) => resolve(g) ?? ""));
+  }
   if (!values.length) return false;
   const refused = values.filter(looksRefused).length;
   return refused >= Math.max(1, Math.ceil(values.length / 2));
@@ -509,11 +512,49 @@ function verdictOf(raw: string | undefined): AnswerRow["verdict"] | undefined {
   return undefined;
 }
 
+/** Case, whitespace, and trailing-punctuation insensitive form of a question key. */
+function answerKey(question: string): string {
+  return question
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .replace(/[\s?.:*!]+$/, "")
+    .trim();
+}
+
+/**
+ * Resolve each grade's answer text from `applications.answers`.
+ *
+ * The evaluator used to echo every answer back verbatim inside its JSON, which
+ * meant paying output-token rates to copy text already sitting in Supabase. It now
+ * returns only the question key, so we join here. Grades written before that
+ * change still carry `answer`, and that is the fallback when no key matches.
+ */
+function answerTextResolver(
+  application: ApplicationLite | null,
+): (grade: AnswerGradePayload) => string | undefined {
+  const raw = application?.answers;
+  const byKey = new Map<string, string>();
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [q, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (typeof v === "string" && v.trim()) byKey.set(answerKey(q), v);
+    }
+  }
+  return (grade) => {
+    const question = (grade.question ?? "").trim();
+    if (question) {
+      const exact = byKey.get(answerKey(question));
+      if (exact) return exact;
+    }
+    return grade.answer?.trim() || undefined;
+  };
+}
+
 function answersFrom(
   grades: AnswerGradePayload[],
   application: ApplicationLite | null,
 ): AnswerRow[] {
   if (grades.length) {
+    const resolve = answerTextResolver(application);
     return grades.map((g) => {
       const verdict = verdictOf(g.verdict);
       // Only OWNED answers may carry concept chips — SURFACE "procedural logic"
@@ -524,7 +565,7 @@ function answersFrom(
           : undefined;
       return {
         q: g.question || "Application answer",
-        a: g.answer || "—",
+        a: resolve(g) || "—",
         comment: [g.note, g.provenanceNote].filter(Boolean).join(" ") || undefined,
         present: present?.length ? present : undefined,
         verdict,
