@@ -15,6 +15,10 @@ const envSchema = z.object({
   DATABASE_URL: z.string().optional(),
   SUPABASE_DB_URL: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
+  // Model pins for the two Claude tiers (see lib/ai/models.ts). Optional: unset
+  // uses the defaults there. Set these to roll a model back without a release.
+  CLAUDE_MODEL_JUDGMENT: z.string().optional(),
+  CLAUDE_MODEL_EXTRACTION: z.string().optional(),
   CRON_SECRET: z.string().optional(),
   // Outbound email (SMTP) for the daily applicant summary. Defaults are tuned
   // for Google Workspace / Gmail with an app password, so the summary is sent
