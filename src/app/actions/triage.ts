@@ -202,7 +202,8 @@ async function persistAndMaybeRecalc(
   if (opts.recalc && blocked && read?.missingInputs?.length) {
     message = `Saved. Review blocked — waiting on ${describeMissing(read.missingInputs)} before a read can be made.`;
   } else if (opts.recalc && !read) {
-    message = "Saved. Claude re-analysis unavailable (no API key or transient error).";
+    message =
+      "Saved. Analysis is queued or already in progress; the current read stays in place until it completes.";
   }
 
   return {

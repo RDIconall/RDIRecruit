@@ -8,16 +8,29 @@ function decisionFor(evaluation: EvaluatorOutput): Decision {
   ) {
     return "reject";
   }
-  if (evaluation.total >= 70) return "interview";
-  if (evaluation.total >= 55) return "backup";
-
   const substantive = evaluation.answerGrades.filter((grade) => grade.verdict === "OWNED").length;
   const empty = evaluation.answerGrades.filter(
     (grade) => grade.verdict === "SURFACE" || grade.verdict === "EVASIVE" || grade.verdict === "AI",
   ).length;
-  return evaluation.answerGrades.length > 0 && substantive === 0 && empty === evaluation.answerGrades.length
-    ? "reject"
-    : "backup";
+  if (
+    evaluation.total < 55 &&
+    evaluation.answerGrades.length > 0 &&
+    substantive === 0 &&
+    empty === evaluation.answerGrades.length
+  ) {
+    return "reject";
+  }
+
+  const verificationRead = evaluation.verification.read.toLowerCase();
+  const discrepancy =
+    verificationRead.includes("discrepancy") ||
+    verificationRead.includes("material") ||
+    evaluation.verification.claims.some((claim) => claim.verdict === "DISCREPANCY");
+  if (discrepancy) return "backup";
+  if ((!evaluation.salaryAsk || evaluation.salaryValue === "unstated") && evaluation.total < 82) {
+    return "backup";
+  }
+  return evaluation.total >= 70 ? "interview" : "backup";
 }
 
 function nextAction(decision: Decision, postInterview: boolean): string {

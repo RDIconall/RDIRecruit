@@ -20,7 +20,7 @@ import { gradeLog } from "../triage/grade-log";
 import { getWorkingFile, upsertWorkingFile } from "../triage/store";
 import { decisionReadFromEvaluation } from "../analysis/decision";
 import { analysisFingerprint } from "../analysis/fingerprint";
-import { markAnalysisProjected } from "../analysis/store";
+import { claimAnalysisProjection, markAnalysisProjected } from "../analysis/store";
 import { loadOneCandidate } from "../triage/load";
 import { renderWorkingFile } from "../triage/working-file";
 import type { ParsedResumeReview } from "../resume/types";
@@ -328,6 +328,23 @@ export async function scoreCandidate(
     return { skipped: true as const, reason: "no_model_read" as const };
   }
 
+  const decisionRead = decisionReadFromEvaluation(
+    evaluation,
+    Boolean(evaluatorInput.interviewEvidence?.trim()),
+    CLAUDE_JUDGMENT_MODEL,
+  );
+  if (canonicalAnalysisId && !(await claimAnalysisProjection(canonicalAnalysisId))) {
+    // Another invocation owns the deterministic projection for this exact result.
+    // Return the durable read immediately; the owner (or cron replay after a
+    // crash) writes the compatibility tables exactly once.
+    return {
+      total: evaluation.total,
+      read: decisionRead,
+      analysisId: canonicalAnalysisId,
+      reused: true,
+    };
+  }
+
   // Evaluation succeeded — now it is safe to clear the prior read for a replace.
   // (ro_assessments and narratives are deleted-then-inserted in place further down.)
   if (options?.replace) {
@@ -526,11 +543,6 @@ export async function scoreCandidate(
   // The same canonical response powers the founder-facing working file. This
   // replaces the second, separate triage/recalc Claude call and guarantees that
   // the score-derived pool call and the dossier prose came from one analysis.
-  const decisionRead = decisionReadFromEvaluation(
-    evaluation,
-    Boolean(evaluatorInput.interviewEvidence?.trim()),
-    CLAUDE_JUDGMENT_MODEL,
-  );
   const one = await loadOneCandidate(candidateId);
   if (one) {
     const projectedCandidate = {

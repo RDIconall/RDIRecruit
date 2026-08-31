@@ -53,7 +53,11 @@ export async function addInterviewEvidence(input: {
   });
   if (error) return { ok: false as const, error: error.message };
 
-  const rescore = await rescoreCandidateOnNewEvidence(input.candidateId, "interview");
+  const rescore = await rescoreCandidateOnNewEvidence(
+    input.candidateId,
+    "interview",
+    { immediate: true },
+  );
 
   revalidatePath(`/candidates/${input.candidateId}`);
   revalidatePath("/board");
@@ -95,7 +99,11 @@ export async function addVideoAskAnswers(input: {
   });
   if (error) return { ok: false as const, error: error.message };
 
-  const rescore = await rescoreCandidateOnNewEvidence(input.candidateId, "async_video");
+  const rescore = await rescoreCandidateOnNewEvidence(
+    input.candidateId,
+    "async_video",
+    { immediate: true },
+  );
 
   revalidatePath(`/candidates/${input.candidateId}`);
   revalidatePath("/board");

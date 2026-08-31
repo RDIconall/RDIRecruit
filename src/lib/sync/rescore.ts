@@ -13,6 +13,7 @@ export type RescoreReason =
 export async function rescoreCandidateOnNewEvidence(
   candidateId: string,
   reason: RescoreReason = "new_evidence",
+  options?: { immediate?: boolean },
 ) {
   if (!hasSupabase() || !hasAnthropic()) {
     return { scored: false, reason: "not_configured" as const };
@@ -22,11 +23,15 @@ export async function rescoreCandidateOnNewEvidence(
   const result = await scoreCandidate(candidateId, {
     force: true,
     replace: true,
-    transport: "enqueue",
+    ...(options?.immediate ? {} : { transport: "enqueue" as const }),
     trigger: reason,
   });
-  const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
-  const batch = await processCanonicalAnalysisBatches();
+  const batch = options?.immediate
+    ? null
+    : await (async () => {
+        const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
+        return processCanonicalAnalysisBatches();
+      })();
 
   const supabase = getServiceSupabase();
   await supabase.from("audit_log").insert({
@@ -37,7 +42,12 @@ export async function rescoreCandidateOnNewEvidence(
     detail: { reason },
   });
 
-  return { scored: false, queued: true, result, batch };
+  return {
+    scored: "read" in result,
+    queued: !("read" in result),
+    result,
+    batch,
+  };
 }
 
 export async function loadInterviewEvidenceText(candidateId: string): Promise<string> {

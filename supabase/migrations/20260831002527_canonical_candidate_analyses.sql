@@ -9,7 +9,7 @@ create table if not exists public.candidate_analyses (
   candidate_id text not null references public.candidates(workable_id) on delete cascade,
   input_hash text not null,
   status text not null default 'pending'
-    check (status in ('pending', 'submitted', 'processing', 'completed', 'failed', 'obsolete')),
+    check (status in ('pending', 'submitted', 'processing', 'completed', 'failed', 'obsolete', 'uncertain')),
   trigger text not null default 'automatic',
   model text not null,
   input_snapshot jsonb not null,
@@ -23,6 +23,7 @@ create table if not exists public.candidate_analyses (
   submitted_at timestamptz,
   started_at timestamptz,
   completed_at timestamptz,
+  projection_started_at timestamptz,
   projected_at timestamptz,
   updated_at timestamptz not null default now(),
   unique (candidate_id, input_hash)
@@ -50,6 +51,7 @@ create table if not exists public.claude_batches (
   request_counts jsonb not null default '{}'::jsonb,
   error text,
   created_at timestamptz not null default now(),
+  expires_at timestamptz,
   ended_at timestamptz,
   results_processed_at timestamptz,
   updated_at timestamptz not null default now()
@@ -132,4 +134,38 @@ $$;
 revoke all on function public.attach_candidate_analyses_to_batch(text, uuid[])
   from public, anon, authenticated;
 grant execute on function public.attach_candidate_analyses_to_batch(text, uuid[])
+  to service_role;
+
+-- Projection is a separate, replayable side effect. Claim it atomically so
+-- overlapping cron invocations cannot both delete/reinsert the compatibility
+-- score rows. A stale claim can be recovered after a crashed Vercel invocation.
+create or replace function public.claim_candidate_analysis_projection(
+  p_analysis_id uuid,
+  p_stale_minutes integer default 15
+)
+returns boolean
+language plpgsql
+set search_path = ''
+as $$
+declare
+  claimed boolean := false;
+begin
+  update public.candidate_analyses
+     set projection_started_at = now(),
+         updated_at = now()
+   where id = p_analysis_id
+     and status = 'completed'
+     and projected_at is null
+     and (
+       projection_started_at is null
+       or projection_started_at < now() - make_interval(mins => p_stale_minutes)
+     )
+  returning true into claimed;
+  return coalesce(claimed, false);
+end;
+$$;
+
+revoke all on function public.claim_candidate_analysis_projection(uuid, integer)
+  from public, anon, authenticated;
+grant execute on function public.claim_candidate_analysis_projection(uuid, integer)
   to service_role;

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
+import { CLAUDE_JUDGMENT_MODEL, type ClaudeUsage } from "../ai/models";
 import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
 import { gradeLog } from "../triage/grade-log";
@@ -526,7 +526,7 @@ async function callEvaluator(
   client: Anthropic,
   input: EvaluatorInput,
   hardened: boolean,
-): Promise<{ text: string; stopReason: string | null }> {
+): Promise<{ text: string; stopReason: string | null; usage: ClaudeUsage }> {
   const response = await client.messages.create(buildEvaluatorRequest(input, hardened));
   logClaudeUsage("scoring.evaluator", MODEL, response.usage, {
     seat: input.seat.jobShortcode ?? null,
@@ -536,7 +536,7 @@ async function callEvaluator(
   const text = response.content
     .map((block) => (block.type === "text" ? block.text : ""))
     .join("\n");
-  return { text, stopReason: response.stop_reason ?? null };
+  return { text, stopReason: response.stop_reason ?? null, usage: response.usage };
 }
 
 export function parseEvaluatorMessage(
@@ -557,14 +557,28 @@ export function parseEvaluatorMessage(
   }
 }
 
-export async function evaluateCandidate(input: EvaluatorInput): Promise<EvaluatorOutput> {
+function mergeUsage(left: ClaudeUsage | null, right: ClaudeUsage): ClaudeUsage {
+  return {
+    input_tokens: (left?.input_tokens ?? 0) + (right.input_tokens ?? 0),
+    output_tokens: (left?.output_tokens ?? 0) + (right.output_tokens ?? 0),
+    cache_creation_input_tokens:
+      (left?.cache_creation_input_tokens ?? 0) + (right.cache_creation_input_tokens ?? 0),
+    cache_read_input_tokens:
+      (left?.cache_read_input_tokens ?? 0) + (right.cache_read_input_tokens ?? 0),
+  };
+}
+
+export async function evaluateCandidateWithUsage(
+  input: EvaluatorInput,
+): Promise<{ evaluation: EvaluatorOutput; usage: ClaudeUsage | null }> {
   if (!hasAnthropic()) {
-    return heuristicEvaluate(input);
+    return { evaluation: heuristicEvaluate(input), usage: null };
   }
 
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
 
   let result = await callEvaluator(client, input, false);
+  let usage: ClaudeUsage = result.usage;
   let match = result.text.match(/\{[\s\S]*\}/);
 
   // A false safety refusal on a benign hiring read (seen on dense life-sciences
@@ -578,6 +592,7 @@ export async function evaluateCandidate(input: EvaluatorInput): Promise<Evaluato
       reason: result.stopReason === "refusal" ? "refusal" : "no_json",
     });
     result = await callEvaluator(client, sanitizeInputForSafety(input), true);
+    usage = mergeUsage(usage, result.usage);
     match = result.text.match(/\{[\s\S]*\}/);
   }
 
@@ -594,7 +609,7 @@ export async function evaluateCandidate(input: EvaluatorInput): Promise<Evaluato
       stopReason: result.stopReason,
       sample: result.text.trim().slice(0, 240),
     });
-    return heuristicEvaluate(input);
+    return { evaluation: heuristicEvaluate(input), usage };
   }
 
   let parsed: Partial<EvaluatorOutput>;
@@ -608,7 +623,7 @@ export async function evaluateCandidate(input: EvaluatorInput): Promise<Evaluato
       name: input.name,
       stopReason: result.stopReason,
     });
-    return heuristicEvaluate(input);
+    return { evaluation: heuristicEvaluate(input), usage };
   }
 
   // A parsed-but-empty object (e.g. the model returned "{}" or a stub with none of
@@ -621,10 +636,14 @@ export async function evaluateCandidate(input: EvaluatorInput): Promise<Evaluato
       stopReason: result.stopReason,
       keys: Object.keys(parsed ?? {}).length,
     });
-    return heuristicEvaluate(input);
+    return { evaluation: heuristicEvaluate(input), usage };
   }
 
-  return normalize(parsed, input);
+  return { evaluation: normalize(parsed, input), usage };
+}
+
+export async function evaluateCandidate(input: EvaluatorInput): Promise<EvaluatorOutput> {
+  return (await evaluateCandidateWithUsage(input)).evaluation;
 }
 
 /**

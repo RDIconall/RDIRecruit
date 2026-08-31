@@ -9,6 +9,7 @@ function source(over: Record<string, unknown> = {}) {
     integrityGate: { status: "clear", note: "" },
     otherGateResults: [],
     answerGrades: [{ verdict: "OWNED" }],
+    verification: { read: "Clean", claims: [], questions: [], actions: [] },
     salaryValue: "justified",
     salaryAsk: "$120k",
     triage: {
@@ -60,6 +61,25 @@ test("low evidence stays backup unless answers own nothing", () => {
       "m",
     ).decision,
     "reject",
+  );
+});
+
+test("discrepancy and an unpriced sub-82 file stay off the interview list", () => {
+  assert.equal(
+    decisionReadFromEvaluation(
+      source({ verification: { read: "Material discrepancy", claims: [] } }) as never,
+      false,
+      "m",
+    ).decision,
+    "backup",
+  );
+  assert.equal(
+    decisionReadFromEvaluation(
+      source({ total: 81, salaryAsk: null, salaryValue: "unstated" }) as never,
+      false,
+      "m",
+    ).decision,
+    "backup",
   );
 });
 

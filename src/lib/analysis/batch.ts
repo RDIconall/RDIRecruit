@@ -10,8 +10,12 @@ import { batchRequestForAnalysis } from "./batch-request";
 import {
   completeCandidateAnalysis,
   claimCandidateAnalysis,
+  claimAnalysisProjection,
   failCandidateAnalysis,
+  markAnalysisProjected,
   markAnalysisObsolete,
+  markAnalysisUncertain,
+  releaseAnalysisProjection,
   type CandidateAnalysisRow,
 } from "./store";
 
@@ -41,22 +45,25 @@ async function projectCompletedAnalyses(limit = MAX_BATCH_REQUESTS): Promise<num
   let projected = 0;
   for (const row of (data ?? []) as CandidateAnalysisRow[]) {
     if (!row.result) continue;
-    const result = await scoreCandidate(row.candidate_id, {
-      force: true,
-      replace: true,
-      evaluation: row.result,
-      expectedInputHash: row.input_hash,
-      trigger: "batch_projection",
-    });
-    if ("obsolete" in result && result.obsolete) {
-      await markAnalysisObsolete(row.id);
-      continue;
+    if (!(await claimAnalysisProjection(row.id))) continue;
+    try {
+      const result = await scoreCandidate(row.candidate_id, {
+        force: true,
+        replace: true,
+        evaluation: row.result,
+        expectedInputHash: row.input_hash,
+        trigger: "batch_projection",
+      });
+      if ("obsolete" in result && result.obsolete) {
+        await markAnalysisObsolete(row.id);
+        continue;
+      }
+      await markAnalysisProjected(row.id);
+      projected += 1;
+    } catch (error) {
+      await releaseAnalysisProjection(row.id);
+      throw error;
     }
-    const { error } = await supabase
-      .from("candidate_analyses")
-      .update({ projected_at: new Date().toISOString(), updated_at: new Date().toISOString() })
-      .eq("id", row.id);
-    if (!error) projected += 1;
   }
   return projected;
 }
@@ -69,8 +76,10 @@ async function collectEndedBatch(
   const results = await client.messages.batches.results(batchId);
   let completed = 0;
   let failed = 0;
+  const seen = new Set<string>();
 
   for await (const entry of results) {
+    seen.add(entry.custom_id);
     const { data } = await supabase
       .from("candidate_analyses")
       .select("*")
@@ -85,7 +94,7 @@ async function collectEndedBatch(
         entry.result.type === "errored"
           ? entry.result.error.error.message
           : `Anthropic batch result: ${entry.result.type}`;
-      await failCandidateAnalysis(row.id, detail);
+      await failCandidateAnalysis(row.id, detail, batchId);
       failed += 1;
       continue;
     }
@@ -93,7 +102,7 @@ async function collectEndedBatch(
     const message = entry.result.message;
     const evaluation = parseEvaluatorMessage(message, row.input_snapshot);
     if (!evaluation) {
-      await failCandidateAnalysis(row.id, "Batch returned no usable canonical analysis");
+      await failCandidateAnalysis(row.id, "Batch returned no usable canonical analysis", batchId);
       failed += 1;
       continue;
     }
@@ -107,8 +116,23 @@ async function collectEndedBatch(
       evaluation,
       usage,
       estimateCostUsd(row.model, message.usage),
+      batchId,
     );
     completed += 1;
+  }
+
+  // A provider batch is ended, so every attached request must have a terminal
+  // result. Any row absent from the JSONL stream is safe to retry: there is no
+  // still-running request left that could create a second purchase.
+  const { data: missingRows } = await supabase
+    .from("candidate_analyses")
+    .select("id")
+    .eq("batch_id", batchId)
+    .eq("status", "submitted");
+  for (const row of missingRows ?? []) {
+    if (seen.has(row.id as string)) continue;
+    await failCandidateAnalysis(row.id as string, "Ended batch omitted this request result", batchId);
+    failed += 1;
   }
 
   await supabase
@@ -126,7 +150,7 @@ async function pollBatches(client: Anthropic): Promise<{ completed: number; fail
   const supabase = getServiceSupabase();
   const { data } = await supabase
     .from("claude_batches")
-    .select("id, status")
+    .select("id, status, expires_at")
     .in("status", ["in_progress", "canceling", "ended"])
     .order("created_at", { ascending: true })
     .limit(2);
@@ -152,6 +176,31 @@ async function pollBatches(client: Anthropic): Promise<{ completed: number; fail
       }
     } catch (error) {
       console.error(`Failed to poll Claude batch ${local.id}`, error);
+      const expired =
+        typeof local.expires_at === "string" &&
+        new Date(local.expires_at).getTime() < Date.now();
+      if (expired) {
+        const { data: attached } = await supabase
+          .from("candidate_analyses")
+          .select("id")
+          .eq("batch_id", local.id)
+          .eq("status", "submitted");
+        for (const row of attached ?? []) {
+          await failCandidateAnalysis(
+            row.id as string,
+            "Provider batch expired before a result was available",
+            local.id as string,
+          );
+        }
+        await supabase
+          .from("claude_batches")
+          .update({
+            status: "failed",
+            error: "Provider batch expired and could not be retrieved",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", local.id);
+      }
       failed += 1;
     }
   }
@@ -188,7 +237,7 @@ async function submitPending(client: Anthropic): Promise<number> {
   } catch (error) {
     await Promise.all(
       reserved.map((row) =>
-        failCandidateAnalysis(row.id, error instanceof Error ? error.message : String(error)),
+        markAnalysisUncertain(row.id, error instanceof Error ? error.message : String(error)),
       ),
     );
     throw error;
@@ -201,6 +250,7 @@ async function submitPending(client: Anthropic): Promise<number> {
     request_count: reserved.length,
     request_counts: batch.request_counts,
     created_at: batch.created_at,
+    expires_at: batch.expires_at,
     ended_at: batch.ended_at,
     updated_at: now,
   });
@@ -227,15 +277,16 @@ export async function processCanonicalAnalysisBatches(): Promise<BatchProcessRes
   if (!hasSupabase() || !hasAnthropic()) {
     return { submitted: 0, completed: 0, failed: 0, pending: 0 };
   }
-  // A Vercel function can die after the atomic claim and before provider
-  // submission. No valid synchronous analysis runs for fifteen minutes, so these
-  // rows are abandoned and safe to retry.
+  // A crash after Anthropic accepted a batch but before its id reached Postgres is
+  // indistinguishable from a crash before submission. Retrying could buy the same
+  // fingerprint twice, so preserve the at-most-once guarantee: quarantine the row
+  // for operator reconciliation rather than automatically resubmitting it.
   const staleBefore = new Date(Date.now() - 15 * 60_000).toISOString();
   await getServiceSupabase()
     .from("candidate_analyses")
     .update({
-      status: "failed",
-      error: "Recovered abandoned analysis claim",
+      status: "uncertain",
+      error: "Submission outcome unknown after abandoned claim; not retried to avoid duplicate spend",
       updated_at: new Date().toISOString(),
     })
     .eq("status", "processing")
