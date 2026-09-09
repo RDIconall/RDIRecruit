@@ -4,10 +4,11 @@ import { useMemo, useState } from "react";
 import { APP, DECISION_LABEL } from "@/lib/triage/app-theme";
 import { isInboxStage, phoneScreenSlug, type StageColumn } from "@/lib/triage/stages";
 import { sortBestNew } from "@/lib/triage/ranking";
+import { isGenericMultiRoleShortcode } from "@/lib/rubric/seat-rubrics";
 import type { Candidate, Decision } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
-import { Avatar, Checkbox, Dot, StatusSelect, mono, ellipsis } from "./pool-shared";
+import { Avatar, Checkbox, StatusSelect, mono, ellipsis } from "./pool-shared";
 
 interface Props {
   wsApi: WorkspaceApi;
@@ -26,6 +27,7 @@ function flagChips(c: Candidate) {
     chips.push({ label: "Integrity", color: APP.weak, bg: APP.weakSoft });
   }
   if (c.decision === "blocked") chips.push({ label: "Blocked", color: APP.muted, bg: APP.line2 });
+  if (c.suggestedSeat) chips.push({ label: `Seat: ${c.suggestedSeat}`, color: APP.accent, bg: APP.accentSoft });
   return chips;
 }
 
@@ -43,15 +45,18 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
       .filter((c) => (filter === "all" ? true : c.decision === filter))
       .filter((c) => {
         if (!query) return true;
-        return `${c.name} ${c.company} ${c.why} ${c.role} ${c.jobTitle || ""}`.toLowerCase().includes(query);
+        return `${c.name} ${c.company} ${c.why} ${c.appliedFit || ""} ${c.rdiFit || ""} ${c.role} ${c.jobTitle || ""} ${c.suggestedSeat || ""}`.toLowerCase().includes(query);
       });
     return sortBestNew(rows);
   }, [candidates, dq, filter, q]);
 
   // Only a file that actually clears the bar for an interview gets the callout.
   // Falling back to the top row promoted whoever happened to sort first — which is
-  // how weak applicants ended up billed as the one to screen.
-  const best = inbox.find((c) => c.decision === "interview") ?? null;
+  // how weak applicants ended up billed as the one to screen. Generic multi-role
+  // (routing-only) Interviews also do not count — they are not a real-seat call.
+  const best =
+    inbox.find((c) => c.decision === "interview" && !isGenericMultiRoleShortcode(c.jobShortcode)) ??
+    null;
   const selectedIds = Object.keys(sel).filter((id) => sel[id] && inbox.some((c) => c.id === id));
   const screenSlug = phoneScreenSlug(stages);
 
@@ -101,8 +106,17 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
             </div>
             <div style={{ fontSize: 13, color: APP.ink2, marginTop: 4 }}>{best.why || DECISION_LABEL[best.decision]}</div>
             <div style={mono({ fontSize: 12, color: APP.muted, marginTop: 4 })}>
-              {DECISION_LABEL[best.decision]} · {best.answersRead.label} · {best.value?.headline || "—"}
+              {DECISION_LABEL[best.decision]}
+              {best.appliedFit ? ` · ${best.appliedFit}` : ""}
             </div>
+            {best.rdiFit && (
+              <div style={{ fontSize: 12, color: APP.secondary, marginTop: 4 }}>{best.rdiFit}</div>
+            )}
+            {best.suggestedSeat && (
+              <div style={mono({ fontSize: 12, color: APP.accent, marginTop: 4 })}>
+                Better seat: {best.suggestedSeat}
+              </div>
+            )}
           </div>
           <button type="button" onClick={() => openCandidate(best.id)} style={{ ...btnStyle, background: APP.accent, borderColor: APP.accent, color: "#fff" }}>
             Open
@@ -124,11 +138,11 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
           }}
         >
           <div style={mono({ fontSize: 11, color: APP.muted, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" })}>
-            Nothing to interview yet
+            No good applicant on a real seat yet
           </div>
           <div style={{ fontSize: 13, color: APP.ink2, marginTop: 4 }}>
-            No new applicant clears the bar for an interview. Work the backups below or keep recruiting — the
-            list stays empty rather than talking up the least-weak file.
+            Nobody on a published role reads Good. Work Neutral below or keep recruiting — the
+            banner stays empty rather than talking up a routing-only or leftover score.
           </div>
         </div>
       )}
@@ -151,9 +165,9 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
         {(
           [
             ["all", "All new"],
-            ["interview", "Interview"],
-            ["backup", "Backup"],
-            ["reject", "Reject"],
+            ["interview", "Good"],
+            ["backup", "Neutral"],
+            ["reject", "Negative"],
             ["blocked", "Blocked"],
           ] as const
         ).map(([key, label]) => (
@@ -253,8 +267,8 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
                 />
               </th>
               {(crossRole
-                ? ["Candidate", "Role", "AI call", "Answers", "Why", "Flags", ""]
-                : ["Candidate", "AI call", "Answers", "Why", "Flags", "Workable", ""]
+                ? ["Candidate", "Role", "AI call", "This seat", "Why", "Flags", ""]
+                : ["Candidate", "AI call", "This seat", "Why", "Flags", "Workable", ""]
               ).map((h) => (
                 <th
                   key={h || "actions"}
@@ -332,11 +346,17 @@ export function TriageInbox({ wsApi, openCandidate, stages, onStageChange, cross
                     <td style={{ padding: "10px 12px" }}>
                       <StatusSelect value={c.decision} onChange={(d) => wsApi.setDecision(c.id, d)} />
                     </td>
-                    <td style={{ padding: "10px 12px" }}>
-                      <Dot read={c.answersRead} />
+                    <td style={{ padding: "10px 12px", maxWidth: 220, color: APP.ink2, fontSize: 13 }} title={c.appliedFit}>
+                      <div style={ellipsis}>{c.appliedFit || "—"}</div>
                     </td>
-                    <td style={{ padding: "10px 12px", maxWidth: 280, color: APP.ink2, fontSize: 13 }} title={c.why}>
+                    <td
+                      style={{ padding: "10px 12px", maxWidth: 280, color: APP.ink2, fontSize: 13 }}
+                      title={[c.why, c.rdiFit].filter(Boolean).join(" · ")}
+                    >
                       <div style={ellipsis}>{c.why || DECISION_LABEL[c.decision]}</div>
+                      {c.rdiFit && (
+                        <div style={{ ...ellipsis, fontSize: 12, color: APP.muted, marginTop: 2 }}>{c.rdiFit}</div>
+                      )}
                     </td>
                     <td style={{ padding: "10px 12px" }}>
                       {chips.length === 0 ? (

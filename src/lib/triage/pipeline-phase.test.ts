@@ -24,7 +24,7 @@ assert.equal(
 assert.equal(detectPipelinePhase({ workableStage: "Phone Screen" }), "post_interview");
 assert.equal(detectPipelinePhase({ workableStage: "Applied" }), "triage");
 
-assert.equal(decisionLabelForPhase("interview", "triage"), "Interview");
+assert.equal(decisionLabelForPhase("interview", "triage"), "Good");
 assert.equal(decisionLabelForPhase("interview", "post_interview"), "Advance");
 assert.equal(decisionLabelForPhase("reject", "post_interview"), "Pass");
 assert.equal(nextActionForPhase("interview", "post_interview"), "Advance to next round");

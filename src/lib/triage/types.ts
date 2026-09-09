@@ -1,9 +1,10 @@
 // Decision vocabulary — the ONLY status language. No scores, no tiers.
-// Four meaningful actions:
-//   interview = Interview (worth your time; ranked in priority order)
-//   backup    = Backup (competent, only if the interview list falls through)
-//   reject    = Reject / do not interview (with a reason — the cut list)
-//   blocked   = Review blocked (materials incomplete — no read possible)
+// Internal keys stay interview/backup/reject/blocked; the inbox labels them
+// Good / Neutral / Negative / Review blocked.
+//   interview = Good (want them in the building)
+//   backup    = Neutral (competent or unfinished; not first)
+//   reject    = Negative (do not pursue)
+//   blocked   = Review blocked (no fit read yet / materials incomplete)
 export type Decision =
   | "interview"
   | "backup"
@@ -370,6 +371,12 @@ export interface Candidate {
   rev: ReviewerSignal;
   revNote: string;
   why: string;
+  /** Free-form fit to the posting they applied to (from fit_read). */
+  appliedFit?: string;
+  /** Would we want this person at RDI (from fit_read). */
+  rdiFit?: string;
+  /** Better real seat if this posting is wrong/generic. */
+  suggestedSeat?: string;
   flag: string;
   next: string;
   survivor: boolean;

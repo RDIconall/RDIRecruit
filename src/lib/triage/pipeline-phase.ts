@@ -46,9 +46,9 @@ export function decisionLabelForPhase(decision: Decision, phase: PipelinePhase):
   if (phase === "triage") {
     return (
       {
-        interview: "Interview",
-        backup: "Backup",
-        reject: "Reject",
+        interview: "Good",
+        backup: "Neutral",
+        reject: "Negative",
         blocked: "Review blocked",
       } as const
     )[decision];

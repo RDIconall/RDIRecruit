@@ -1,0 +1,34 @@
+import assert from "node:assert/strict";
+import { decisionFromSentiment, fitReadFromCanonical, parseFitRead } from "./fit-read";
+
+assert.equal(parseFitRead(null), null);
+assert.equal(parseFitRead({ sentiment: "good" }), null);
+assert.equal(parseFitRead({ reply: "They've run studies.", sentiment: "ok" }), null);
+
+const ok = parseFitRead({
+  reply: "Owned the BSL-2 stand-up at Labcorp; answers are specific.",
+  sentiment: "GOOD",
+  appliedFit: "Wrong for this generic posting.",
+  rdiFit: "We would want them in the building.",
+  suggestedSeat: "Head of Clinical Operations",
+});
+assert.ok(ok);
+assert.equal(ok.sentiment, "good");
+assert.equal(ok.suggestedSeat, "Head of Clinical Operations");
+assert.equal(decisionFromSentiment("good"), "interview");
+assert.equal(decisionFromSentiment("neutral"), "backup");
+assert.equal(decisionFromSentiment("negative"), "reject");
+
+assert.equal(
+  fitReadFromCanonical({
+    why: "Owned the BSL-2 stand-up.",
+    personQuality: "high",
+    seatVerdict: "routing",
+    appliedFit: "Generic posting.",
+    rdiFit: "Want them.",
+    suggestedSeat: "Head of Clinical Operations",
+  })?.sentiment,
+  "good",
+);
+
+console.log("fit-read.test.ts: ok");

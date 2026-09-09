@@ -17,6 +17,7 @@ import { getActiveMethodDoc } from "../evaluation/method";
 import { getJobRubric } from "../rubric/store";
 import { computeReadiness, type GradingInputs } from "../triage/readiness";
 import { gradeLog } from "../triage/grade-log";
+import { fitReadFromCanonical, storeFitRead } from "../triage/fit-read";
 import { getWorkingFile, upsertWorkingFile } from "../triage/store";
 import { decisionReadFromEvaluation } from "../analysis/decision";
 import { analysisFingerprint } from "../analysis/fingerprint";
@@ -111,9 +112,10 @@ export async function scoreCandidate(
 
   if (!options?.force && !options?.replace) {
     const { data: existing } = await supabase
-      .from("scores")
+      .from("evaluations")
       .select("id")
       .eq("candidate_id", candidateId)
+      .eq("kind", "fit_read")
       .limit(1);
     if (existing?.length) {
       return { skipped: true, reason: "already_scored" as const };
@@ -133,11 +135,12 @@ export async function scoreCandidate(
 
   if (!candidate) throw new Error("Candidate not found");
 
-  const { data: application } = await supabase
+  const { data: applicationRows } = await supabase
     .from("applications")
     .select("*")
     .eq("candidate_id", candidateId)
-    .maybeSingle();
+    .limit(1);
+  const application = applicationRows?.[0] ?? null;
 
   const resumeReview = (application?.resume_parsed ?? null) as ParsedResumeReview | null;
 
@@ -538,6 +541,24 @@ export async function scoreCandidate(
         error: evalError.message,
       });
     }
+  }
+
+  const altSeat =
+    evaluation.alternateSeatSignals.find((s) => s.fit === "high_potential") ??
+    evaluation.alternateSeatSignals[0];
+  const fitRead = fitReadFromCanonical({
+    why: decisionRead.why || evaluation.triage.why || evaluation.summary,
+    personQuality: evaluation.personQuality,
+    seatVerdict: evaluation.seatFit.verdict,
+    appliedFit: evaluation.seatFit.summary,
+    rdiFit: [evaluation.investHead, evaluation.complementRemoves].filter(Boolean).join(" — "),
+    suggestedSeat:
+      evaluation.seatFit.verdict === "routing" || evaluation.seatFit.verdict === "wrong_seat"
+        ? (altSeat?.seatLabel ?? "")
+        : "",
+  });
+  if (fitRead) {
+    await storeFitRead(candidateId, candidate.job_shortcode ?? null, fitRead);
   }
 
   // The same canonical response powers the founder-facing working file. This

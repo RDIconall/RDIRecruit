@@ -269,11 +269,13 @@ export async function upsertCandidateFromWorkable(
 
   result.metadataUpdated = true;
 
-  const { data: existingApp } = await supabase
+  const { data: existingApps } = await supabase
     .from("applications")
     .select("id, resume_url, answers, cover_letter")
     .eq("candidate_id", candidate.id)
-    .maybeSingle();
+    .order("resume_ingested_at", { ascending: false, nullsFirst: false })
+    .limit(1);
+  const existingApp = existingApps?.[0] ?? null;
 
   // The single-candidate endpoint (getCandidate) returns `resume_url`, screening
   // `answers`, and `cover_letter`, but the bulk LIST endpoint (listAllCandidates
@@ -297,15 +299,11 @@ export async function upsertCandidateFromWorkable(
     parsed_education: parseEducation(candidate),
   };
 
-  if (existingApp?.id) {
-    const { error } = await supabase
-      .from("applications")
-      .update(applicationPayload)
-      .eq("id", existingApp.id);
-    if (error) console.error(`application update failed (${candidate.id})`, error.message);
-  } else {
-    const { error } = await supabase.from("applications").insert(applicationPayload);
-    if (error) console.error(`application insert failed (${candidate.id})`, error.message);
+  const { error: applicationError } = await supabase
+    .from("applications")
+    .upsert(applicationPayload, { onConflict: "candidate_id" });
+  if (applicationError) {
+    console.error(`application upsert failed (${candidate.id})`, applicationError.message);
   }
 
   const needsFirstIngest =
@@ -345,19 +343,20 @@ export async function upsertCandidateFromWorkable(
   return result;
 }
 
-/** Initial score only — rescoring happens via rescoreCandidateOnNewEvidence. */
+/** Initial fit read only — rewriting happens via rescoreCandidateOnNewEvidence. */
 export async function scoreCandidateIfNew(candidateId: string) {
   if (!hasSupabase() || !hasAnthropic()) return { scored: false };
 
   const supabase = getServiceSupabase();
-  const { data: existingScore } = await supabase
-    .from("scores")
+  const { data: existingRead } = await supabase
+    .from("evaluations")
     .select("id")
     .eq("candidate_id", candidateId)
+    .eq("kind", "fit_read")
     .limit(1)
     .maybeSingle();
 
-  if (existingScore) return { scored: false, reason: "already_scored" as const };
+  if (existingRead) return { scored: false, reason: "already_scored" as const };
 
   const { scoreCandidate } = await import("../scoring/run-score");
   await scoreCandidate(candidateId, {
@@ -374,8 +373,9 @@ export async function scoreUnscoredBatch(candidateIds: string[], concurrency = 3
 
   const supabase = getServiceSupabase();
   const { data: scoredRows } = await supabase
-    .from("scores")
+    .from("evaluations")
     .select("candidate_id")
+    .eq("kind", "fit_read")
     .in("candidate_id", candidateIds);
 
   const scoredSet = new Set((scoredRows ?? []).map((r) => r.candidate_id as string));
@@ -519,7 +519,10 @@ async function runScoreUnscoredPass(options?: {
   const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }, { data: dqOverlayRows }] =
     await Promise.all([
       supabase.from("candidates").select("workable_id, job_shortcode, created_at, disqualified"),
-      supabase.from("scores").select("candidate_id, created_at, model_version"),
+      supabase
+        .from("evaluations")
+        .select("candidate_id, created_at, model_version")
+        .eq("kind", "fit_read"),
       supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
       supabase.from("candidate_overlay").select("candidate_id").eq("status", "disqualified"),
     ]);

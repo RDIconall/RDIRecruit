@@ -6,9 +6,9 @@ import type { Candidate, Decision } from "./types";
 // Per-candidate status word for the email (the four-action vocabulary — no
 // scores, no tiers). Mirrors POOL_GROUPS but phrased for a single candidate.
 const STATUS_LABEL: Record<Decision, string> = {
-  interview: "Interview",
-  backup: "Backup",
-  reject: "Do not interview",
+  interview: "Good",
+  backup: "Neutral",
+  reject: "Negative",
   blocked: "Review blocked",
 };
 
@@ -224,7 +224,7 @@ export function renderSummaryHtml(summary: DailySummary): string {
         </td></tr>
         ${body}
         <tr><td style="padding:26px 24px;font:400 12px ${FONT};color:${C.muted};border-top:1px solid ${C.hair};margin-top:24px;">
-          Statuses use the triage vocabulary: Interview · Backup · Do not interview · Review blocked. Open a name to view the full read in Workable.
+          Statuses use the triage vocabulary: Good · Neutral · Negative · Review blocked. Open a name to view the full read in Workable.
         </td></tr>
       </table>
     </td></tr>

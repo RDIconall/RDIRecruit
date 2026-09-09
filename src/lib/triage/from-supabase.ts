@@ -2,9 +2,9 @@
 // into the triage view model in ./types. Faithful to whatever the DB holds;
 // where a field doesn't exist it degrades gracefully rather than fabricating.
 //
-// HARD RULE: the triage UI speaks decision vocabulary only. Numeric scores and
-// tiers from the `scores` table are used here ONLY to derive a Decision; they
-// are never surfaced in any field that reaches the screen.
+// HARD RULE: the triage UI speaks decision vocabulary only. List grouping comes
+// from fit_read sentiment (Good / Neutral / Negative). Leftover `scores` rows
+// are ignored for the decision.
 
 import type {
   AnswerGradePayload,
@@ -39,6 +39,7 @@ import {
   coalesceTenureRoles,
   type TenureStability,
 } from "./tenure-stability";
+import { decisionFromSentiment, type FitRead } from "./fit-read";
 import type {
   AnswerRow,
   Candidate,
@@ -71,6 +72,7 @@ export interface CandidateEvaluations {
   verification: VerificationPayload | null;
   roleReads: RoleReadPayload[];
   answerGrades: AnswerGradePayload[];
+  fitRead?: FitRead | null;
 }
 
 // One résumé experience entry as stored in applications.parsed_experience.
@@ -240,21 +242,21 @@ export function deriveDecisionDetail(input: MapInput): DecisionDerivation {
   // stale "blocked" read — and a cut candidate is NEVER surfaced as "Review blocked".
   if (humanCut(input)) return settled("reject");
 
-  const ungated = ungatedDecision(input);
-  // Hopping gate first (repeated short completed stints), then the interview bar
-  // (borderline evidence / answers that own nothing). Neither can be overridden
-  // by a model read: both are properties of the file, not of the read.
-  const decision = applyInterviewBar(applyTenureDecisionGate(ungated, tenure), bar);
-  const demoted = ungated === "interview" && decision !== "interview";
+  const fit = input.evals.fitRead ?? null;
+  if (fit) {
+    const decision = decisionFromSentiment(fit.sentiment);
+    return {
+      decision,
+      ungated: decision,
+      tenure,
+      bar,
+      demoted: false,
+      demotionNote: "",
+    };
+  }
 
-  return {
-    decision,
-    ungated,
-    tenure,
-    bar,
-    demoted,
-    demotionNote: demoted ? demotionNoteFor(tenure, bar) : "",
-  };
+  // No fit read yet — do not invent Good from a leftover numeric score.
+  return settled("blocked");
 }
 
 export function deriveDecision(input: MapInput): Decision {
@@ -283,12 +285,8 @@ function interviewBarFor(input: MapInput): InterviewBar {
  * The gate as carried to the client on the mapped candidate: what the gates would
  * do to an Interview call on this file, whatever the current decision is.
  */
-function interviewGateFrom(derived: DecisionDerivation): InterviewGate {
-  const clears =
-    applyInterviewBar(applyTenureDecisionGate("interview", derived.tenure), derived.bar) === "interview";
-  return clears
-    ? { clears: true, note: "" }
-    : { clears: false, note: demotionNoteFor(derived.tenure, derived.bar) };
+function interviewGateFrom(_derived: DecisionDerivation): InterviewGate {
+  return { clears: true, note: "" };
 }
 
 function narrativeRolesForTenure(input: MapInput) {
@@ -1021,7 +1019,9 @@ export function mapCandidate(input: MapInput): Candidate {
   const company = lastRoleRead?.company || ro?.per_role?.[ro.per_role.length - 1]?.company || "—";
 
   const salary = invest?.ask || "—";
+  const fit = input.evals.fitRead ?? null;
   let why =
+    fit?.reply ||
     input.read?.why ||
     dig?.careerRead ||
     firstSentence(invest?.summary) ||
@@ -1107,6 +1107,9 @@ export function mapCandidate(input: MapInput): Candidate {
     rev: "none",
     revNote: "No human review yet — read synced from submitted materials.",
     why,
+    appliedFit: fit?.appliedFit,
+    rdiFit: fit?.rdiFit,
+    suggestedSeat: fit?.suggestedSeat || undefined,
     flag: risk,
     // After a gate demotion, ignore stale Claude "Interview" next-step copy.
     next: input.decisionOverride

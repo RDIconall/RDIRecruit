@@ -58,14 +58,14 @@ export function fitWeight(level: VerdictLevel): number {
   return level === "strong" ? 2 : level === "mixed" ? 1 : 0;
 }
 
-// The pool's groups, in fixed display order. Interview is the ranked list you
-// work top-down; Reject is the visible "do not interview" list (each with a
-// reason) so you can disqualify; Blocked is waiting on materials. Disqualified
+// The pool's groups, in fixed display order. Good is the ranked list you
+// work top-down; Negative is the visible "do not pursue" list (each with a
+// reason) so you can disqualify; Blocked is waiting on a fit read. Disqualified
 // candidates collapse out separately below the board.
 export const POOL_GROUPS: { key: Decision; label: string }[] = [
-  { key: "interview", label: "Interview — in priority order" },
-  { key: "backup", label: "Backup" },
-  { key: "reject", label: "Do not interview" },
+  { key: "interview", label: "Good — in priority order" },
+  { key: "backup", label: "Neutral" },
+  { key: "reject", label: "Negative" },
   { key: "blocked", label: "Review blocked" },
 ];
 
@@ -89,17 +89,17 @@ export function describeMissingInputs(missing: ReadinessInput[]): string {
 
 // The fixed decision vocabulary — the ONLY status language (no scores/tiers).
 export const DECISION_LABEL: Record<Decision, string> = {
-  interview: "Interview",
-  backup: "Backup",
-  reject: "Reject",
+  interview: "Good",
+  backup: "Neutral",
+  reject: "Negative",
   blocked: "Review blocked",
 };
 
 // The next action each decision implies, in triage language.
 export const DECISION_NEXT: Record<Decision, string> = {
   interview: "Interview",
-  backup: "Hold as backup",
-  reject: "Reject",
+  backup: "Hold",
+  reject: "Do not pursue",
   blocked: "Re-sync",
 };
 

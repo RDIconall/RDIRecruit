@@ -3,9 +3,9 @@ import type { Candidate, Decision, PoolStanding } from "./types";
 
 // Human label for each decision group's standing copy ("3rd of 12 to interview").
 const GROUP_LABEL: Record<Decision, string> = {
-  interview: "to interview",
-  backup: "in the backup group",
-  reject: "on the do-not-interview list",
+  interview: "good",
+  backup: "neutral",
+  reject: "negative",
   blocked: "blocked",
 };
 
@@ -42,15 +42,13 @@ const DECISION_PRIORITY: Record<Decision, number> = {
 };
 
 /**
- * Sort for cross-role "best new applicant": Interview first, then value/fit,
- * then newest appliedAt. Mutates nothing — returns a new array.
+ * Sort for cross-role "best new applicant": Good first, then Neutral,
+ * then newest appliedAt. Scores are not used. Mutates nothing — returns a new array.
  */
 export function sortBestNew(candidates: Candidate[]): Candidate[] {
   return [...candidates].sort((a, b) => {
     const dp = DECISION_PRIORITY[a.decision] - DECISION_PRIORITY[b.decision];
     if (dp) return dp;
-    const rw = rankWeight(b) - rankWeight(a);
-    if (rw) return rw;
     const at = Date.parse(b.appliedAt || "") - Date.parse(a.appliedAt || "");
     return Number.isFinite(at) ? at : 0;
   });
@@ -79,7 +77,10 @@ export function assignPoolStanding(
   for (const g of POOL_GROUPS) {
     const rows = active
       .filter((x) => poolGroupOf(x.c.decision) === g.key)
-      .sort((a, b) => rankWeight(b.c) - rankWeight(a.c) || a.index - b.index);
+      .sort((a, b) => {
+        const at = Date.parse(b.c.appliedAt || "") - Date.parse(a.c.appliedAt || "");
+        return (Number.isFinite(at) ? at : 0) || a.index - b.index;
+      });
     rows.forEach((row, i) => {
       groupRank.set(row.c.id, { rank: i + 1, total: rows.length, label: GROUP_LABEL[g.key] });
     });

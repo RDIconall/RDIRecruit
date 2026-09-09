@@ -30,6 +30,7 @@ import {
   isPermanentWorkableNotFound,
   isRetryableWorkableStatus,
 } from "../src/lib/workable/errors.ts";
+import { decisionFromSentiment, parseFitRead } from "../src/lib/triage/fit-read.ts";
 
 test("dynamic rubric parser reads seat dimensions totaling 100 and critical minimums", () => {
   const rubric = getBuiltinSeatRubric({ shortcode: HEAD_CLINICAL_OPS });
@@ -244,6 +245,22 @@ test("title routing does not steal unrelated engineer or monitoring jobs", () =>
   assert.equal(getBuiltinSeatRubric({ title: "Site Monitoring Coordinator" }), null);
   assert.ok(getBuiltinSeatRubric({ title: "Founding Product Engineer - Clinical Systems" }));
   assert.ok(getBuiltinSeatRubric({ shortcode: HEAD_CLINICAL_OPS }));
+});
+
+test("fit_read parse rejects incomplete payloads and maps sentiment to decisions", () => {
+  assert.equal(parseFitRead(null), null);
+  assert.equal(parseFitRead({ sentiment: "good" }), null);
+  const ok = parseFitRead({
+    reply: "Owned the stand-up.",
+    sentiment: "GOOD",
+    appliedFit: "Wrong posting.",
+    rdiFit: "Want them.",
+    suggestedSeat: "Head of Clinical Operations",
+  });
+  assert.equal(ok?.sentiment, "good");
+  assert.equal(decisionFromSentiment("good"), "interview");
+  assert.equal(decisionFromSentiment("neutral"), "backup");
+  assert.equal(decisionFromSentiment("negative"), "reject");
 });
 
 test("event retry policy stops after the bounded retry budget", () => {

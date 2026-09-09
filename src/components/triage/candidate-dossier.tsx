@@ -682,6 +682,9 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
         )}
         <p style={{ margin: "0 0 14px", fontSize: 17, lineHeight: 1.5 }}>{c.why || "No assessment on file yet."}</p>
         <AssessRow label="Recommendation" value={decisionLabel} valueColor={c.decision === "interview" ? "#93b4ff" : c.decision === "reject" ? "#f0a89e" : "#fff"} />
+        {c.appliedFit && <AssessRow label="This posting" value={c.appliedFit} />}
+        {c.rdiFit && <AssessRow label="RDI fit" value={c.rdiFit} />}
+        {c.suggestedSeat && <AssessRow label="Better seat" value={c.suggestedSeat} />}
         {c.caveat && <AssessRow label="Confirm first" value={c.caveat} valueColor="#f5d28a" />}
         {c.flag && <AssessRow label="Main risk" value={c.flag} />}
         {c.next && <AssessRow label="Next" value={c.next} />}

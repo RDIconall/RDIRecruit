@@ -20,6 +20,7 @@ import type {
   VerificationPayload,
 } from "../types";
 import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
+import { parseFitRead } from "./fit-read";
 import { mapCandidate, type ApplicationLite, type CandidateEvaluations, type ParsedExperienceEntry } from "./from-supabase";
 import { getWorkingFiles } from "./store";
 import { assignPoolStanding } from "./ranking";
@@ -208,6 +209,7 @@ function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
       verification: latest("verification") as unknown as VerificationPayload | null,
       roleReads: latestBatch("role_read") as unknown as RoleReadPayload[],
       answerGrades: latestBatch("answer_grade") as unknown as AnswerGradePayload[],
+      fitRead: parseFitRead(latest("fit_read")),
     });
   }
   return result;
@@ -220,17 +222,17 @@ function deriveMeta(candidates: Candidate[], jobShortcode: string, title: string
   const reject = n("reject");
 
   let healthState: string;
-  if (interview > 0) healthState = "Has people to interview";
-  else if (backup > 0) healthState = "Backups only, no clear interview";
-  else healthState = "No one to interview yet";
+  if (interview > 0) healthState = "Has good applicants";
+  else if (backup > 0) healthState = "Neutral only — nobody reads Good yet";
+  else healthState = "No good applicant yet";
 
   const healthRead =
     candidates.length === 0
       ? "No candidates synced for this job yet."
-      : `${candidates.length} in pool · ${interview} to interview, ${backup} backup, ${reject} to reject. ` +
+      : `${candidates.length} in pool · ${interview} good, ${backup} neutral, ${reject} negative. ` +
         (interview > 0
-          ? `Work the interview list top-down (it's ranked), then clear the do-not-interview list.`
-          : `No file clears the bar for a first interview yet — review the backups and keep recruiting.`);
+          ? `Work the Good list top-down (newest first), then clear the Negative list.`
+          : `Nobody reads Good yet — review Neutral and keep recruiting.`);
 
   return {
     title,
@@ -282,6 +284,7 @@ export async function loadOneCandidate(candidateId: string): Promise<OneCandidat
     verification: null,
     roleReads: [],
     answerGrades: [],
+    fitRead: null,
   };
   const wf = wfMap.get(candidateId);
 
@@ -382,7 +385,7 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
       overlay: item.overlay ?? null,
       application: appsByCandidate.get(id) ?? null,
       narrative: [],
-      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [] },
+      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
       interviewEvidence: [],
       read,
       corrections: wf?.workspace?.corrections ?? [],
@@ -551,7 +554,7 @@ async function buildCrossRolePool(
       overlay: item.overlay ?? null,
       application: appsByCandidate.get(id) ?? null,
       narrative: narrByCandidate.get(id) ?? [],
-      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [] },
+      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
       interviewEvidence: evidenceByCandidate.get(id) ?? [],
       read,
       corrections: wf?.workspace?.corrections ?? [],
@@ -631,7 +634,7 @@ async function buildCrossRolePool(
       jobShortcode: CROSS_ROLE_SHORTCODE,
       jobUrl: "",
       healthState: `${candidates.length} across ${shortcodes.length} open jobs`,
-      healthRead: `Applications from the last ${RECENT_WINDOW_DAYS} days across ${shortcodes.length} open jobs · ${interviewCount} interview-ready — ranked by job match, then problem complexity.`,
+      healthRead: `Applications from the last ${RECENT_WINDOW_DAYS} days across ${shortcodes.length} open jobs · ${interviewCount} good — ranked by fit read, then newest first.`,
       total: candidates.length,
     },
   };
@@ -731,7 +734,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       overlay: item.overlay ?? null,
       application: appsByCandidate.get(id) ?? null,
       narrative: narrByCandidate.get(id) ?? [],
-      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [] },
+      evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
       interviewEvidence: evidenceByCandidate.get(id) ?? [],
       read,
       corrections: wf?.workspace?.corrections ?? [],
