@@ -66,6 +66,39 @@ export function fitReadFromCanonical(parts: {
   };
 }
 
+/** Shape of a canonical evaluation needed to project the list-facing fit read. */
+export interface FitReadEvaluationSource {
+  summary?: string | null;
+  investHead?: string | null;
+  complementRemoves?: string | null;
+  personQuality?: string | null;
+  seatFit?: { verdict?: string | null; summary?: string | null } | null;
+  triage?: { why?: string | null } | null;
+  alternateSeatSignals?: Array<{ fit?: string | null; seatLabel?: string | null }> | null;
+  heuristic?: boolean | null;
+}
+
+/**
+ * Same projection the scorer writes after a canonical analysis. Null when there
+ * is no prose to show, or when the analysis was a heuristic placeholder.
+ */
+export function fitReadFromEvaluation(evaluation: FitReadEvaluationSource): FitRead | null {
+  if (evaluation.heuristic) return null;
+  const altSeat =
+    evaluation.alternateSeatSignals?.find((s) => s.fit === "high_potential") ??
+    evaluation.alternateSeatSignals?.[0];
+  const verdict = evaluation.seatFit?.verdict ?? null;
+  return fitReadFromCanonical({
+    why: (evaluation.triage?.why || evaluation.summary || "").trim(),
+    personQuality: evaluation.personQuality,
+    seatVerdict: verdict,
+    appliedFit: evaluation.seatFit?.summary,
+    rdiFit: [evaluation.investHead, evaluation.complementRemoves].filter(Boolean).join(" — "),
+    suggestedSeat:
+      verdict === "routing" || verdict === "wrong_seat" ? (altSeat?.seatLabel ?? "") : "",
+  });
+}
+
 const SYSTEM = `You are reading one job applicant for RDI Trials (a diagnostics CRO). Conall and Lara are hiring complements — people who take work or risk off their plate — not replacements.
 
 You will get the job description and everything the candidate submitted. Write a free hiring read. Do NOT assign points, percentages, bands, or a numeric score.

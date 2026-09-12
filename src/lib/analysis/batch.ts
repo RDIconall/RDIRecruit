@@ -31,6 +31,9 @@ export interface BatchProcessResult {
   completed: number;
   failed: number;
   pending: number;
+  fitReadsProjected?: number;
+  fitReadsQueued?: number;
+  fitReadsRemaining?: number;
 }
 
 async function projectCompletedAnalyses(limit = MAX_BATCH_REQUESTS): Promise<number> {
@@ -314,6 +317,8 @@ export async function processCanonicalAnalysisBatches(): Promise<BatchProcessRes
     .lt("started_at", staleBefore);
 
   const client = new Anthropic({ apiKey: env.ANTHROPIC_API_KEY });
+  const { backfillMissingFitReads } = await import("../triage/backfill-fit-reads");
+  const fitReads = await backfillMissingFitReads({ budgetMs: 90_000 });
   await projectCompletedAnalyses();
   const polled = await pollBatches(client);
   await projectCompletedAnalyses();
@@ -327,6 +332,9 @@ export async function processCanonicalAnalysisBatches(): Promise<BatchProcessRes
     completed: polled.completed,
     failed: polled.failed,
     pending: count ?? 0,
+    fitReadsProjected: fitReads.projected,
+    fitReadsQueued: fitReads.queued,
+    fitReadsRemaining: fitReads.remaining,
   };
 }
 
