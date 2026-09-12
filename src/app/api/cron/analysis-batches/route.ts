@@ -7,8 +7,8 @@ export const maxDuration = 300;
 
 /**
  * Drain the Message Batch queue independently of Workable sync and the scoring
- * lock. Submit pending fingerprints, poll in-flight batches, and project durable
- * results so automated analysis stays on the 50% Anthropic batch path.
+ * lock. Also copies already-paid canonical analyses onto the inbox as fit reads
+ * and queues anyone still waiting on a first write-up.
  */
 export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization");

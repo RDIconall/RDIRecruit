@@ -495,6 +495,8 @@ export async function scoreUnscoredAcrossJobs(options?: {
   }
 
   try {
+    const { backfillMissingFitReads } = await import("../triage/backfill-fit-reads");
+    await backfillMissingFitReads({ budgetMs: Math.min(45_000, options?.budgetMs ?? 45_000) });
     const queued = await runScoreUnscoredPass(options);
     const { processCanonicalAnalysisBatches } = await import("../analysis/batch");
     const batch = await processCanonicalAnalysisBatches();

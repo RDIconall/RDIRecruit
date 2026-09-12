@@ -17,7 +17,7 @@ import { getActiveMethodDoc } from "../evaluation/method";
 import { getJobRubric } from "../rubric/store";
 import { computeReadiness, type GradingInputs } from "../triage/readiness";
 import { gradeLog } from "../triage/grade-log";
-import { fitReadFromCanonical, storeFitRead } from "../triage/fit-read";
+import { fitReadFromEvaluation, storeFitRead } from "../triage/fit-read";
 import { getWorkingFile, upsertWorkingFile } from "../triage/store";
 import { decisionReadFromEvaluation } from "../analysis/decision";
 import { analysisFingerprint } from "../analysis/fingerprint";
@@ -296,6 +296,14 @@ export async function scoreCandidate(
       evaluatorInput,
       options.trigger ?? (options.replace ? "stale" : "new_candidate"),
     );
+    // A completed analysis from before fit_read existed was already marked
+    // projected, so the batch cron never copied the write-up onto the inbox.
+    if (queued.status === "completed" && queued.result) {
+      const existingRead = fitReadFromEvaluation(queued.result);
+      if (existingRead) {
+        await storeFitRead(candidateId, candidate.job_shortcode ?? null, existingRead);
+      }
+    }
     return {
       queued: queued.status !== "completed",
       completed: queued.status === "completed",
@@ -543,19 +551,11 @@ export async function scoreCandidate(
     }
   }
 
-  const altSeat =
-    evaluation.alternateSeatSignals.find((s) => s.fit === "high_potential") ??
-    evaluation.alternateSeatSignals[0];
-  const fitRead = fitReadFromCanonical({
-    why: decisionRead.why || evaluation.triage.why || evaluation.summary,
-    personQuality: evaluation.personQuality,
-    seatVerdict: evaluation.seatFit.verdict,
-    appliedFit: evaluation.seatFit.summary,
-    rdiFit: [evaluation.investHead, evaluation.complementRemoves].filter(Boolean).join(" — "),
-    suggestedSeat:
-      evaluation.seatFit.verdict === "routing" || evaluation.seatFit.verdict === "wrong_seat"
-        ? (altSeat?.seatLabel ?? "")
-        : "",
+  const fitRead = fitReadFromEvaluation({
+    ...evaluation,
+    triage: {
+      why: decisionRead.why || evaluation.triage.why || evaluation.summary,
+    },
   });
   if (fitRead) {
     await storeFitRead(candidateId, candidate.job_shortcode ?? null, fitRead);
