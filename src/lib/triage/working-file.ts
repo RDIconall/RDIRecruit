@@ -1,5 +1,6 @@
 import { DM } from "./theme";
 import { PROCESS_STATUS_LABEL, workableStageLabel } from "./app-theme";
+import { correctionAuthor } from "./founders";
 import type { Candidate, TimelineRow, WorkspaceSlice } from "./types";
 
 // Matches the prototype's nowStamp() (en-US date + time) so the stored .md reads
@@ -96,7 +97,11 @@ export function renderWorkingFile(
   }
 
   s += "\n## Corrections (human, persisted)\n\n";
-  if (corr.length) corr.forEach((e) => (s += `- [${e.ts}]${e.reviewerLabel ? ` (${e.reviewerLabel})` : ""} ${e.text}\n`));
+  if (corr.length)
+    corr.forEach((e) => {
+      const who = correctionAuthor(e);
+      s += `- [${e.ts}]${who ? ` (${who})` : ""} ${e.text}\n`;
+    });
   else s += "- none\n";
 
   s += "\n## Notes to Claude (replies on its comments)\n\n";

@@ -3,6 +3,7 @@ import { hasSupabase } from "../env";
 import type { BoardCandidate, CandidateRow, RoAssessmentRow, ScoreRow } from "../types";
 import { fetchOverlays } from "./overlay";
 import { chunkIds } from "./chunk";
+import { actorLabel } from "../triage/founders";
 
 function latestByCandidate<T extends { candidate_id: string; created_at?: string }>(
   rows: T[],
@@ -182,7 +183,7 @@ async function hydrateBoard(candidates: CandidateRow[]): Promise<BoardCandidate[
       why: extras?.why ?? null,
       ask: extras?.ask ?? null,
       sources: ro?.per_role?.length ?? 0,
-      assignee: overlay?.updated_by ?? null,
+      assignee: overlay?.updated_by ? actorLabel(overlay.updated_by) : null,
     };
   });
 }

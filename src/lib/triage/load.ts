@@ -21,6 +21,7 @@ import type {
 } from "../types";
 import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
 import { parseFitRead } from "./fit-read";
+import { actorLabel } from "./founders";
 import { mapCandidate, type ApplicationLite, type CandidateEvaluations, type ParsedExperienceEntry } from "./from-supabase";
 import { getWorkingFiles } from "./store";
 import { assignPoolStanding } from "./ranking";
@@ -57,7 +58,7 @@ type ActivityRow = { id: string; candidate_id: string; type: string | null; auth
 
 function toActivityEntry(r: ActivityRow): ActivityEntry {
   const type = r.type === "interview" || r.type === "comment" ? r.type : "note";
-  return { id: r.id, type, author: r.author || "—", body: r.body, at: r.created_at };
+  return { id: r.id, type, author: r.author ? actorLabel(r.author) : "—", body: r.body, at: r.created_at };
 }
 
 async function loadJobStages(jobShortcode: string): Promise<StageColumn[]> {

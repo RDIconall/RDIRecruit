@@ -1,7 +1,8 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { TriageApp } from "@/components/triage/triage-app";
 import { loadTriagePool, CROSS_ROLE_SHORTCODE } from "@/lib/triage/load";
-import { reviewerKindFrom, reviewerKindLabel, type Viewer } from "@/lib/triage/reviewer";
+import { reviewerKindLabel, type Viewer } from "@/lib/triage/reviewer";
+import { founderKindFor } from "@/lib/triage/founders";
 
 // Server-fed from Supabase (candidates + evaluations + working files). Auth is
 // enforced by Clerk middleware. Human triage edits persist to Supabase via the
@@ -15,7 +16,7 @@ async function resolveViewer(): Promise<Viewer> {
     const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
     const email = user.emailAddresses?.[0]?.emailAddress;
     const label = name || (email ? email.split("@")[0] : undefined);
-    const kind = reviewerKindFrom(label || email);
+    const kind = founderKindFor(user.id);
     return { id: user.id, label: label || reviewerKindLabel(kind), kind };
   } catch {
     return { kind: "other", label: reviewerKindLabel("other") };

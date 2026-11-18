@@ -24,6 +24,7 @@ import { analysisFingerprint } from "../analysis/fingerprint";
 import { claimAnalysisProjection, markAnalysisProjected } from "../analysis/store";
 import { loadOneCandidate } from "../triage/load";
 import { renderWorkingFile } from "../triage/working-file";
+import { correctionAuthor } from "../triage/founders";
 import type { ParsedResumeReview } from "../resume/types";
 import type { CategoryKey } from "../types";
 
@@ -172,7 +173,7 @@ export async function scoreCandidate(
   const workingFile = await getWorkingFile(candidateId);
   const workspaceTranscript = workingFile?.workspace.transcript?.trim() ?? "";
   const correctionContext = (workingFile?.workspace.corrections ?? [])
-    .map((item) => `${item.reviewerLabel ?? "Reviewer"}: ${item.text}`)
+    .map((item) => `${correctionAuthor(item) ?? "Reviewer"}: ${item.text}`)
     .join("\n");
   const replyContext = Object.entries(workingFile?.workspace.replies ?? {})
     .filter(([, value]) => value)

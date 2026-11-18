@@ -19,21 +19,6 @@ async function requireAuth() {
   return userId;
 }
 
-/** A human-readable owner label (first name / email prefix) for the board, or the id. */
-async function reviewerLabel(): Promise<string | undefined> {
-  try {
-    const { currentUser } = await import("@clerk/nextjs/server");
-    const user = await currentUser();
-    if (!user) return undefined;
-    const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-    if (name) return name;
-    const email = user.emailAddresses?.[0]?.emailAddress;
-    return email ? email.split("@")[0] : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
 export async function advanceCandidate(input: {
   jobShortcode: string;
   candidateId: string;
@@ -105,7 +90,7 @@ export async function denyCandidate(input: {
   candidateId: string;
   reason?: string;
 }) {
-  await requireAuth();
+  const actorId = await requireAuth();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
 
   // Best-effort Workable propagation; the local overlay below is the source of
@@ -132,7 +117,7 @@ export async function denyCandidate(input: {
     await upsertOverlay(
       input.candidateId,
       { status: "disqualified", status_reason: input.reason ?? "Not a fit at this time" },
-      await reviewerLabel(),
+      actorId,
     );
   }
 
@@ -145,12 +130,12 @@ export async function withdrawCandidate(input: {
   candidateId: string;
   reason?: string;
 }) {
-  await requireAuth();
+  const actorId = await requireAuth();
   if (hasSupabase()) {
     await upsertOverlay(
       input.candidateId,
       { status: "withdrawn", status_reason: input.reason ?? "Candidate withdrew" },
-      await reviewerLabel(),
+      actorId,
     );
   }
   revalidatePath("/board");
@@ -162,12 +147,12 @@ export async function restoreCandidate(input: {
   jobShortcode: string;
   candidateId: string;
 }) {
-  await requireAuth();
+  const actorId = await requireAuth();
   if (hasSupabase()) {
     await upsertOverlay(
       input.candidateId,
       { status: "active", status_reason: null },
-      await reviewerLabel(),
+      actorId,
     );
   }
   revalidatePath("/board");
