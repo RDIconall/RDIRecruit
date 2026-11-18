@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { env } from "@/lib/env";
+import { isOperatorRequest } from "@/lib/operator-auth";
 import { applyPendingMigrations } from "@/lib/db/apply-migrations";
 import { incrementalSync, rescoreOnly } from "@/lib/sync/incremental-sync";
 
@@ -7,8 +7,7 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get("authorization");
-  if (env.CRON_SECRET && auth !== `Bearer ${env.CRON_SECRET}`) {
+  if (!isOperatorRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
