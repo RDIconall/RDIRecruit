@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { env, hasAnthropic, hasSupabase } from "@/lib/env";
+import { hasAnthropic, hasSupabase } from "@/lib/env";
+import { isOperatorRequest } from "@/lib/operator-auth";
 import { isRadarEnabled } from "@/lib/radar/enabled";
 import { getActiveScorecard, loadContacts, saveScore } from "@/lib/radar/store";
 import { scoreContact } from "@/lib/radar/score";
@@ -16,8 +17,7 @@ export const dynamic = "force-dynamic";
 const BUDGET_MS = 50_000;
 
 export async function GET(request: NextRequest) {
-  const authz = request.headers.get("authorization");
-  if (env.CRON_SECRET && authz !== `Bearer ${env.CRON_SECRET}`) {
+  if (!isOperatorRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!isRadarEnabled()) {
