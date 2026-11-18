@@ -1,57 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
 import { env } from "@/lib/env";
+import { guardIngest, hmacSha256Hex, safeEqual } from "@/lib/ingest/guard";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
 
 export const runtime = "nodejs";
 
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
 /**
- * Accepts the webhook when VIDEOASK_WEBHOOK_SECRET is unset (back-compat), or when
- * the request proves the secret: either a raw shared-secret header, or an HMAC-SHA256
- * signature of the body. Keeps the previously-working webhook flowing while letting
- * production lock it down by setting the env var + configuring the secret in VideoAsk.
+ * Requires VIDEOASK_WEBHOOK_SECRET (rejects everything when unset). The request
+ * proves the secret with either a raw shared-secret header, or an HMAC-SHA256
+ * signature of the body.
  */
-function isAuthorized(rawBody: string, request: NextRequest): boolean {
-  const secret = env.VIDEOASK_WEBHOOK_SECRET;
-  if (!secret) return true;
-
+function isAuthorized(rawBody: string, request: NextRequest, secret: string): boolean {
   const shared =
     request.headers.get("x-videoask-secret") ?? request.headers.get("videoask-secret");
   if (shared && safeEqual(shared, secret)) return true;
 
   const signature =
     request.headers.get("x-videoask-signature") ?? request.headers.get("videoask-signature");
-  if (signature) {
-    const digest = createHmac("sha256", secret).update(rawBody).digest("hex");
-    if (safeEqual(signature, digest)) return true;
-  }
+  if (signature && safeEqual(signature, hmacSha256Hex(secret, rawBody))) return true;
 
   return false;
 }
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
+  const guard = await guardIngest(request, {
+    route: "videoask",
+    secret: env.VIDEOASK_WEBHOOK_SECRET,
+    authorize: isAuthorized,
+  });
+  if (!guard.ok) return guard.response;
 
-  if (!isAuthorized(rawBody, request)) {
-    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-  }
-
-  let payload: Record<string, unknown>;
-  try {
-    payload = JSON.parse(rawBody) as Record<string, unknown>;
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
-  }
-
+  const payload = guard.payload;
   await recordEvent("videoask", "response", payload);
 
   const p = payload as {
