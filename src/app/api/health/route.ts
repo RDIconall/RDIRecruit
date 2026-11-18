@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { hasAnthropic, hasSupabase, hasWorkable } from "@/lib/env";
+import { isOperatorRequest } from "@/lib/operator-auth";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { getSeedMethod, getSeedRubricForJob } from "@/lib/docs/seed";
 import { listJobs } from "@/lib/workable/client";
+import { WorkableApiError } from "@/lib/workable/errors";
 
 export async function GET(request: NextRequest) {
+  // The route is public (uptime checks). Anything beyond liveness touches the
+  // production Workable/Supabase credentials, so it is operator-only.
+  if (!isOperatorRequest(request)) {
+    return NextResponse.json({ ok: true });
+  }
+
   const deep = request.nextUrl.searchParams.get("deep") === "1";
   const integrations = {
     workable: hasWorkable(),
@@ -12,6 +20,8 @@ export async function GET(request: NextRequest) {
     anthropic: hasAnthropic(),
   };
 
+  // Upstream error text is logged, never returned: it can echo provider
+  // response bodies.
   let supabaseStatus: "ok" | "not_configured" | "error" = "not_configured";
   let migrationsApplied = false;
   let supabaseError: string | undefined;
@@ -24,8 +34,9 @@ export async function GET(request: NextRequest) {
         supabaseStatus = "error";
         supabaseError = "Schema not migrated — run supabase/migrations SQL";
       } else if (jobsError) {
+        console.error("Health check Supabase query failed", jobsError);
         supabaseStatus = "error";
-        supabaseError = jobsError.message;
+        supabaseError = jobsError.code ? `Supabase query failed (${jobsError.code})` : "Supabase query failed";
       } else {
         supabaseStatus = "ok";
         migrationsApplied = true;
@@ -40,8 +51,9 @@ export async function GET(request: NextRequest) {
         }
       }
     } catch (error) {
+      console.error("Health check Supabase connection failed", error);
       supabaseStatus = "error";
-      supabaseError = error instanceof Error ? error.message : "Supabase connection failed";
+      supabaseError = "Supabase connection failed";
     }
   }
 
@@ -71,16 +83,17 @@ export async function GET(request: NextRequest) {
       rubricSeeds[title] = r ? r.length : 0;
     }
 
-    let workableLive: { ok: boolean; jobs?: number; error?: string } = { ok: false };
+    let workableLive: { ok: boolean; jobs?: number; status?: number; error?: string } = { ok: false };
     if (hasWorkable()) {
       try {
         const jobs = await listJobs({ state: "published", limit: 50 });
         workableLive = { ok: true, jobs: jobs.length };
       } catch (error) {
-        workableLive = {
-          ok: false,
-          error: error instanceof Error ? error.message : "listJobs failed",
-        };
+        console.error("Health check Workable listJobs failed", error);
+        workableLive =
+          error instanceof WorkableApiError
+            ? { ok: false, status: error.status, error: "Workable API error" }
+            : { ok: false, error: "listJobs failed" };
       }
     }
 
