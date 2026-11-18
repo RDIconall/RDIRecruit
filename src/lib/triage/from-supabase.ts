@@ -21,6 +21,7 @@ import type {
 } from "../types";
 import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
+import { correctionAuthor, correctionReviewerKind } from "./founders";
 import { askNumK, cityState } from "./format";
 import { avatarColor, DECISION_NEXT, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision, normalizeProcessStatus } from "./types";
@@ -815,7 +816,7 @@ function careerProgressionFrom(ro: RoAssessmentRow | null): CareerProgression | 
 function latestReviewerKind(corrections: CorrectionEntry[] | undefined): CorrectionEntry["reviewerKind"] | undefined {
   if (!corrections?.length) return undefined;
   for (let i = corrections.length - 1; i >= 0; i--) {
-    if (corrections[i].reviewerKind) return corrections[i].reviewerKind;
+    if (corrections[i].reviewerKind) return correctionReviewerKind(corrections[i]);
   }
   return undefined;
 }
@@ -835,9 +836,9 @@ function reviewerFrom(
   for (let i = corrections.length - 1; i >= 0; i--) {
     const c = corrections[i];
     if (!c.reviewerKind) continue;
-    const who = c.reviewerLabel || c.reviewerKind;
+    const who = correctionAuthor(c) ?? "Reviewer";
     return {
-      rev: reviewerSignalFor(c.reviewerKind, decision),
+      rev: reviewerSignalFor(correctionReviewerKind(c), decision),
       revNote: `${who}: ${c.text}`,
     };
   }
