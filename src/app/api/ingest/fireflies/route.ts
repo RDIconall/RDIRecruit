@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
-import { hasSupabase } from "@/lib/env";
+import { env, hasSupabase } from "@/lib/env";
+import { guardIngest, hasSharedSecretHeader } from "@/lib/ingest/guard";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
 import {
   extractInlineTranscript,
@@ -19,9 +20,17 @@ export const runtime = "nodejs";
  * the webhook payload when present, otherwise fetched from the Fireflies GraphQL
  * API using FIREFLIES_API_KEY. The candidate is resolved from an explicit id in
  * the payload metadata, or by matching meeting participant emails to a candidate.
+ * The caller must send FIREFLIES_INGEST_SECRET in `x-fireflies-ingest-secret`.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const guard = await guardIngest(request, {
+    route: "fireflies",
+    secret: env.FIREFLIES_INGEST_SECRET,
+    authorize: (_raw, req, secret) => hasSharedSecretHeader(req, "x-fireflies-ingest-secret", secret),
+  });
+  if (!guard.ok) return guard.response;
+
+  const payload = guard.payload;
   await recordEvent("fireflies", "transcript_ready", payload);
 
   if (!hasSupabase()) {

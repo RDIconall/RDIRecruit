@@ -36,6 +36,11 @@ const envSchema = z.object({
   VIDEOASK_WEBHOOK_SECRET: z.string().optional(),
   CALENDLY_TOKEN: z.string().optional(),
   FIREFLIES_API_KEY: z.string().optional(),
+  // Shared secrets for the public event-queue routes. Each route rejects every
+  // request while its secret is unset (see lib/ingest/guard.ts).
+  CALENDLY_WEBHOOK_SECRET: z.string().optional(),
+  FIREFLIES_INGEST_SECRET: z.string().optional(),
+  GMAIL_INGEST_SECRET: z.string().optional(),
   // Geoapify (free tier: 3,000 credits/day, no card) — geocoding + driving-time
   // for the candidate commute read. Optional: when unset we fall back to the
   // Claude geographic estimate. https://www.geoapify.com/

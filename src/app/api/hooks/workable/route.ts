@@ -3,6 +3,7 @@ import { env } from "@/lib/env";
 import { markEventFailure, markEventProcessed, recordEvent } from "@/lib/sync/workable-sync";
 import { syncCandidateFromWebhook } from "@/lib/sync/incremental-sync";
 import { eventFailureStatus } from "@/lib/sync/event-queue";
+import { guardIngest } from "@/lib/ingest/guard";
 import { verifyWorkableSignature } from "@/lib/workable/client";
 
 // Workable SPI v3 only exposes two subscribable candidate events:
@@ -15,22 +16,17 @@ import { verifyWorkableSignature } from "@/lib/workable/client";
 // https://workable.readme.io/reference/webhook-subscriptions
 const HANDLED_EVENTS = new Set(["candidate_created", "candidate_moved"]);
 
+/** Requires WORKABLE_WEBHOOK_SECRET; every request is rejected while it is unset. */
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
-  const signature = request.headers.get("X-Workable-Signature");
+  const guard = await guardIngest(request, {
+    route: "workable",
+    secret: env.WORKABLE_WEBHOOK_SECRET,
+    authorize: (raw, req, secret) =>
+      verifyWorkableSignature(raw, req.headers.get("X-Workable-Signature"), secret),
+  });
+  if (!guard.ok) return guard.response;
 
-  if (env.WORKABLE_WEBHOOK_SECRET) {
-    const valid = verifyWorkableSignature(
-      rawBody,
-      signature,
-      env.WORKABLE_WEBHOOK_SECRET,
-    );
-    if (!valid) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-    }
-  }
-
-  const payload = JSON.parse(rawBody) as {
+  const payload = guard.payload as {
     id?: string;
     event_type?: string;
     type?: string;
