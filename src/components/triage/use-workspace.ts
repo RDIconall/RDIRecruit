@@ -2,8 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
-import { reviewerKindLabel } from "@/lib/triage/reviewer";
+import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, TimelineRow, Workspace } from "@/lib/triage/types";
 import {
   bulkDisqualify,
   clearCandidateChat,
@@ -59,7 +58,7 @@ export interface WorkspaceApi {
   removeRow: (id: string, idx: number) => void;
   setReply: (id: string, key: string, val: string) => void;
   setTranscript: (id: string, val: string) => void;
-  addCorrection: (id: string, text: string, reviewerKind?: ReviewerKind) => void;
+  addCorrection: (id: string, text: string) => void;
   /** Append a human entry to the candidate's activity log (interview/note/comment). */
   logActivity: (id: string, type: ActivityType, body: string) => void;
   /** Re-run the evaluator over the activity-log delta and re-persist the pinned assessment. */
@@ -372,19 +371,14 @@ export function useWorkspace(
   );
 
   const addCorrection = useCallback(
-    (id: string, text: string, reviewerKind?: ReviewerKind) => {
+    (id: string, text: string) => {
       const v = text.trim();
       if (!v) return;
-      // Optimistic entry: stamp the picked reviewer's label; the server persists the
-      // authoritative Clerk-derived label/id on its write.
-      const optimistic = {
-        ts: nowStamp(),
-        text: v,
-        ...(reviewerKind ? { reviewerKind, reviewerLabel: reviewerKindLabel(reviewerKind) } : {}),
-      };
+      // Optimistic entry; the server stamps the reviewer from the Clerk session.
+      const optimistic = { ts: nowStamp(), text: v };
       const log = [...(wsRef.current.corrections[id] || []), optimistic];
       setWs((w) => ({ ...w, corrections: { ...w.corrections, [id]: log } }));
-      void handleRecalc(id, () => saveCorrection({ candidateId: id, text: v, reviewerKind }));
+      void handleRecalc(id, () => saveCorrection({ candidateId: id, text: v }));
     },
     [handleRecalc],
   );

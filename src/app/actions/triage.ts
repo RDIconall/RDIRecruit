@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@clerk/nextjs/server";
+import { requireActor, type Actor } from "@/lib/auth/actor";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
 import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
@@ -13,7 +13,8 @@ import { prepareGradingInputs, describeMissing } from "@/lib/triage/readiness";
 import { chatWithClaude } from "@/lib/triage/chat";
 import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-phase";
 import { DM } from "@/lib/triage/theme";
-import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
+import { reviewerSignalFor } from "@/lib/triage/reviewer";
+import { actorLabel } from "@/lib/triage/founders";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import type {
   ActivityEntry,
@@ -24,7 +25,6 @@ import type {
   Decision,
   DecisionRead,
   ProcessStatus,
-  ReviewerKind,
   TimelineRow,
   WorkspaceSlice,
 } from "@/lib/triage/types";
@@ -39,37 +39,6 @@ const VALID_PROCESS_STATUS: ProcessStatus[] = [
   "hired",
   "passed",
 ];
-
-async function requireAuth(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
-}
-
-interface ReviewerIdentity {
-  id?: string;
-  label?: string;
-  kind: ReviewerKind;
-}
-
-/** Resolve the acting reviewer from Clerk, mapping name/email → reviewer kind (#7). */
-async function reviewerIdentity(): Promise<ReviewerIdentity> {
-  try {
-    const { currentUser } = await import("@clerk/nextjs/server");
-    const user = await currentUser();
-    if (!user) return { kind: "other" };
-    const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
-    const email = user.emailAddresses?.[0]?.emailAddress;
-    const label = name || (email ? email.split("@")[0] : undefined);
-    return { id: user.id, label, kind: reviewerKindFrom(label || email) };
-  } catch {
-    return { kind: "other" };
-  }
-}
-
-async function reviewerLabel(): Promise<string | undefined> {
-  return (await reviewerIdentity()).label;
-}
 
 function nowStamp(): string {
   return new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
@@ -109,12 +78,13 @@ interface RecalcResult {
 async function persistAndMaybeRecalc(
   candidateId: string,
   patch: WorkspaceSlice,
-  opts: { recalc: boolean; trigger?: string; reviewer?: ReviewerIdentity },
+  opts: { actor: Actor; recalc: boolean; trigger?: string; reviewerSignal?: boolean },
 ): Promise<RecalcResult> {
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
 
-  const reviewer = opts.reviewer;
-  const updatedBy = reviewer?.label ?? (await reviewerLabel());
+  const actor = opts.actor;
+  const reviewer = opts.reviewerSignal ? actor : undefined;
+  const updatedBy = actor.id;
   // Write the human edit first so it survives even if Claude is unavailable.
   await upsertWorkingFile(candidateId, { workspace: patch }, updatedBy);
 
@@ -159,17 +129,17 @@ async function persistAndMaybeRecalc(
     if (read) {
       // #7: carry the reviewer-signal lens (rev/revNote) on the persisted read so
       // the pool + candidate views show the human's signal, not a generic "none".
-      if (reviewer && updatedBy) {
+      if (reviewer) {
         read = {
           ...read,
           rev: reviewerSignalFor(reviewer.kind, read.decision),
-          revNote: `${updatedBy}: ${read.timelineNote || read.why}`.slice(0, 200),
+          revNote: `${reviewer.label}: ${read.timelineNote || read.why}`.slice(0, 200),
         };
       }
       // When a human note moved the decision, surface the before→after with the
       // real human reviewer (person), not the trigger type.
       if (read.decision !== priorDecision) {
-        const who = updatedBy ? `${updatedBy} (human signal)` : opts.trigger ?? "Human signal";
+        const who = `${actor.label} (human signal)`;
         read = {
           ...read,
           reanalysis: {
@@ -214,55 +184,44 @@ async function persistAndMaybeRecalc(
   };
 }
 
-export async function saveCorrection(input: {
-  candidateId: string;
-  text: string;
-  reviewerKind?: ReviewerKind;
-}): Promise<RecalcResult> {
-  await requireAuth();
+/** The reviewer on the correction is always the signed-in Clerk user; founder status comes from the id allowlist. */
+export async function saveCorrection(input: { candidateId: string; text: string }): Promise<RecalcResult> {
+  const actor = await requireActor();
   const text = input.text.trim();
   if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
-
-  // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
-  const ident = await reviewerIdentity();
-  const kind = input.reviewerKind ?? ident.kind;
-  const label =
-    ident.label && reviewerKindFrom(ident.label) === kind ? ident.label : reviewerKindLabel(kind);
-  const reviewer: ReviewerIdentity = { id: ident.id, label, kind };
 
   const entry: CorrectionEntry = {
     ts: nowStamp(),
     text,
-    reviewerId: ident.id,
-    reviewerLabel: label,
-    reviewerKind: kind,
+    reviewerId: actor.id,
+    reviewerLabel: actor.label,
+    reviewerKind: actor.kind,
   };
   const existing = await getWorkingFile(input.candidateId);
   const corrections = [...(existing?.workspace.corrections ?? []), entry];
-  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction", reviewer });
+  return persistAndMaybeRecalc(input.candidateId, { corrections }, { actor, recalc: true, trigger: "Human correction", reviewerSignal: true });
 }
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
-  await requireAuth();
-  const reviewer = await reviewerIdentity();
-  return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
+  const actor = await requireActor();
+  return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { actor, recalc: true, trigger: "Interview transcript", reviewerSignal: true });
 }
 
 export async function runDeepAnalysis(input: { candidateId: string }): Promise<RecalcResult> {
-  await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { deep: true }, { recalc: true, trigger: "Deep analysis" });
+  const actor = await requireActor();
+  return persistAndMaybeRecalc(input.candidateId, { deep: true }, { actor, recalc: true, trigger: "Deep analysis" });
 }
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {
-  await requireAuth();
+  const actor = await requireActor();
   const existing = await getWorkingFile(input.candidateId);
   const replies = { ...(existing?.workspace.replies ?? {}), [input.key]: input.value };
-  return persistAndMaybeRecalc(input.candidateId, { replies }, { recalc: false });
+  return persistAndMaybeRecalc(input.candidateId, { replies }, { actor, recalc: false });
 }
 
 export async function saveTimeline(input: { candidateId: string; ovr: TimelineRow[] }): Promise<RecalcResult> {
-  await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { ovr: input.ovr }, { recalc: false });
+  const actor = await requireActor();
+  return persistAndMaybeRecalc(input.candidateId, { ovr: input.ovr }, { actor, recalc: false });
 }
 
 /**
@@ -270,11 +229,11 @@ export async function saveTimeline(input: { candidateId: string; ovr: TimelineRo
  * that wins over the model read until the next Claude re-analysis clears it.
  */
 export async function setDecision(input: { candidateId: string; decision: Decision }): Promise<RecalcResult> {
-  await requireAuth();
+  const actor = await requireActor();
   if (!VALID_DECISIONS.includes(input.decision)) {
     return { ok: false, recalculated: false, read: null, message: "Invalid decision" };
   }
-  return persistAndMaybeRecalc(input.candidateId, { decisionOverride: input.decision }, { recalc: false });
+  return persistAndMaybeRecalc(input.candidateId, { decisionOverride: input.decision }, { actor, recalc: false });
 }
 
 /**
@@ -288,7 +247,7 @@ export async function setProcessStatus(input: {
   candidateId: string;
   status: ProcessStatus | null;
 }): Promise<RecalcResult> {
-  await requireAuth();
+  const actor = await requireActor();
   const status = input.status === null ? null : normalizeProcessStatus(input.status);
   if (input.status !== null && status === null) {
     return { ok: false, recalculated: false, read: null, message: "Invalid process status" };
@@ -296,13 +255,13 @@ export async function setProcessStatus(input: {
   if (status !== null && !VALID_PROCESS_STATUS.includes(status)) {
     return { ok: false, recalculated: false, read: null, message: "Invalid process status" };
   }
-  return persistAndMaybeRecalc(input.candidateId, { processStatus: status }, { recalc: false });
+  return persistAndMaybeRecalc(input.candidateId, { processStatus: status }, { actor, recalc: false });
 }
 
 /** Re-run Claude on the current materials (with the per-role rubric). Clears any manual override. */
 export async function reanalyze(input: { candidateId: string }): Promise<RecalcResult> {
-  await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, {}, { recalc: true, trigger: "Re-analysis" });
+  const actor = await requireActor();
+  return persistAndMaybeRecalc(input.candidateId, {}, { actor, recalc: true, trigger: "Re-analysis" });
 }
 
 /** What happened to the candidate's status in Workable as a result of a triage cut. */
@@ -372,7 +331,7 @@ export async function setDisqualified(input: {
   disqualified: boolean;
   reason?: string;
 }): Promise<{ ok: boolean; workable: WorkableSync }> {
-  await requireAuth();
+  const actor = await requireActor();
   if (!hasSupabase()) return { ok: false, workable: "skipped" };
   const reason = input.reason?.trim() || "Cut via triage";
   await upsertOverlay(
@@ -380,7 +339,7 @@ export async function setDisqualified(input: {
     input.disqualified
       ? { status: "disqualified", status_reason: reason }
       : { status: "active", status_reason: null },
-    await reviewerLabel(),
+    actor.id,
   );
 
   const workable = await pushDisqualifyToWorkable(input.candidateId, input.disqualified, reason);
@@ -392,7 +351,7 @@ export async function setDisqualified(input: {
       workableUrl: one.workableUrl,
       disqualified: input.disqualified,
     });
-    await upsertWorkingFile(input.candidateId, { content }, await reviewerLabel());
+    await upsertWorkingFile(input.candidateId, { content }, actor.id);
   }
   revalidatePath("/");
   return { ok: true, workable };
@@ -402,9 +361,8 @@ export async function bulkDisqualify(input: {
   candidateIds: string[];
   disqualified: boolean;
 }): Promise<{ ok: boolean; count: number; workableDisqualified: number; workableFailed: number }> {
-  await requireAuth();
+  const actor = await requireActor();
   if (!hasSupabase()) return { ok: false, count: 0, workableDisqualified: 0, workableFailed: 0 };
-  const label = await reviewerLabel();
   let workableDisqualified = 0;
   let workableFailed = 0;
   for (const id of input.candidateIds) {
@@ -413,7 +371,7 @@ export async function bulkDisqualify(input: {
       input.disqualified
         ? { status: "disqualified", status_reason: "Cut via triage" }
         : { status: "active", status_reason: null },
-      label,
+      actor.id,
     );
     const res = await pushDisqualifyToWorkable(id, input.disqualified, "Cut via triage");
     if (res === "disqualified" || res === "reinstated") workableDisqualified += 1;
@@ -428,9 +386,8 @@ export async function bulkDisqualify(input: {
  * (or refreshing) the rubric-fit section. No workspace edit — just a recalc pass.
  */
 export async function compareToRubric(input: { candidateId: string }): Promise<RecalcResult> {
-  await requireAuth();
-  const reviewer = await reviewerIdentity();
-  return persistAndMaybeRecalc(input.candidateId, {}, { recalc: true, trigger: "Rubric comparison", reviewer });
+  const actor = await requireActor();
+  return persistAndMaybeRecalc(input.candidateId, {}, { actor, recalc: true, trigger: "Rubric comparison", reviewerSignal: true });
 }
 
 // ---- Activity log (HANDOFF-v2 §2) — the human-authored record ----
@@ -446,7 +403,7 @@ async function fetchActivity(candidateId: string): Promise<ActivityEntry[]> {
   return ((data ?? []) as Array<{ id: string; type: string | null; author: string | null; body: string; created_at: string }>).map((r) => ({
     id: r.id,
     type: r.type === "interview" || r.type === "comment" ? r.type : "note",
-    author: r.author || "—",
+    author: r.author ? actorLabel(r.author) : "—",
     body: r.body,
     at: r.created_at,
   }));
@@ -479,24 +436,21 @@ function activityDigest(acts: ActivityEntry[]): { transcript: string; notes: Cor
   return { transcript, notes };
 }
 
-/** Append a human entry to the candidate's activity log. Claude never writes here. */
+/** Append a human entry to the candidate's activity log, authored by the signed-in Clerk user. Claude never writes here. */
 export async function logActivity(input: {
   candidateId: string;
   type: ActivityType;
-  author?: string;
   body: string;
 }): Promise<{ ok: boolean; entry: ActivityEntry | null; message?: string }> {
-  await requireAuth();
+  const actor = await requireActor();
   const body = input.body.trim();
   if (!body) return { ok: false, entry: null, message: "Empty entry" };
   if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
 
-  const ident = await reviewerIdentity();
-  const author = input.author?.trim() || ident.label || "You";
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("activity")
-    .insert({ candidate_id: input.candidateId, type: input.type, author, body })
+    .insert({ candidate_id: input.candidateId, type: input.type, author: actor.id, body })
     .select("id, created_at")
     .single();
   if (error || !data) {
@@ -504,7 +458,10 @@ export async function logActivity(input: {
     return { ok: false, entry: null, message: "Save failed — please retry." };
   }
   revalidatePath("/");
-  return { ok: true, entry: { id: data.id as string, type: input.type, author, body, at: data.created_at as string } };
+  return {
+    ok: true,
+    entry: { id: data.id as string, type: input.type, author: actor.label, body, at: data.created_at as string },
+  };
 }
 
 /**
@@ -516,7 +473,7 @@ export async function logActivity(input: {
 export async function updateAssessment(input: {
   candidateId: string;
 }): Promise<RecalcResult & { regenAt?: string }> {
-  await requireAuth();
+  const actor = await requireActor();
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
 
   let one = await loadOneCandidate(input.candidateId);
@@ -553,7 +510,7 @@ export async function updateAssessment(input: {
     // Persist the blocked read so the UI shows exactly what grading is waiting on.
     const blockedCandidate = applyRead(one.candidate, read);
     const blockedContent = renderWorkingFile(blockedCandidate, one.slice, { workableUrl: one.workableUrl, disqualified: one.disqualified });
-    await upsertWorkingFile(input.candidateId, { content: blockedContent, read }, await reviewerLabel());
+    await upsertWorkingFile(input.candidateId, { content: blockedContent, read }, actor.id);
     revalidatePath("/");
     return {
       ok: true,
@@ -581,7 +538,7 @@ export async function updateAssessment(input: {
 
   const candidate = applyRead(one.candidate, read);
   const content = renderWorkingFile(candidate, one.slice, { workableUrl: one.workableUrl, disqualified: one.disqualified });
-  await upsertWorkingFile(input.candidateId, { content, read }, await reviewerLabel());
+  await upsertWorkingFile(input.candidateId, { content, read }, actor.id);
   revalidatePath("/");
   return { ok: true, recalculated: true, read, regenAt: nowStamp() };
 }
@@ -603,19 +560,18 @@ export async function sendCandidateChat(input: {
   candidateId: string;
   message: string;
 }): Promise<ChatResult> {
-  await requireAuth();
+  const actor = await requireActor();
   const text = input.message.trim();
   if (!text) return { ok: false, messages: [], message: "Empty message" };
   if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
 
-  const ident = await reviewerIdentity();
   const existing = await getWorkingFile(input.candidateId);
   const history = existing?.workspace.chat ?? [];
   const userMsg: ChatMessage = {
     role: "user",
     content: text,
     ts: new Date().toISOString(),
-    author: ident.label,
+    author: actor.id,
   };
   const withUser = [...history, userMsg];
 
@@ -714,7 +670,7 @@ export async function sendCandidateChat(input: {
     : withUser;
 
   // Persist the human turn (and Claude's reply when we got one) either way.
-  await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, ident.label);
+  await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, actor.id);
 
   return {
     ok: Boolean(reply),
@@ -725,9 +681,9 @@ export async function sendCandidateChat(input: {
 
 /** Clear a candidate's war-room conversation. */
 export async function clearCandidateChat(input: { candidateId: string }): Promise<{ ok: boolean }> {
-  await requireAuth();
+  const actor = await requireActor();
   if (!hasSupabase()) return { ok: false };
-  await upsertWorkingFile(input.candidateId, { workspace: { chat: [] } }, await reviewerLabel());
+  await upsertWorkingFile(input.candidateId, { workspace: { chat: [] } }, actor.id);
   return { ok: true };
 }
 
@@ -735,7 +691,7 @@ export async function clearCandidateChat(input: { candidateId: string }): Promis
 export async function getJobRubricContent(input: {
   jobShortcode: string;
 }): Promise<{ rubricMd: string; specMd: string }> {
-  await requireAuth();
+  await requireActor();
   return getJobRubric(input.jobShortcode);
 }
 
@@ -745,12 +701,12 @@ export async function saveJobRubric(input: {
   rubricMd?: string;
   specMd?: string;
 }): Promise<{ ok: boolean }> {
-  await requireAuth();
+  const actor = await requireActor();
   if (!hasSupabase()) return { ok: false };
   await upsertJobRubric(
     input.jobShortcode,
     { rubricMd: input.rubricMd, specMd: input.specMd },
-    await reviewerLabel(),
+    actor.id,
   );
   revalidatePath("/");
   return { ok: true };
@@ -764,7 +720,7 @@ export async function saveJobRubric(input: {
 export async function resyncCandidate(input: {
   candidateId: string;
 }): Promise<{ ok: boolean; message: string }> {
-  await requireAuth();
+  await requireActor();
   if (!hasSupabase()) return { ok: false, message: "Supabase not configured." };
   if (!hasWorkable()) return { ok: false, message: "Workable not configured." };
 
@@ -819,7 +775,7 @@ export async function resyncCandidate(input: {
 
 /** Returns the stored .md, regenerating from current data if none has been saved yet. */
 export async function getWorkingFileContent(input: { candidateId: string }): Promise<{ content: string }> {
-  await requireAuth();
+  await requireActor();
   const existing = await getWorkingFile(input.candidateId);
   if (existing?.content) return { content: existing.content };
 
@@ -841,7 +797,7 @@ export async function moveCandidateToStage(input: {
   candidateId: string;
   targetStage: string;
 }): Promise<{ ok: boolean; stage?: string; error?: string; workable?: "moved" | "skipped" | "failed" }> {
-  await requireAuth();
+  await requireActor();
   const target = input.targetStage?.trim();
   if (!target) return { ok: false, error: "No target stage" };
   if (target === "disqualified") {
@@ -882,7 +838,7 @@ export async function sendCandidateToScreen(input: {
   jobShortcode: string;
   candidateId: string;
 }): Promise<{ ok: boolean; stage?: string; error?: string; workable?: "moved" | "skipped" | "failed" }> {
-  await requireAuth();
+  await requireActor();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured", workable: "skipped" };
   try {
     const { listStages } = await import("@/lib/workable/client");

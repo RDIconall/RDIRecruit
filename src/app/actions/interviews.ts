@@ -19,25 +19,24 @@ export type InterviewKind = "interview" | "phone_screen";
  * Store a pasted-in interview transcript as its OWN evidence row (never overwriting
  * prior interviews), then recalculate the candidate's read. Each call adds one
  * round — "Phone screen", "Onsite 1", etc. — so a candidate accumulates a full
- * interview history that the evaluator weighs heavily.
+ * interview history that the evaluator weighs heavily. The row is attributed to
+ * the signed-in Clerk user; speaker labels inside the transcript stay authoritative.
  */
 export async function addInterviewEvidence(input: {
   candidateId: string;
   jobShortcode: string;
   kind: InterviewKind;
   label: string;
-  author?: string | null;
   date?: string | null;
   transcript: string;
 }) {
-  await requireAuth();
+  const author = await requireAuth();
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const transcript = input.transcript.trim();
   if (!transcript) return { ok: false as const, error: "Paste the interview transcript first." };
 
   const label = input.label.trim() || (input.kind === "phone_screen" ? "Phone screen" : "Interview");
-  const author = input.author?.trim() || null;
   const capturedAt = parseDate(input.date);
 
   const supabase = getServiceSupabase();

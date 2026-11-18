@@ -1,5 +1,6 @@
 // Pure reviewer-identity helpers (#7). No server-only imports — safe to use from
-// both the server actions (Clerk-derived label) and the client corrections UI.
+// both the server actions and the client corrections UI. Which Clerk user is a
+// founder is decided server-side in ./founders.
 
 import type { Decision, ReviewerKind, ReviewerSignal } from "./types";
 
@@ -7,14 +8,6 @@ export interface Viewer {
   id?: string;
   label: string;
   kind: ReviewerKind;
-}
-
-/** Map a human's name/email to a reviewer kind. Defaults to "other". */
-export function reviewerKindFrom(text: string | null | undefined): ReviewerKind {
-  const t = (text ?? "").toLowerCase();
-  if (t.includes("conall")) return "conall";
-  if (t.includes("lara")) return "lara";
-  return "other";
 }
 
 export function reviewerKindLabel(kind: ReviewerKind): string {
