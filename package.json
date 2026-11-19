@@ -45,5 +45,8 @@
     "supabase": "^2.106.0",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "sharp": "^0.35.5"
   }
 }
