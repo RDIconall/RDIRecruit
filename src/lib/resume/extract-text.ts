@@ -1,15 +1,25 @@
 import mammoth from "mammoth";
 import { ensurePdfPolyfills } from "./pdf-polyfills";
 import { MIN_RESUME_TEXT } from "./constants";
+import { RESUME_BYTE_LIMIT, ResumeByteLimitError } from "./byte-limit";
+import { openBoundedDocx } from "./docx-package";
+import { sanitizePdfForParsing } from "./pdf-budget";
 
 export async function extractTextFromResume(
   buffer: Buffer,
   mime: string,
   extension: string,
 ): Promise<string> {
+  if (buffer.length > RESUME_BYTE_LIMIT) {
+    throw new ResumeByteLimitError(`file is ${buffer.length} bytes, over ${RESUME_BYTE_LIMIT}`);
+  }
   const ext = extension.toLowerCase();
 
   if (mime.includes("pdf") || ext === "pdf") {
+    // Measure and rewrite the PDF before either parser sees it; pdf-parse and
+    // mupdf only ever receive the bounded rewrite (see ./pdf-budget).
+    const { textPdf, renderPdf, maxImageBytes } = await sanitizePdfForParsing(buffer);
+
     // pdf-parse v2 removed the v1 default-export function in favour of a
     // PDFParse class. The constructor accepts binary data (we pass a Uint8Array)
     // and getText() returns the concatenated document text. A minimal local type
@@ -26,7 +36,7 @@ export async function extractTextFromResume(
     // module can evaluate in any Node runtime.
     ensurePdfPolyfills();
     const { PDFParse } = (await import("pdf-parse")) as unknown as PdfParseModule;
-    const parser = new PDFParse({ data: new Uint8Array(buffer) });
+    const parser = new PDFParse({ data: new Uint8Array(textPdf) });
     let text: string;
     try {
       const result = await parser.getText();
@@ -42,9 +52,10 @@ export async function extractTextFromResume(
     if (text.length < MIN_RESUME_TEXT) {
       try {
         const { ocrPdfText } = await import("./ocr");
-        const ocr = normalizeText(await ocrPdfText(buffer));
+        const ocr = normalizeText(await ocrPdfText(renderPdf, maxImageBytes));
         if (ocr.length > text.length) text = ocr;
       } catch (error) {
+        if (error instanceof ResumeByteLimitError) throw error;
         // OCR is best-effort: keep the (short) extracted text on any failure.
         console.warn("resume.extract.ocr_fallback_failed", error instanceof Error ? error.message : error);
       }
@@ -58,7 +69,10 @@ export async function extractTextFromResume(
     ext === "docx" ||
     ext === "doc"
   ) {
-    const result = await mammoth.extractRawText({ buffer });
+    // mammoth accepts a pre-opened package as `file`; the bounded package keeps
+    // every part it reads inside the same byte budget as the download.
+    const file = openBoundedDocx(buffer, RESUME_BYTE_LIMIT);
+    const result = await mammoth.extractRawText({ file } as unknown as Parameters<typeof mammoth.extractRawText>[0]);
     return normalizeText(result.value ?? "");
   }
 

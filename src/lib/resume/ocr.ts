@@ -1,4 +1,5 @@
 import "server-only";
+import { IMAGE_BYTE_LIMIT, RASTER_BYTE_LIMIT, ResumeByteLimitError } from "./byte-limit";
 
 /**
  * OCR fallback for scanned / image-only PDFs whose text layer is empty or near-
@@ -53,10 +54,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise
  * recognized text (may be empty on any failure). Never throws and always
  * returns within ~OCR_BUDGET_MS.
  */
-export async function ocrPdfText(buffer: Buffer): Promise<string> {
+export async function ocrPdfText(buffer: Buffer, maxImageBytes: number): Promise<string> {
   const start = Date.now();
 
-  const pngPages = await renderPdfPagesToPng(buffer);
+  const pngPages = await renderPdfPagesToPng(buffer, maxImageBytes);
   if (!pngPages.length) return "";
 
   let worker: Awaited<ReturnType<typeof import("tesseract.js")["createWorker"]>> | null = null;
@@ -92,7 +93,25 @@ export async function ocrPdfText(buffer: Buffer): Promise<string> {
   }
 }
 
-async function renderPdfPagesToPng(buffer: Buffer): Promise<Uint8Array[]> {
+/** Pixmap bytes for a page at RENDER_SCALE in RGB, from the bounds mupdf renders. */
+function pagePixmapBytes(bounds: number[]): number {
+  const [x0, y0, x1, y1] = bounds;
+  const width = Math.ceil((x1 - x0) * RENDER_SCALE);
+  const height = Math.ceil((y1 - y0) * RENDER_SCALE);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width < 0 || height < 0) return Infinity;
+  return width * height * 3;
+}
+
+/**
+ * `buffer` must be the rewrite from sanitizePdfForParsing, whose content
+ * streams are already inside the decode budget; images and page rasters are
+ * checked here before mupdf allocates them.
+ */
+async function renderPdfPagesToPng(buffer: Buffer, maxImageBytes: number): Promise<Uint8Array[]> {
+  if (maxImageBytes > IMAGE_BYTE_LIMIT) {
+    throw new ResumeByteLimitError(`PDF image decodes to ${maxImageBytes} bytes, over ${IMAGE_BYTE_LIMIT}`);
+  }
+
   let mupdf: typeof import("mupdf");
   try {
     mupdf = await import("mupdf");
@@ -102,21 +121,33 @@ async function renderPdfPagesToPng(buffer: Buffer): Promise<Uint8Array[]> {
   }
 
   const pages: Uint8Array[] = [];
+  let doc: ReturnType<typeof mupdf.Document.openDocument> | null = null;
   try {
-    const doc = mupdf.Document.openDocument(new Uint8Array(buffer), "application/pdf");
+    doc = mupdf.Document.openDocument(new Uint8Array(buffer), "application/pdf");
     const count = Math.min(doc.countPages(), MAX_OCR_PAGES);
     const matrix = mupdf.Matrix.scale(RENDER_SCALE, RENDER_SCALE);
     for (let i = 0; i < count; i += 1) {
       const page = doc.loadPage(i);
-      const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false);
-      pages.push(pixmap.asPNG());
-      pixmap.destroy();
-      page.destroy();
+      try {
+        const bytes = pagePixmapBytes(page.getBounds());
+        if (bytes > RASTER_BYTE_LIMIT) {
+          throw new ResumeByteLimitError(`page ${i + 1} renders to ${bytes} bytes, over ${RASTER_BYTE_LIMIT}`);
+        }
+        // Annotations are skipped: their appearance streams are not measured.
+        const pixmap = page.toPixmap(matrix, mupdf.ColorSpace.DeviceRGB, false, false);
+        pages.push(pixmap.asPNG());
+        pixmap.destroy();
+      } finally {
+        page.destroy();
+      }
     }
-    doc.destroy();
   } catch (error) {
+    if (error instanceof ResumeByteLimitError) throw error;
     console.warn("resume.ocr.render_failed", error instanceof Error ? error.message : error);
     return pages;
+  } finally {
+    doc?.destroy();
+    mupdf.emptyStore();
   }
   return pages;
 }
