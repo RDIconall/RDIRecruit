@@ -1,5 +1,6 @@
 import { hasAnthropic, hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
+import { loadReviewerPinnedIds } from "../scoring/reviewer-pin";
 import type { WorkableCandidate, WorkableJob } from "../workable/client";
 import { getCandidate, getJob, listAllCandidates, listJobs } from "../workable/client";
 import { computeApplicationFingerprint } from "./candidate-hash";
@@ -518,37 +519,31 @@ async function runScoreUnscoredPass(options?: {
   const concurrency = options?.concurrency ?? 8;
   const supabase = getServiceSupabase();
 
-  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }, { data: dqOverlayRows }] =
+  const [{ data: candidateRows }, { data: scoredRows }, { data: epochRows }, { data: dqOverlayRows }, locked] =
     await Promise.all([
       supabase.from("candidates").select("workable_id, job_shortcode, created_at, disqualified"),
       supabase
         .from("evaluations")
-        .select("candidate_id, created_at, model_version")
+        .select("candidate_id, created_at")
         .eq("kind", "fit_read"),
       supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
       supabase.from("candidate_overlay").select("candidate_id").eq("status", "disqualified"),
+      // Reviewer overrides are locked — never auto-overwrite a human's corrected read.
+      loadReviewerPinnedIds(supabase),
     ]);
 
   // Disqualified candidates (Workable state or app overlay) are out of the pool —
   // never spend an evaluation on them. Mirrors the reanalyze cron's eligibility.
   const disqualifiedOverlay = new Set((dqOverlayRows ?? []).map((r) => r.candidate_id as string));
 
-  // Latest score (timestamp + model) per candidate.
+  // Latest fit read timestamp per candidate.
   const latestScoreAt = new Map<string, string>();
-  const latestModel = new Map<string, string>();
   for (const r of scoredRows ?? []) {
     const id = r.candidate_id as string;
     const at = (r.created_at as string) ?? "";
     const prev = latestScoreAt.get(id);
-    if (!prev || at > prev) {
-      latestScoreAt.set(id, at);
-      latestModel.set(id, (r.model_version as string | null) ?? "");
-    }
+    if (!prev || at > prev) latestScoreAt.set(id, at);
   }
-  // Reviewer overrides are locked — never auto-overwrite a human's corrected read.
-  const locked = new Set(
-    [...latestModel.entries()].filter(([, m]) => m === "reviewer-override").map(([id]) => id),
-  );
 
   // Scoring epoch per scope (job shortcode or 'global'). A candidate is stale
   // when its latest score predates the effective epoch for its seat.

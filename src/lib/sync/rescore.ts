@@ -26,6 +26,9 @@ export async function rescoreCandidateOnNewEvidence(
     ...(options?.immediate ? {} : { transport: "enqueue" as const }),
     trigger: reason,
   });
+  if ("locked" in result && result.locked) {
+    return { scored: false, queued: false, locked: true as const, result, batch: null };
+  }
   const batch = options?.immediate
     ? null
     : await (async () => {

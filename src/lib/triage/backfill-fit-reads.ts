@@ -108,7 +108,9 @@ export async function backfillMissingFitReads(options?: {
   const enqueueLimit = options?.enqueueLimit ?? DEFAULT_ENQUEUE_LIMIT;
   const started = Date.now();
 
-  const [candidateRows, overlayRows, fitReadRows, analysisRows] = await Promise.all([
+  const { getServiceSupabase } = await import("../supabase/server");
+  const { loadReviewerPinnedIds } = await import("../scoring/reviewer-pin");
+  const [candidateRows, overlayRows, fitReadRows, analysisRows, reviewerPinnedIds] = await Promise.all([
     fetchPaged<{
       workable_id: string;
       job_shortcode: string | null;
@@ -118,11 +120,9 @@ export async function backfillMissingFitReads(options?: {
     fetchPaged<{ candidate_id: string }>("candidate_overlay", "candidate_id", {
       eq: { column: "status", value: "disqualified" },
     }),
-    fetchPaged<{ candidate_id: string; model_version: string | null }>(
-      "evaluations",
-      "candidate_id, model_version",
-      { eq: { column: "kind", value: "fit_read" } },
-    ),
+    fetchPaged<{ candidate_id: string }>("evaluations", "candidate_id", {
+      eq: { column: "kind", value: "fit_read" },
+    }),
     fetchPaged<{
       candidate_id: string;
       result: FitReadEvaluationSource | null;
@@ -131,6 +131,7 @@ export async function backfillMissingFitReads(options?: {
       eq: { column: "status", value: "completed" },
       order: "completed_at",
     }),
+    loadReviewerPinnedIds(getServiceSupabase()),
   ]);
 
   const latestAnalysis = new Map<string, FitReadEvaluationSource>();
@@ -148,9 +149,7 @@ export async function backfillMissingFitReads(options?: {
     })),
     overlayDisqualifiedIds: overlayRows.map((row) => row.candidate_id),
     fitReadIds: fitReadRows.map((row) => row.candidate_id),
-    reviewerLockedIds: fitReadRows
-      .filter((row) => row.model_version === "reviewer-override")
-      .map((row) => row.candidate_id),
+    reviewerLockedIds: reviewerPinnedIds,
     completedAnalysisIds: latestAnalysis.keys(),
   });
 

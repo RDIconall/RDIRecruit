@@ -84,6 +84,7 @@ export async function gradeCandidate(req: GradeRequest): Promise<GradeResult> {
     force: true,
     replace: true,
     trigger: req.reviewer?.label ? `human:${req.reviewer.label}` : "human_reanalysis",
+    reviewerOverride: true,
   });
   const read = "read" in result ? (result.read ?? null) : null;
 
