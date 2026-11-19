@@ -1,41 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
 import { env } from "@/lib/env";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { verifyWebhookSecret } from "@/lib/ingest/webhook-auth";
 
 export const runtime = "nodejs";
 
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
 /**
- * Accepts the webhook when VIDEOASK_WEBHOOK_SECRET is unset (back-compat), or when
- * the request proves the secret: either a raw shared-secret header, or an HMAC-SHA256
- * signature of the body. Keeps the previously-working webhook flowing while letting
- * production lock it down by setting the env var + configuring the secret in VideoAsk.
+ * Requires VIDEOASK_WEBHOOK_SECRET: the request must carry it in a shared-secret
+ * header, or an HMAC-SHA256 signature of the body. With the env var unset or blank
+ * the webhook refuses everything, since the body picks the candidate and is stored
+ * as interview evidence that re-scores them.
  */
 function isAuthorized(rawBody: string, request: NextRequest): boolean {
-  const secret = env.VIDEOASK_WEBHOOK_SECRET;
-  if (!secret) return true;
-
-  const shared =
-    request.headers.get("x-videoask-secret") ?? request.headers.get("videoask-secret");
-  if (shared && safeEqual(shared, secret)) return true;
-
-  const signature =
-    request.headers.get("x-videoask-signature") ?? request.headers.get("videoask-signature");
-  if (signature) {
-    const digest = createHmac("sha256", secret).update(rawBody).digest("hex");
-    if (safeEqual(signature, digest)) return true;
-  }
-
-  return false;
+  return verifyWebhookSecret({
+    secret: env.VIDEOASK_WEBHOOK_SECRET,
+    rawBody,
+    headers: request.headers,
+    sharedSecretHeaders: ["x-videoask-secret", "videoask-secret"],
+    signatureHeaders: ["x-videoask-signature", "videoask-signature"],
+  });
 }
 
 export async function POST(request: NextRequest) {
