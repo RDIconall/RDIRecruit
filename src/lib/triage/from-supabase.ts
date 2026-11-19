@@ -482,8 +482,9 @@ const REFUSAL_TOKENS = new Set([
 function looksRefused(value: string): boolean {
   const t = value.trim().toLowerCase();
   if (!t) return true;
-  // Pure punctuation: "-", "--", ".", "…", "_", "*", "/", "?" and the like.
-  if (/^[\s\-–—_.*/\\?!,…]+$/.test(t)) return true;
+  // No letter or digit in any script: dashes, punctuation, symbols, emoji, or
+  // invisible characters (zero-width spaces) that `trim` leaves behind.
+  if (!/[\p{L}\p{N}]/u.test(t)) return true;
   const words = t.replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
   return REFUSAL_TOKENS.has(words);
 }
