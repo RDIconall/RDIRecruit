@@ -526,11 +526,14 @@ async function runScoreUnscoredPass(options?: {
         .select("candidate_id, created_at, model_version")
         .eq("kind", "fit_read"),
       supabase.from("sync_state").select("key, value").like("key", "scoring_epoch:%"),
-      supabase.from("candidate_overlay").select("candidate_id").eq("status", "disqualified"),
+      supabase
+        .from("candidate_overlay")
+        .select("candidate_id")
+        .in("status", ["disqualified", "withdrawn"]),
     ]);
 
-  // Disqualified candidates (Workable state or app overlay) are out of the pool —
-  // never spend an evaluation on them. Mirrors the reanalyze cron's eligibility.
+  // Disqualified or withdrawn candidates (Workable state or app overlay) are out of
+  // the pool — never spend an evaluation on them. Mirrors the reanalyze cron's eligibility.
   const disqualifiedOverlay = new Set((dqOverlayRows ?? []).map((r) => r.candidate_id as string));
 
   // Latest score (timestamp + model) per candidate.
