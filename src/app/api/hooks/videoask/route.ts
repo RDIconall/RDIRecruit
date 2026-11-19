@@ -15,14 +15,14 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Accepts the webhook when VIDEOASK_WEBHOOK_SECRET is unset (back-compat), or when
- * the request proves the secret: either a raw shared-secret header, or an HMAC-SHA256
- * signature of the body. Keeps the previously-working webhook flowing while letting
- * production lock it down by setting the env var + configuring the secret in VideoAsk.
+ * Accepts the webhook only when the request proves VIDEOASK_WEBHOOK_SECRET: either
+ * a raw shared-secret header, or an HMAC-SHA256 signature of the body. While the
+ * secret is unset every request is rejected, since the body becomes interview
+ * evidence and triggers a re-score.
  */
 function isAuthorized(rawBody: string, request: NextRequest): boolean {
   const secret = env.VIDEOASK_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) return false;
 
   const shared =
     request.headers.get("x-videoask-secret") ?? request.headers.get("videoask-secret");
