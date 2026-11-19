@@ -347,10 +347,14 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
   const supabase = getServiceSupabase();
 
   const [appsRes, evalRows, workingFiles] = await Promise.all([
-    // `answers` comes along even though the roster view never prints it: the
-    // decision mapper reads the answer text to spot a dash-filled application, and
+    // The source materials come along even though the roster view never prints
+    // them: the decision mapper checks them before it lets an Interview call stand
+    // (see source-evidence), reads the answer text to spot a dash-filled application, and
     // answer text now lives here rather than being echoed back by the evaluator.
-    supabase.from("applications").select("candidate_id, answers, parsed_experience").in("candidate_id", ids),
+    supabase
+      .from("applications")
+      .select("candidate_id, answers, cover_letter, parsed_experience, resume_text")
+      .in("candidate_id", ids),
     fetchEvaluationsPaged(supabase, ids),
     getWorkingFiles(ids),
   ]);
@@ -359,13 +363,16 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
   for (const a of (appsRes.data ?? []) as Array<{
     candidate_id: string;
     answers?: Record<string, unknown> | null;
+    cover_letter?: string | null;
     parsed_experience?: ParsedExperienceEntry[] | null;
+    resume_text?: string | null;
   }>) {
     if (!appsByCandidate.has(a.candidate_id))
       appsByCandidate.set(a.candidate_id, {
         answers: a.answers ?? null,
-        cover_letter: null,
+        cover_letter: a.cover_letter ?? null,
         parsed_experience: a.parsed_experience ?? null,
+        resume_text: a.resume_text ?? null,
       });
   }
 
