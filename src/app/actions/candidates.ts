@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@clerk/nextjs/server";
+import { requireHiringAdmin } from "@/lib/auth/hiring-admin";
 import {
   addCandidateNote,
   addCandidateTags,
@@ -14,9 +14,7 @@ import { enqueueWorkableWrite } from "@/lib/workable/write-queue";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 
 async function requireAuth() {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
+  return (await requireHiringAdmin()).userId;
 }
 
 /** A human-readable owner label (first name / email prefix) for the board, or the id. */

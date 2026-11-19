@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { checkHiringAdmin } from "@/lib/auth/hiring-admin";
 import { hasSupabase } from "@/lib/env";
 import { contactsToCsv } from "@/lib/radar/csv";
 import { isRadarEnabled, RADAR_DISABLED_MESSAGE } from "@/lib/radar/enabled";
@@ -14,8 +14,8 @@ export async function GET(request: NextRequest) {
   if (!isRadarEnabled()) {
     return NextResponse.json({ error: RADAR_DISABLED_MESSAGE }, { status: 410 });
   }
-  const { userId } = await auth();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await checkHiringAdmin();
+  if (!access.ok) return NextResponse.json({ error: access.error }, { status: access.status });
   if (!hasSupabase()) return NextResponse.json({ error: "Supabase not configured" }, { status: 500 });
 
   const pipeline = (request.nextUrl.searchParams.get("pipeline") as Pipeline) || "recruiting";

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { checkHiringAdmin } from "@/lib/auth/hiring-admin";
 import { getPublishedJobs } from "@/lib/jobs/service";
 
 export async function GET() {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await checkHiringAdmin();
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
   const jobs = await getPublishedJobs();
   return NextResponse.json({ jobs });

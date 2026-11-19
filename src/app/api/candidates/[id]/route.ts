@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { checkHiringAdmin } from "@/lib/auth/hiring-admin";
 import { getCandidateDetail } from "@/lib/data/board";
 import { loadOneCandidate } from "@/lib/triage/load";
 
@@ -14,6 +15,11 @@ export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
+  const access = await checkHiringAdmin();
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
   const { id } = await context.params;
   const detail = await getCandidateDetail(id);
   if (!detail) {
