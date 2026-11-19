@@ -9,13 +9,35 @@ export type MigrationApplyResult = {
   skipped: string[];
 };
 
+/**
+ * The ledger decides which SQL runs as the database owner, so only the owner
+ * connection may touch it. It sits in the Data API schema, so creation and
+ * lockdown run as one statement (no session sees the default grants) and are
+ * re-applied every pass. Enabling RLS fails closed if the migration role does
+ * not own the table.
+ */
+const LEDGER_LOCKDOWN_SQL = `
+do $$
+declare
+  api_role text;
+begin
+  create table if not exists public.schema_migrations (
+    filename text primary key,
+    applied_at timestamptz default now()
+  );
+  alter table public.schema_migrations enable row level security;
+  revoke all on table public.schema_migrations from public;
+  foreach api_role in array array['anon', 'authenticated', 'service_role'] loop
+    if exists (select 1 from pg_roles where rolname = api_role) then
+      execute format('revoke all on table public.schema_migrations from %I', api_role);
+    end if;
+  end loop;
+end
+$$;
+`;
+
 async function ensureMigrationTable(client: Client) {
-  await client.query(`
-    create table if not exists schema_migrations (
-      filename text primary key,
-      applied_at timestamptz default now()
-    );
-  `);
+  await client.query(LEDGER_LOCKDOWN_SQL);
 }
 
 /** Apply any SQL files in supabase/migrations that are not yet recorded. */
@@ -35,7 +57,7 @@ export async function applyPendingMigrations(): Promise<MigrationApplyResult> {
     await ensureMigrationTable(client);
 
     const { rows: done } = await client.query<{ filename: string }>(
-      "select filename from schema_migrations",
+      "select filename from public.schema_migrations",
     );
     const appliedSet = new Set(done.map((r) => r.filename));
 
@@ -48,7 +70,7 @@ export async function applyPendingMigrations(): Promise<MigrationApplyResult> {
         if (!bootstrapFiles.has(file)) continue;
         if (!appliedSet.has(file)) {
           await client.query(
-            "insert into schema_migrations (filename) values ($1) on conflict do nothing",
+            "insert into public.schema_migrations (filename) values ($1) on conflict do nothing",
             [file],
           );
           appliedSet.add(file);
@@ -77,7 +99,7 @@ export async function applyPendingMigrations(): Promise<MigrationApplyResult> {
         missing = !rows[0]?.reg;
       }
       if (missing) {
-        await client.query("delete from schema_migrations where filename = $1", [file]);
+        await client.query("delete from public.schema_migrations where filename = $1", [file]);
         appliedSet.delete(file);
       }
     }
@@ -89,7 +111,7 @@ export async function applyPendingMigrations(): Promise<MigrationApplyResult> {
       }
       const sql = fs.readFileSync(path.join(migrationsDir, file), "utf8");
       await client.query(sql);
-      await client.query("insert into schema_migrations (filename) values ($1)", [file]);
+      await client.query("insert into public.schema_migrations (filename) values ($1)", [file]);
       applied.push(file);
     }
 
