@@ -16,18 +16,17 @@ import { verifyWorkableSignature } from "@/lib/workable/client";
 const HANDLED_EVENTS = new Set(["candidate_created", "candidate_moved"]);
 
 export async function POST(request: NextRequest) {
+  // Read once: the same value must both permit the request and verify its HMAC.
+  const secret = env.WORKABLE_WEBHOOK_SECRET;
+  if (!secret) {
+    console.error("Workable webhook rejected: WORKABLE_WEBHOOK_SECRET is not configured");
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
   const rawBody = await request.text();
   const signature = request.headers.get("X-Workable-Signature");
-
-  if (env.WORKABLE_WEBHOOK_SECRET) {
-    const valid = verifyWorkableSignature(
-      rawBody,
-      signature,
-      env.WORKABLE_WEBHOOK_SECRET,
-    );
-    if (!valid) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-    }
+  if (!verifyWorkableSignature(rawBody, signature, secret)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   const payload = JSON.parse(rawBody) as {
