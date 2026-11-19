@@ -115,9 +115,10 @@ export async function backfillMissingFitReads(options?: {
       disqualified: boolean | null;
       created_at: string | null;
     }>("candidates", "workable_id, job_shortcode, disqualified, created_at", { order: "created_at" }),
-    fetchPaged<{ candidate_id: string }>("candidate_overlay", "candidate_id", {
-      eq: { column: "status", value: "disqualified" },
-    }),
+    fetchPaged<{ candidate_id: string; status: string | null }>(
+      "candidate_overlay",
+      "candidate_id, status",
+    ),
     fetchPaged<{ candidate_id: string; model_version: string | null }>(
       "evaluations",
       "candidate_id, model_version",
@@ -146,7 +147,9 @@ export async function backfillMissingFitReads(options?: {
       disqualified: Boolean(row.disqualified),
       createdAt: row.created_at ?? "",
     })),
-    overlayDisqualifiedIds: overlayRows.map((row) => row.candidate_id),
+    overlayDisqualifiedIds: overlayRows
+      .filter((row) => row.status === "disqualified" || row.status === "withdrawn")
+      .map((row) => row.candidate_id),
     fitReadIds: fitReadRows.map((row) => row.candidate_id),
     reviewerLockedIds: fitReadRows
       .filter((row) => row.model_version === "reviewer-override")

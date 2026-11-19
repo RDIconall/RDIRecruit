@@ -74,6 +74,46 @@ export function poolLineFromBoard(items: BoardCandidate[], overlays: Map<string,
   return `${active} active · ${disqualified} disqualified · ${withdrawn} withdrawn`;
 }
 
+/** A human or sync cut takes the person out of the pool; scoring never undoes it. */
+export function isCutOverlayStatus(status: string | null | undefined): boolean {
+  return status === "disqualified" || status === "withdrawn";
+}
+
+export async function fetchOverlayStatus(candidateId: string): Promise<OverlayStatus | null> {
+  if (!hasSupabase()) return null;
+  const supabase = getServiceSupabase();
+  const { data, error } = await supabase
+    .from("candidate_overlay")
+    .select("status")
+    .eq("candidate_id", candidateId)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load overlay status: ${error.message}`);
+  return ((data as { status?: OverlayStatus } | null)?.status ?? null) as OverlayStatus | null;
+}
+
+/**
+ * Write only the scorer-owned complement columns. Status, status reason, and
+ * attribution belong to reviewer and sync actions, so an insert takes the
+ * column defaults and an update leaves them as they are.
+ */
+export async function saveOverlayComplement(
+  candidateId: string,
+  fields: Pick<CandidateOverlayRow, "complement" | "complement_removes" | "salary_vector">,
+) {
+  if (!hasSupabase()) return;
+  const supabase = getServiceSupabase();
+  const { error } = await supabase.from("candidate_overlay").upsert(
+    {
+      candidate_id: candidateId,
+      complement: fields.complement,
+      complement_removes: fields.complement_removes,
+      salary_vector: fields.salary_vector,
+    },
+    { onConflict: "candidate_id" },
+  );
+  if (error) console.error(`Failed to save overlay complement for ${candidateId}`, error);
+}
+
 export async function upsertOverlay(
   candidateId: string,
   patch: Partial<Omit<CandidateOverlayRow, "candidate_id" | "updated_at">>,

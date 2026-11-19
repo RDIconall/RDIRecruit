@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env, hasAnthropic, hasSupabase } from "@/lib/env";
 import { getBoardFromSupabase } from "@/lib/data/board-queries";
+import { isCutOverlayStatus } from "@/lib/data/overlay";
 import { getWorkingFiles } from "@/lib/triage/store";
 import { assembleGradingInputs, computeReadiness } from "@/lib/triage/readiness";
 import { scoreCandidate } from "@/lib/scoring/run-score";
@@ -14,7 +15,7 @@ export const maxDuration = 300;
  * job_rubrics rubric + spec. CRON_SECRET-gated, manually triggered (not scheduled).
  *
  * Resilient + resumable:
- *  - Skips disqualified candidates and any candidate with a human decision override.
+ *  - Skips disqualified or withdrawn candidates and any candidate with a human decision override.
  *  - `since` lets repeated calls skip candidates already re-graded in this run
  *    (a read whose recalculatedAt >= since). Pass a FIXED timestamp across calls.
  *  - Time-budgeted: returns `remaining` so the caller keeps hitting it until 0.
@@ -70,7 +71,7 @@ export async function GET(request: NextRequest) {
   for (const item of board) {
     const id = item.candidate.workable_id as string;
     const disqualified =
-      (item.overlay as { status?: string } | null)?.status === "disqualified" ||
+      isCutOverlayStatus((item.overlay as { status?: string } | null)?.status) ||
       Boolean((item.candidate as { disqualified?: boolean }).disqualified);
     if (disqualified) {
       skippedDisqualified += 1;
