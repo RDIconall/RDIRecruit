@@ -13,6 +13,8 @@ import { prepareGradingInputs, describeMissing } from "@/lib/triage/readiness";
 import { chatWithClaude } from "@/lib/triage/chat";
 import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-phase";
 import { DM } from "@/lib/triage/theme";
+import { DECISION_NEXT } from "@/lib/triage/app-theme";
+import { applyInterviewGate } from "@/lib/triage/interview-bar";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import type {
@@ -75,14 +77,23 @@ function nowStamp(): string {
   return new Date().toISOString().replace("T", " ").slice(0, 16) + " UTC";
 }
 
+/** The call a model read lands on for this file once the mapped candidate's interview gate holds it. */
+function gatedDecision(candidate: Candidate, read: DecisionRead): Decision {
+  return applyInterviewGate(read.decision, candidate.interviewGate);
+}
+
 /** Apply a freshly computed read onto the mapped candidate so the rendered .md matches it. */
 function applyRead(candidate: Candidate, read: DecisionRead): Candidate {
+  const decision = gatedDecision(candidate, read);
+  const held = decision !== read.decision;
+  const why = read.why || candidate.why;
   return {
     ...candidate,
-    decision: read.decision,
-    why: read.why || candidate.why,
+    decision,
+    why: held && candidate.interviewGate?.note ? `${candidate.interviewGate.note} ${why}` : why,
     flag: read.risk || candidate.flag,
-    next: read.next || candidate.next,
+    next: held ? DECISION_NEXT[decision] : read.next || candidate.next,
+    survivor: decision === "interview",
     redFlags: read.flags ?? candidate.redFlags,
     reanalysis: read.reanalysis ?? candidate.reanalysis,
     value: read.value ?? candidate.value,
@@ -159,23 +170,24 @@ async function persistAndMaybeRecalc(
     if (read) {
       // #7: carry the reviewer-signal lens (rev/revNote) on the persisted read so
       // the pool + candidate views show the human's signal, not a generic "none".
+      const after = gatedDecision(candidate, read);
       if (reviewer && updatedBy) {
         read = {
           ...read,
-          rev: reviewerSignalFor(reviewer.kind, read.decision),
+          rev: reviewerSignalFor(reviewer.kind, after),
           revNote: `${updatedBy}: ${read.timelineNote || read.why}`.slice(0, 200),
         };
       }
       // When a human note moved the decision, surface the before→after with the
       // real human reviewer (person), not the trigger type.
-      if (read.decision !== priorDecision) {
+      if (after !== priorDecision) {
         const who = updatedBy ? `${updatedBy} (human signal)` : opts.trigger ?? "Human signal";
         read = {
           ...read,
           reanalysis: {
             reviewer: who,
             before: DM(priorDecision).label,
-            after: DM(read.decision).label,
+            after: DM(after).label,
             rec: read.timelineNote || read.why,
           },
         };
@@ -567,13 +579,14 @@ export async function updateAssessment(input: {
     return { ok: true, recalculated: false, read: null, message: "Saved. Claude re-analysis unavailable (no API key or transient error)." };
   }
 
-  if (read.decision !== priorDecision) {
+  const after = gatedDecision(one.candidate, read);
+  if (after !== priorDecision) {
     read = {
       ...read,
       reanalysis: {
         reviewer: "Activity log",
         before: DM(priorDecision).label,
-        after: DM(read.decision).label,
+        after: DM(after).label,
         rec: read.timelineNote || read.why,
       },
     };
