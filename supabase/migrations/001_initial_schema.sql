@@ -172,8 +172,27 @@ create index if not exists idx_scores_candidate on scores(candidate_id, created_
 create index if not exists idx_evidence_candidate on evidence(candidate_id);
 create index if not exists idx_events_unprocessed on events(processed) where processed = false;
 
+-- Every table is server-only: the app reads and writes with the service key.
+-- Supabase's init grants anon/authenticated full privileges on new public
+-- tables, so RLS alone is not enough; the Data API roles are revoked too.
+alter table jobs enable row level security;
+alter table app_users enable row level security;
 alter table candidates enable row level security;
 alter table applications enable row level security;
+alter table rubrics enable row level security;
+alter table scores enable row level security;
+alter table score_inputs enable row level security;
+alter table ro_assessments enable row level security;
 alter table evidence enable row level security;
-alter table comms_log enable row level security;
 alter table narratives enable row level security;
+alter table comms_log enable row level security;
+alter table events enable row level security;
+alter table audit_log enable row level security;
+alter table job_members enable row level security;
+alter table notifications enable row level security;
+
+revoke all on
+  jobs, app_users, candidates, applications, rubrics, scores, score_inputs,
+  ro_assessments, evidence, narratives, comms_log, events, audit_log,
+  job_members, notifications
+from anon, authenticated;
