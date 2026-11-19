@@ -60,18 +60,18 @@ function epochKey(scope: string) {
 
 /** Bump the scoring epoch so the next sync re-scores affected candidates. */
 export async function bumpScoringEpoch(scope: string) {
-  const { writeSyncState } = await import("../sync/sync-state");
-  await writeSyncState(epochKey(scope), { at: new Date().toISOString() });
+  const { writeSignedTimestamp } = await import("../sync/sync-state");
+  await writeSignedTimestamp(epochKey(scope));
 }
 
 /** The most recent epoch that applies to a job (max of its role epoch and global). */
 export async function getEffectiveEpoch(jobShortcode: string): Promise<string | null> {
-  const { readSyncState } = await import("../sync/sync-state");
+  const { readSignedTimestamp } = await import("../sync/sync-state");
   const [role, global] = await Promise.all([
-    readSyncState<{ at: string | null }>(epochKey(jobShortcode), { at: null }),
-    readSyncState<{ at: string | null }>(epochKey(GLOBAL_SCOPE), { at: null }),
+    readSignedTimestamp(epochKey(jobShortcode)),
+    readSignedTimestamp(epochKey(GLOBAL_SCOPE)),
   ]);
-  const candidates = [role.at, global.at].filter(Boolean) as string[];
+  const candidates = [role, global].filter(Boolean) as string[];
   if (!candidates.length) return null;
   return candidates.sort().at(-1) ?? null;
 }
