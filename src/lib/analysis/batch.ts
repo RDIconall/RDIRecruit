@@ -58,7 +58,7 @@ async function projectCompletedAnalyses(limit = MAX_BATCH_REQUESTS): Promise<num
         expectedInputHash: row.input_hash,
         trigger: "batch_projection",
       });
-      if ("obsolete" in result && result.obsolete) {
+      if (("obsolete" in result && result.obsolete) || ("locked" in result && result.locked)) {
         await markAnalysisObsolete(row.id);
         continue;
       }

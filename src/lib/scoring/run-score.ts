@@ -21,7 +21,16 @@ import { fitReadFromEvaluation, storeFitRead } from "../triage/fit-read";
 import { getWorkingFile, upsertWorkingFile } from "../triage/store";
 import { decisionReadFromEvaluation } from "../analysis/decision";
 import { analysisFingerprint } from "../analysis/fingerprint";
-import { claimAnalysisProjection, markAnalysisProjected } from "../analysis/store";
+import {
+  claimAnalysisProjection,
+  markAnalysisObsolete,
+  markAnalysisProjected,
+} from "../analysis/store";
+import {
+  REVIEWER_OVERRIDE_MODEL,
+  isReviewerPinned,
+  loadScoreMarkers,
+} from "./reviewer-pin";
 import { loadOneCandidate } from "../triage/load";
 import { renderWorkingFile } from "../triage/working-file";
 import type { ParsedResumeReview } from "../resume/types";
@@ -97,6 +106,10 @@ function deriveCareerContext(
   return { graduationYear, firstRoleYear, yearsOfCareer, assumedGradAge, approxCurrentAge };
 }
 
+function reviewerLocked() {
+  return { skipped: true as const, reason: "reviewer_locked" as const, locked: true as const };
+}
+
 export async function scoreCandidate(
   candidateId: string,
   options?: {
@@ -106,9 +119,15 @@ export async function scoreCandidate(
     evaluation?: EvaluatorOutput;
     expectedInputHash?: string;
     trigger?: string;
+    /**
+     * An explicit human reanalysis of this file. Only this may replace a
+     * reviewer-override pin; every automated or evidence-triggered path is refused.
+     */
+    reviewerOverride?: boolean;
   },
 ) {
   const supabase = getServiceSupabase();
+  const humanOverride = options?.reviewerOverride === true;
 
   if (!options?.force && !options?.replace) {
     const { data: existing } = await supabase
@@ -120,6 +139,11 @@ export async function scoreCandidate(
     if (existing?.length) {
       return { skipped: true, reason: "already_scored" as const };
     }
+  }
+
+  if (!humanOverride && isReviewerPinned(await loadScoreMarkers(supabase, candidateId))) {
+    gradeLog("score.reviewerLocked", { candidateId, trigger: options?.trigger ?? null });
+    return reviewerLocked();
   }
 
   // NOTE: on replace we do NOT delete the prior score here. Deleting up front means
@@ -344,6 +368,17 @@ export async function scoreCandidate(
     Boolean(evaluatorInput.interviewEvidence?.trim()),
     CLAUDE_JUDGMENT_MODEL,
   );
+
+  // The replace acts only on the score rows read here. A pin on top refuses the
+  // write; a pin written after this read is never in the delete set.
+  const priorScores = await loadScoreMarkers(supabase, candidateId);
+  if (!humanOverride && isReviewerPinned(priorScores)) {
+    if (canonicalAnalysisId) await markAnalysisObsolete(canonicalAnalysisId);
+    gradeLog("score.reviewerLocked", { candidateId, trigger: options?.trigger ?? null });
+    return reviewerLocked();
+  }
+  const priorScoreIds = new Set(priorScores.map((s) => s.id));
+
   if (canonicalAnalysisId && !(await claimAnalysisProjection(canonicalAnalysisId))) {
     // Another invocation owns the deterministic projection for this exact result.
     // Return the durable read immediately; the owner (or cron replay after a
@@ -354,21 +389,6 @@ export async function scoreCandidate(
       analysisId: canonicalAnalysisId,
       reused: true,
     };
-  }
-
-  // Evaluation succeeded — now it is safe to clear the prior read for a replace.
-  // (ro_assessments and narratives are deleted-then-inserted in place further down.)
-  if (options?.replace) {
-    const { data: priorScores } = await supabase
-      .from("scores")
-      .select("id")
-      .eq("candidate_id", candidateId);
-    const scoreIds = (priorScores ?? []).map((s) => s.id as string);
-    if (scoreIds.length) {
-      await supabase.from("score_inputs").delete().in("score_id", scoreIds);
-      await supabase.from("scores").delete().in("id", scoreIds);
-    }
-    await supabase.from("evaluations").delete().eq("candidate_id", candidateId);
   }
 
   const scorePayload = {
@@ -425,6 +445,31 @@ export async function scoreCandidate(
 
   if (scoreError || !scoreRow) {
     throw scoreError ?? new Error("Failed to write score");
+  }
+
+  if (!humanOverride) {
+    const pinnedMeanwhile = (await loadScoreMarkers(supabase, candidateId)).some(
+      (s) => s.model_version === REVIEWER_OVERRIDE_MODEL && !priorScoreIds.has(s.id),
+    );
+    if (pinnedMeanwhile) {
+      await supabase.from("scores").delete().eq("id", scoreRow.id);
+      if (canonicalAnalysisId) await markAnalysisObsolete(canonicalAnalysisId);
+      gradeLog("score.reviewerLocked", { candidateId, trigger: options?.trigger ?? null });
+      return reviewerLocked();
+    }
+  }
+
+  // The new score is written — now it is safe to clear the prior read for a replace.
+  // (ro_assessments and narratives are deleted-then-inserted in place further down.)
+  if (options?.replace) {
+    const replacedIds = priorScores
+      .filter((s) => humanOverride || s.model_version !== REVIEWER_OVERRIDE_MODEL)
+      .map((s) => s.id);
+    if (replacedIds.length) {
+      await supabase.from("score_inputs").delete().in("score_id", replacedIds);
+      await supabase.from("scores").delete().in("id", replacedIds);
+    }
+    await supabase.from("evaluations").delete().eq("candidate_id", candidateId);
   }
 
   if (evaluation.claims.length > 0) {
