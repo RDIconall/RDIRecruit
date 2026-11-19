@@ -14,6 +14,11 @@ const envSchema = z.object({
   SUPABASE_ANON_KEY: z.string().optional(),
   DATABASE_URL: z.string().optional(),
   SUPABASE_DB_URL: z.string().optional(),
+  // PEM CA bundle the migration Postgres connection trusts instead of the
+  // default store (e.g. the Supabase root CA from Database → SSL). TLS
+  // verification is always on; without this the server chain must be publicly
+  // trusted or the connection is refused.
+  DATABASE_SSL_ROOT_CERT: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
   // Model pins for the two Claude tiers (see lib/ai/models.ts). Optional: unset
   // uses the defaults there. Set these to roll a model back without a release.

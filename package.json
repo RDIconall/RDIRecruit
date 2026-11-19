@@ -42,6 +42,7 @@
     "eslint": "^9.27.0",
     "eslint-config-next": "^16.2.9",
     "pg": "^8.21.0",
+    "pg-connection-string": "^2.13.0",
     "supabase": "^2.106.0",
     "tailwindcss": "^4.1.8",
     "typescript": "^5.8.3"

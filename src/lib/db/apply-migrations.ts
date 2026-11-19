@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Client } from "pg";
 import { env } from "@/lib/env";
+import { verifiedPgConfig } from "./pg-tls.mjs";
 
 export type MigrationApplyResult = {
   ok: true;
@@ -28,7 +29,7 @@ export async function applyPendingMigrations(): Promise<MigrationApplyResult> {
   const migrationsDir = path.join(process.cwd(), "supabase", "migrations");
   const files = fs.readdirSync(migrationsDir).filter((f) => f.endsWith(".sql")).sort();
 
-  const client = new Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+  const client = new Client(verifiedPgConfig(dbUrl, env.DATABASE_SSL_ROOT_CERT));
 
   try {
     await client.connect();

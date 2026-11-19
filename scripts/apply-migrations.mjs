@@ -6,6 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import pg from "pg";
+import { verifiedPgConfig } from "../src/lib/db/pg-tls.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const migrationsDir = path.join(root, "supabase", "migrations");
@@ -17,7 +18,7 @@ async function main() {
     process.exit(1);
   }
 
-  const client = new pg.Client({ connectionString: dbUrl, ssl: { rejectUnauthorized: false } });
+  const client = new pg.Client(verifiedPgConfig(dbUrl, process.env.DATABASE_SSL_ROOT_CERT));
   await client.connect();
 
   await client.query(`
