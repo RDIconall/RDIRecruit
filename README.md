@@ -84,7 +84,7 @@ Copy `.env.example` to `.env.local` and fill in (auto-provisioned on Vercel):
 | `WORKABLE_WEBHOOK_SECRET` | HMAC secret for webhook verification |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` | Database + storage |
 | `ANTHROPIC_API_KEY` | LLM extraction / drafting |
-| `CRON_SECRET` | Protects the cron routes |
+| `CRON_SECRET` | Required. Bearer token for the cron routes; when unset or blank every `/api/cron/*` request gets 401 |
 
 No secrets are hardcoded; the build is env-driven and deploys to the `rdi-recruit` Vercel project from `main`.
 
