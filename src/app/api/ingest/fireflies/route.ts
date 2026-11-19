@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
-import { hasSupabase } from "@/lib/env";
+import { env, hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { verifyWebhookSecret } from "@/lib/ingest/webhook-auth";
 import {
   extractInlineTranscript,
   extractTranscriptId,
@@ -19,9 +20,33 @@ export const runtime = "nodejs";
  * the webhook payload when present, otherwise fetched from the Fireflies GraphQL
  * API using FIREFLIES_API_KEY. The candidate is resolved from an explicit id in
  * the payload metadata, or by matching meeting participant emails to a candidate.
+ *
+ * Requires FIREFLIES_WEBHOOK_SECRET (the Fireflies webhook Signing Secret): the
+ * request must carry Fireflies' `X-Hub-Signature` HMAC of the body, or — for relays
+ * that cannot sign — the secret itself in `x-fireflies-secret`. Unset or blank
+ * refuses everything, since the body can name the candidate and supply the transcript.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = await request.text();
+
+  const authorized = verifyWebhookSecret({
+    secret: env.FIREFLIES_WEBHOOK_SECRET,
+    rawBody,
+    headers: request.headers,
+    sharedSecretHeaders: ["x-fireflies-secret"],
+    signatureHeaders: ["x-hub-signature"],
+  });
+  if (!authorized) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(rawBody) as unknown;
+    payload = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    payload = {};
+  }
   await recordEvent("fireflies", "transcript_ready", payload);
 
   if (!hasSupabase()) {
