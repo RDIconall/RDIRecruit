@@ -509,8 +509,8 @@ export interface WorkspaceSlice {
   chat?: ChatMessage[];
   /**
    * Manual decision set by a human reviewer. Wins over Claude's read in
-   * deriveDecision, so the board/dossier reflect it immediately. Cleared when a
-   * Claude re-analysis runs (re-analyze hands the call back to the model).
+   * deriveDecision, so the board/dossier reflect it immediately. Cleared only by
+   * a reviewer-requested re-analysis; automatic scoring passes never touch it.
    */
   decisionOverride?: Decision | null;
   /**

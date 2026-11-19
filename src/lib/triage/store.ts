@@ -61,7 +61,12 @@ export interface WorkingFilePatch {
   workspace?: WorkspaceSlice;
 }
 
-/** Merge-patch a candidate's working file. Only the provided fields are written. */
+/**
+ * Merge-patch a candidate's working file. Only the provided fields are written:
+ * columns absent from the patch are left out of the upsert entirely, so a write
+ * that does not patch `workspace` can never overwrite reviewer edits (such as
+ * decisionOverride) stored there concurrently.
+ */
 export async function upsertWorkingFile(
   candidateId: string,
   patch: WorkingFilePatch,
@@ -73,15 +78,14 @@ export async function upsertWorkingFile(
   const existing = await getWorkingFile(candidateId);
   const next: Record<string, unknown> = {
     candidate_id: candidateId,
-    content: patch.content !== undefined ? patch.content : existing?.content ?? null,
-    read: patch.read !== undefined ? patch.read : existing?.read ?? null,
-    workspace:
-      patch.workspace !== undefined
-        ? { ...(existing?.workspace ?? {}), ...patch.workspace }
-        : existing?.workspace ?? {},
     updated_at: new Date().toISOString(),
-    updated_by: updatedBy ?? existing?.updated_by ?? null,
   };
+  if (patch.content !== undefined) next.content = patch.content;
+  if (patch.read !== undefined) next.read = patch.read;
+  if (patch.workspace !== undefined) {
+    next.workspace = { ...(existing?.workspace ?? {}), ...patch.workspace };
+  }
+  if (updatedBy !== undefined) next.updated_by = updatedBy;
 
   const { data } = await supabase
     .from("candidate_working_files")
@@ -89,5 +93,7 @@ export async function upsertWorkingFile(
     .select("*")
     .maybeSingle();
 
-  return data ? normalize(data as WorkingFileRow) : normalize(next as unknown as WorkingFileRow);
+  return data
+    ? normalize(data as WorkingFileRow)
+    : normalize({ ...(existing ?? {}), ...next } as unknown as WorkingFileRow);
 }

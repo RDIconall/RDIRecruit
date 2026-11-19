@@ -564,14 +564,20 @@ export async function scoreCandidate(
   // The same canonical response powers the founder-facing working file. This
   // replaces the second, separate triage/recalc Claude call and guarantees that
   // the score-derived pool call and the dossier prose came from one analysis.
+  //
+  // Automatic paths (batch projection, scoring epoch, re-grade, rescore,
+  // backfill) all land here, so this write must never touch `workspace`: a
+  // reviewer's decisionOverride is only cleared by the reviewer-requested
+  // re-analysis actions in src/app/actions/triage.ts.
   const one = await loadOneCandidate(candidateId);
   if (one) {
+    const pinned = Boolean(one.slice.decisionOverride);
     const projectedCandidate = {
       ...one.candidate,
-      decision: decisionRead.decision,
+      decision: pinned ? one.candidate.decision : decisionRead.decision,
       why: decisionRead.why || one.candidate.why,
       flag: decisionRead.risk || one.candidate.flag,
-      next: decisionRead.next || one.candidate.next,
+      next: pinned ? one.candidate.next : decisionRead.next || one.candidate.next,
       careerRead: decisionRead.careerRead ?? one.candidate.careerRead,
       assessment: decisionRead.assessment ?? one.candidate.assessment,
       assessedAt: decisionRead.assessment
@@ -583,11 +589,7 @@ export async function scoreCandidate(
       workableUrl: one.workableUrl,
       disqualified: one.disqualified,
     });
-    await upsertWorkingFile(
-      candidateId,
-      { content, read: decisionRead, workspace: { decisionOverride: null } },
-      "Canonical candidate analysis",
-    );
+    await upsertWorkingFile(candidateId, { content, read: decisionRead }, "Canonical candidate analysis");
   }
 
   await notifyStrongFit({
