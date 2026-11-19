@@ -2,7 +2,7 @@ import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
 import { enqueueCanonicalAnalysis, runCanonicalAnalysis } from "../analysis/run";
 import { hasAnthropic, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
-import { upsertOverlay } from "../data/overlay";
+import { fetchOverlayStatus, isCutOverlayStatus, saveOverlayComplement } from "../data/overlay";
 import { buildSeatContext } from "../jobs/seat-context";
 import { buildLifeNarrative } from "../narrative/builder";
 import { notifyStrongFit } from "../notifications/service";
@@ -120,6 +120,14 @@ export async function scoreCandidate(
     if (existing?.length) {
       return { skipped: true, reason: "already_scored" as const };
     }
+  }
+
+  // Withdrawn or cut people are out of the pool: no new analysis is bought, and a
+  // result queued before the cut is never projected onto them.
+  const overlayStatus = await fetchOverlayStatus(candidateId);
+  if (isCutOverlayStatus(overlayStatus)) {
+    gradeLog("score.cut.skipped", { candidateId, status: overlayStatus });
+    return { skipped: true as const, reason: "candidate_cut" as const };
   }
 
   // NOTE: on replace we do NOT delete the prior score here. Deleting up front means
@@ -478,8 +486,7 @@ export async function scoreCandidate(
   }
 
   // §2 complement read → overlay.
-  await upsertOverlay(candidateId, {
-    status: "active",
+  await saveOverlayComplement(candidateId, {
     complement: evaluation.complement,
     complement_removes: evaluation.complementRemoves,
     salary_vector: evaluation.salaryVector,
