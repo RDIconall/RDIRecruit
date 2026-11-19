@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
-import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
+import { loadOneCandidate, loadPoolRoster, type RosterEntry } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
@@ -655,18 +655,30 @@ export async function sendCandidateChat(input: {
     })
     .join("\n");
 
+  // Resolve only by exact id or exact full name (trim + case-fold). Partial or
+  // fuzzy matching would hand Claude a different applicant's dossier and save
+  // the reply on this candidate's file. A full name shared by several roster
+  // rows is ambiguous and resolves to nothing; the id must be used instead.
+  const normName = (name: string) => name.trim().toLowerCase();
   const rosterById = new Map(roster.map((r) => [r.id, r]));
-  const rosterByName = new Map(roster.map((r) => [r.name.toLowerCase(), r]));
+  const rosterByName = new Map<string, RosterEntry[]>();
+  for (const r of roster) {
+    const key = normName(r.name);
+    if (!key) continue;
+    rosterByName.set(key, [...(rosterByName.get(key) ?? []), r]);
+  }
+  const resolveRosterEntry = (query: string): RosterEntry | null => {
+    const q = query.trim();
+    if (!q) return null;
+    const byId = rosterById.get(q);
+    if (byId) return byId;
+    const byName = rosterByName.get(normName(q));
+    return byName?.length === 1 ? byName[0] : null;
+  };
   const fetchOtherCandidate = async (
     query: string,
   ): Promise<{ name: string; content: string } | null> => {
-    const q = query.trim();
-    if (!q) return null;
-    const ql = q.toLowerCase();
-    const entry =
-      rosterById.get(q) ??
-      rosterByName.get(ql) ??
-      roster.find((r) => r.name.toLowerCase().includes(ql) || ql.includes(r.name.toLowerCase()));
+    const entry = resolveRosterEntry(query);
     if (!entry) return null;
     const other = await loadOneCandidate(entry.id);
     if (!other) return null;
