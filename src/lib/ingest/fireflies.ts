@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import { env } from "../env";
 
 /**
@@ -116,6 +117,33 @@ function collectEmails(...sources: unknown[]): string[] {
 
 export function hasFirefliesApiKey(): boolean {
   return Boolean(env.FIREFLIES_API_KEY);
+}
+
+/**
+ * True only when FIREFLIES_WEBHOOK_SECRET is set and `signature` is the hex
+ * HMAC-SHA256 of the exact raw body under it. Fireflies sends it in
+ * `x-hub-signature`; relays may use `x-fireflies-signature`. An optional
+ * `sha256=` prefix is accepted.
+ */
+export function verifyFirefliesSignature(rawBody: string, signature: string | null): boolean {
+  const secret = env.FIREFLIES_WEBHOOK_SECRET;
+  if (!secret || !signature) return false;
+  const provided = signature.trim().replace(/^sha256=/i, "").toLowerCase();
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  const providedBuffer = Buffer.from(provided);
+  const expectedBuffer = Buffer.from(expected);
+  if (providedBuffer.length !== expectedBuffer.length) return false;
+  return timingSafeEqual(providedBuffer, expectedBuffer);
+}
+
+/**
+ * Escape a value for a PostgreSQL ILIKE so it matches only itself
+ * (case-insensitively). Returns null for values containing `*`, which PostgREST
+ * rewrites to `%` regardless of escaping.
+ */
+export function literalIlikePattern(value: string): string | null {
+  if (value.includes("*")) return null;
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
 /** Fetch a full transcript from the Fireflies GraphQL API. Requires FIREFLIES_API_KEY. */
