@@ -19,7 +19,8 @@ import { computeReadiness, type GradingInputs } from "../triage/readiness";
 import { gradeLog } from "../triage/grade-log";
 import { fitReadFromEvaluation, storeFitRead } from "../triage/fit-read";
 import { getWorkingFile, upsertWorkingFile } from "../triage/store";
-import { decisionReadFromEvaluation } from "../analysis/decision";
+import { decisionReadFromEvaluation, holdUnsupportedInterview } from "../analysis/decision";
+import { assessSourceEvidence } from "../triage/source-evidence";
 import { analysisFingerprint } from "../analysis/fingerprint";
 import { claimAnalysisProjection, markAnalysisProjected } from "../analysis/store";
 import { loadOneCandidate } from "../triage/load";
@@ -339,10 +340,17 @@ export async function scoreCandidate(
     return { skipped: true as const, reason: "no_model_read" as const };
   }
 
-  const decisionRead = decisionReadFromEvaluation(
-    evaluation,
-    Boolean(evaluatorInput.interviewEvidence?.trim()),
-    CLAUDE_JUDGMENT_MODEL,
+  const postInterview = Boolean(evaluatorInput.interviewEvidence?.trim());
+  const sourceEvidence = assessSourceEvidence({
+    resumeText: (application?.resume_text as string | null) ?? null,
+    answers,
+    coverLetter: (application?.cover_letter as string | null) ?? null,
+    roles: experience,
+  });
+  const decisionRead = holdUnsupportedInterview(
+    decisionReadFromEvaluation(evaluation, postInterview, CLAUDE_JUDGMENT_MODEL),
+    sourceEvidence,
+    postInterview,
   );
   if (canonicalAnalysisId && !(await claimAnalysisProjection(canonicalAnalysisId))) {
     // Another invocation owns the deterministic projection for this exact result.
@@ -590,12 +598,14 @@ export async function scoreCandidate(
     );
   }
 
-  await notifyStrongFit({
-    candidateId,
-    candidateName: candidate.name ?? "Candidate",
-    total: evaluation.total,
-    jobShortcode: candidate.job_shortcode ?? "",
-  });
+  if (sourceEvidence.clears) {
+    await notifyStrongFit({
+      candidateId,
+      candidateName: candidate.name ?? "Candidate",
+      total: evaluation.total,
+      jobShortcode: candidate.job_shortcode ?? "",
+    });
+  }
 
   if (canonicalAnalysisId) await markAnalysisProjected(canonicalAnalysisId);
 

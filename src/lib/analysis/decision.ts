@@ -1,4 +1,5 @@
 import type { EvaluatorOutput } from "../scoring/evaluator";
+import type { SourceEvidence } from "../triage/source-evidence";
 import type { Decision, DecisionRead, ValueRead } from "../triage/types";
 
 function decisionFor(evaluation: EvaluatorOutput): Decision {
@@ -91,6 +92,26 @@ export function decisionReadFromEvaluation(
     value: valueRead(evaluation),
     recalculatedAt: new Date().toISOString(),
     model,
+  };
+}
+
+/**
+ * The model read is derived from applicant-written text, so it never sets an
+ * Interview call on its own: a read the source-material check does not support
+ * holds as a backup, keeping the model's prose behind the reason.
+ */
+export function holdUnsupportedInterview(
+  read: DecisionRead,
+  source: SourceEvidence,
+  postInterview: boolean,
+): DecisionRead {
+  if (read.decision !== "interview" || source.clears) return read;
+  return {
+    ...read,
+    decision: "backup",
+    next: nextAction("backup", postInterview),
+    why: [source.reason, read.why].filter(Boolean).join(" "),
+    ...(source.caveat ? { caveat: source.caveat } : {}),
   };
 }
 

@@ -40,6 +40,7 @@ import {
   type TenureStability,
 } from "./tenure-stability";
 import { decisionFromSentiment, type FitRead } from "./fit-read";
+import { assessSourceEvidence, type SourceEvidence } from "./source-evidence";
 import type {
   AnswerRow,
   Candidate,
@@ -210,6 +211,8 @@ export interface DecisionDerivation {
   ungated: Decision;
   tenure: TenureStability;
   bar: InterviewBar;
+  /** Deterministic check on the applicant's own materials (see source-evidence). */
+  source: SourceEvidence;
   /** True when a gate pulled an Interview call down to Backup. */
   demoted: boolean;
   /** The sentence naming why ("" when nothing was demoted). */
@@ -224,11 +227,13 @@ export interface DecisionDerivation {
 export function deriveDecisionDetail(input: MapInput): DecisionDerivation {
   const tenure = tenureStabilityFor(input);
   const bar = interviewBarFor(input);
+  const source = sourceEvidenceFor(input.application);
   const settled = (decision: Decision): DecisionDerivation => ({
     decision,
     ungated: decision,
     tenure,
     bar,
+    source,
     demoted: false,
     demotionNote: "",
   });
@@ -244,14 +249,18 @@ export function deriveDecisionDetail(input: MapInput): DecisionDerivation {
 
   const fit = input.evals.fitRead ?? null;
   if (fit) {
-    const decision = decisionFromSentiment(fit.sentiment);
+    const ungated = decisionFromSentiment(fit.sentiment);
+    // The fit sentiment is the model's read of applicant-written text, so an
+    // Interview call also has to be backed by the source materials themselves.
+    const demoted = ungated === "interview" && !source.clears;
     return {
-      decision,
-      ungated: decision,
+      decision: demoted ? "backup" : ungated,
+      ungated,
       tenure,
       bar,
-      demoted: false,
-      demotionNote: "",
+      source,
+      demoted,
+      demotionNote: demoted ? (source.reason ?? "") : "",
     };
   }
 
@@ -285,8 +294,17 @@ function interviewBarFor(input: MapInput): InterviewBar {
  * The gate as carried to the client on the mapped candidate: what the gates would
  * do to an Interview call on this file, whatever the current decision is.
  */
-function interviewGateFrom(_derived: DecisionDerivation): InterviewGate {
-  return { clears: true, note: "" };
+function interviewGateFrom(derived: DecisionDerivation): InterviewGate {
+  return { clears: derived.source.clears, note: derived.source.reason ?? "" };
+}
+
+function sourceEvidenceFor(application: ApplicationLite | null): SourceEvidence {
+  return assessSourceEvidence({
+    resumeText: application?.resume_text ?? null,
+    answers: application?.answers ?? null,
+    coverLetter: application?.cover_letter ?? null,
+    roles: application?.parsed_experience ?? null,
+  });
 }
 
 function narrativeRolesForTenure(input: MapInput) {
@@ -1044,6 +1062,14 @@ export function mapCandidate(input: MapInput): Candidate {
   const baseRedFlags = [...(input.read?.flags ?? redFlagsFrom(input, tenure))];
   // Claude-authored flag lists omit our deterministic hopping flag — always merge it.
   appendTenureRedFlags(baseRedFlags, tenure);
+  const graderInstruction = derived.source.graderInstruction;
+  if (graderInstruction && !baseRedFlags.some((f) => f.flag === "Instructions to the grader")) {
+    baseRedFlags.push({
+      flag: "Instructions to the grader",
+      detail: `The ${graderInstruction.field} include text aimed at the automated reviewer: "${graderInstruction.excerpt}"`,
+      source: "Application",
+    });
+  }
 
   const refusedToAnswer = refusedToAnswerFrom(input.application, input.evals.answerGrades);
   if (refusedToAnswer && !baseRedFlags.some((f) => f.flag === "Refused to answer")) {
@@ -1071,6 +1097,10 @@ export function mapCandidate(input: MapInput): Candidate {
     if (derived.bar.caveat) caveat = derived.bar.caveat;
     else if (hasDiscrepancy(input.evals.verification)) caveat = "Confirm the flagged discrepancy before booking an interview.";
     else if (!invest?.ask || salaryValue === "unstated") caveat = "Salary expectation not stated — confirm it before an interview.";
+  }
+  const sourceCaveat = derived.demoted ? derived.source.caveat : null;
+  if (sourceCaveat && !caveat?.includes(sourceCaveat)) {
+    caveat = caveat ? `${sourceCaveat} ${caveat}` : sourceCaveat;
   }
 
   // When a gate pulled Interview → Backup, make the copy name the reason. A
@@ -1111,12 +1141,13 @@ export function mapCandidate(input: MapInput): Candidate {
     rdiFit: fit?.rdiFit,
     suggestedSeat: fit?.suggestedSeat || undefined,
     flag: risk,
-    // After a gate demotion, ignore stale Claude "Interview" next-step copy.
+    // Stored model next-step copy only stands when it matches the board's call;
+    // after a gate demotion or a different read it would contradict the decision.
     next: input.decisionOverride
       ? nextFor(normalizeDecision(input.decisionOverride))
-      : derived.demoted
+      : derived.demoted || !input.read || normalizeDecision(input.read.decision) !== decision
         ? nextFor(decision)
-        : input.read?.next || nextFor(decision),
+        : input.read.next || nextFor(decision),
     survivor: decision === "interview",
     value,
     caveat,
