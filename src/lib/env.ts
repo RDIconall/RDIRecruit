@@ -33,9 +33,13 @@ const envSchema = z.object({
   // Comma-separated recipient list for the daily summary (you + Lara).
   SUMMARY_EMAIL_TO: z.string().optional(),
   VIDEOASK_API_KEY: z.string().optional(),
+  // Required for /api/hooks/videoask to accept anything; unset refuses every request.
   VIDEOASK_WEBHOOK_SECRET: z.string().optional(),
   CALENDLY_TOKEN: z.string().optional(),
   FIREFLIES_API_KEY: z.string().optional(),
+  // Fireflies webhook Signing Secret. Required for /api/ingest/fireflies to accept
+  // anything; unset refuses every request.
+  FIREFLIES_WEBHOOK_SECRET: z.string().optional(),
   // Geoapify (free tier: 3,000 credits/day, no card) — geocoding + driving-time
   // for the candidate commute read. Optional: when unset we fall back to the
   // Claude geographic estimate. https://www.geoapify.com/
