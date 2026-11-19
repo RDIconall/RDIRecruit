@@ -581,7 +581,12 @@ export async function updateAssessment(input: {
 
   const candidate = applyRead(one.candidate, read);
   const content = renderWorkingFile(candidate, one.slice, { workableUrl: one.workableUrl, disqualified: one.disqualified });
-  await upsertWorkingFile(input.candidateId, { content, read }, await reviewerLabel());
+  // Reviewer-requested re-analysis hands the call back to the model.
+  await upsertWorkingFile(
+    input.candidateId,
+    { content, read, workspace: { decisionOverride: null } },
+    await reviewerLabel(),
+  );
   revalidatePath("/");
   return { ok: true, recalculated: true, read, regenAt: nowStamp() };
 }
