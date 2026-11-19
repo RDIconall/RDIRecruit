@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@clerk/nextjs/server";
+import { requireHiringAdmin } from "@/lib/auth/hiring-admin";
 import { parseRubricMarkdown } from "@/lib/rubric/parser";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
@@ -11,8 +11,7 @@ export async function saveRubric(input: {
   markdown: string;
   name?: string;
 }) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  await requireHiringAdmin();
   if (!hasSupabase()) return { ok: false, error: "Supabase not configured" };
 
   const parsed = parseRubricMarkdown(input.markdown);
@@ -55,8 +54,7 @@ export async function saveRubric(input: {
 
 /** Extract plain text/markdown from an uploaded rubric file (.md/.txt/.pdf/.docx). */
 export async function extractRubricFromFile(formData: FormData) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  await requireHiringAdmin();
 
   const file = formData.get("file");
   if (!(file instanceof File)) return { ok: false as const, error: "No file provided" };
@@ -80,8 +78,7 @@ export async function extractRubricFromFile(formData: FormData) {
 
 /** Save the global "How We Evaluate" method doc (re-scores all seats via the epoch). */
 export async function saveMethod(markdown: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  await requireHiringAdmin();
   const { saveMethodDoc } = await import("@/lib/evaluation/method");
   const result = await saveMethodDoc(markdown);
   revalidatePath("/rubrics");
@@ -95,6 +92,7 @@ export async function saveMethod(markdown: string) {
  * tell the user whether they're editing a saved version or the seed file.
  */
 export async function getActiveRubricMarkdown(jobShortcode: string) {
+  await requireHiringAdmin();
   if (hasSupabase()) {
     const supabase = getServiceSupabase();
     const { data } = await supabase

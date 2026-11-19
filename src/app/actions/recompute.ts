@@ -1,6 +1,6 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
+import { requireHiringAdmin } from "@/lib/auth/hiring-admin";
 import { revalidatePath } from "next/cache";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
@@ -16,6 +16,11 @@ export async function rescoreJobWithActiveRubric(
   jobShortcode: string,
   budgetMs = 40_000,
 ) {
+  await requireHiringAdmin();
+  return rescoreJob(jobShortcode, budgetMs);
+}
+
+async function rescoreJob(jobShortcode: string, budgetMs = 40_000) {
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
   const supabase = getServiceSupabase();
 
@@ -63,8 +68,7 @@ export async function saveRubricAndRecompute(input: {
   jobShortcode: string;
   markdown: string;
 }) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  await requireHiringAdmin();
 
   const { saveRubric } = await import("./rubrics");
   const saved = await saveRubric({ jobShortcode: input.jobShortcode, markdown: input.markdown });
@@ -74,7 +78,7 @@ export async function saveRubricAndRecompute(input: {
   await bumpScoringEpoch(input.jobShortcode);
 
   // Re-score a first batch now with the real evaluator for instant feedback.
-  const rescore = await rescoreJobWithActiveRubric(input.jobShortcode);
+  const rescore = await rescoreJob(input.jobShortcode);
 
   revalidatePath("/board");
   revalidatePath("/rubrics");

@@ -76,4 +76,4 @@ Supabase agent skills (`.agents/skills/`):
 
 ## Auth
 
-All app routes require Clerk login. Webhooks (`/api/hooks/*`) and cron (`/api/cron/*`) stay public with their own secrets.
+All app routes require Clerk login. A session alone is not authorization: every server action, candidate API, and the home page must call `requireHiringAdmin()` / `checkHiringAdmin()` (`src/lib/auth/hiring-admin.ts`), which requires the user's verified primary email to be on `HIRING_ADMIN_EMAILS`, before any Supabase or Workable call. Webhooks (`/api/hooks/*`) and cron (`/api/cron/*`) stay public with their own secrets.

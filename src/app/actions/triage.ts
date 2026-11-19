@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { auth } from "@clerk/nextjs/server";
+import { requireHiringAdmin } from "@/lib/auth/hiring-admin";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
 import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
@@ -41,9 +41,7 @@ const VALID_PROCESS_STATUS: ProcessStatus[] = [
 ];
 
 async function requireAuth(): Promise<string> {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
+  return (await requireHiringAdmin()).userId;
 }
 
 interface ReviewerIdentity {

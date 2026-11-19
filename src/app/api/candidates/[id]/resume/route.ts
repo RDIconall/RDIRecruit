@@ -1,18 +1,18 @@
-import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { checkHiringAdmin } from "@/lib/auth/hiring-admin";
 import { getSignedResumeUrl } from "@/lib/resume/ingest";
 
 export async function GET(
   _request: Request,
   context: { params: Promise<{ id: string }> },
 ) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const access = await checkHiringAdmin();
+  if (!access.ok) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
   const { id } = await context.params;
-  const signed = await getSignedResumeUrl(id, userId);
+  const signed = await getSignedResumeUrl(id, access.admin.userId);
 
   if (!signed) {
     return NextResponse.json({ error: "Résumé not ingested yet" }, { status: 404 });

@@ -1,6 +1,6 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
+import { requireHiringAdmin } from "@/lib/auth/hiring-admin";
 import { revalidatePath } from "next/cache";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
@@ -31,8 +31,7 @@ export async function submitReadAdjustment(input: {
   correctedTotal?: number | null;
   note: string;
 }) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  const { userId } = await requireHiringAdmin();
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
   if (!input.note.trim()) return { ok: false as const, error: "Add your reasoning so Claude can learn from it." };
 
