@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { env, hasAnthropic, hasSupabase } from "@/lib/env";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { hasAnthropic, hasSupabase } from "@/lib/env";
 import { getBoardFromSupabase } from "@/lib/data/board-queries";
 import { getWorkingFiles } from "@/lib/triage/store";
 import { assembleGradingInputs, computeReadiness } from "@/lib/triage/readiness";
@@ -31,8 +32,7 @@ export const maxDuration = 300;
  *   dryRun=1           count eligible candidates without grading
  */
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get("authorization");
-  if (env.CRON_SECRET && auth !== `Bearer ${env.CRON_SECRET}`) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   if (!hasSupabase()) {
