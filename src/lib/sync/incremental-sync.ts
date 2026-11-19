@@ -8,7 +8,7 @@ import {
   syncJobsFromWorkable,
   upsertCandidateFromWorkable,
 } from "./workable-sync";
-import { readSyncState, writeSyncState } from "./sync-state";
+import { readSignedTimestamp, writeSignedTimestamp, writeSyncState } from "./sync-state";
 import { getServiceSupabase } from "../supabase/server";
 import { getCandidate } from "../workable/client";
 import {
@@ -49,7 +49,9 @@ async function deltaScanAllJobs() {
 
   const supabase = getServiceSupabase();
   const { data: jobs } = await supabase.from("jobs").select("shortcode").eq("status", "published");
-  const lastScan = await readSyncState<{ at: string | null }>("last_delta_scan", { at: null });
+  // An unsigned, tampered, or future cursor reads as null, which falls back to a
+  // full scan rather than asking Workable for a window that skips applicants.
+  const lastScanAt = await readSignedTimestamp("last_delta_scan");
   const scanStartedAt = new Date().toISOString();
 
   let changed = 0;
@@ -58,7 +60,7 @@ async function deltaScanAllJobs() {
 
   for (const job of jobs ?? []) {
     try {
-      const result = await syncChangedCandidatesForJob(job.shortcode, lastScan.at);
+      const result = await syncChangedCandidatesForJob(job.shortcode, lastScanAt);
       changed += result.changed;
       skipped += result.skipped;
       for (const e of result.errors) if (errors.length < 5) errors.push(e);
@@ -72,7 +74,7 @@ async function deltaScanAllJobs() {
   // Only advance the cursor when the scan was clean. If anything failed, keep the
   // old cursor so the next run re-pulls those candidates (upserts are idempotent).
   if (errors.length === 0) {
-    await writeSyncState("last_delta_scan", { at: scanStartedAt });
+    await writeSignedTimestamp("last_delta_scan", scanStartedAt);
   }
 
   return { changed, skipped, errors };

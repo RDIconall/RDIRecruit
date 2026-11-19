@@ -1,6 +1,6 @@
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
-import { readSyncState } from "../sync/sync-state";
+import { readSignedTimestamp, readSyncState } from "../sync/sync-state";
 import { getEffectiveEpoch } from "../calibration/service";
 
 export interface PipelineStatus {
@@ -129,13 +129,13 @@ export async function getPipelineStatus(jobShortcode?: string | null): Promise<P
   }
 
   // Sync freshness — newest of the incremental / delta-scan signals.
-  const [incremental, delta] = await Promise.all([
+  const [incremental, deltaAt] = await Promise.all([
     readSyncState<{ at: string | null }>("last_incremental", { at: null }),
-    readSyncState<{ at: string | null }>("last_delta_scan", { at: null }),
+    readSignedTimestamp("last_delta_scan"),
   ]);
   const signals: Array<{ at: string | null; source: string }> = [
     { at: incremental.at, source: "incremental sync" },
-    { at: delta.at, source: "delta scan" },
+    { at: deltaAt, source: "delta scan" },
   ];
   const newest = signals
     .filter((s) => s.at)
@@ -161,6 +161,5 @@ export async function getPipelineStatus(jobShortcode?: string | null): Promise<P
 }
 
 async function globalEpoch(): Promise<string | null> {
-  const state = await readSyncState<{ at: string | null }>("scoring_epoch:global", { at: null });
-  return state.at;
+  return readSignedTimestamp("scoring_epoch:global");
 }

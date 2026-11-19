@@ -553,10 +553,11 @@ async function runScoreUnscoredPass(options?: {
   // Scoring epoch per scope (job shortcode or 'global'). A candidate is stale
   // when its latest score predates the effective epoch for its seat.
   const epochByScope = new Map<string, string>();
+  const { verifySignedTimestamp } = await import("./sync-state");
   for (const row of epochRows ?? []) {
-    const scope = (row.key as string).replace("scoring_epoch:", "");
-    const at = (row.value as { at?: string } | null)?.at;
-    if (at) epochByScope.set(scope, at);
+    const key = row.key as string;
+    const at = verifySignedTimestamp(key, row.value);
+    if (at) epochByScope.set(key.replace("scoring_epoch:", ""), at);
   }
   const globalEpoch = epochByScope.get("global") ?? "";
   const effectiveEpoch = (jobShortcode: string | null) => {
