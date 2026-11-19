@@ -244,14 +244,19 @@ export function deriveDecisionDetail(input: MapInput): DecisionDerivation {
 
   const fit = input.evals.fitRead ?? null;
   if (fit) {
-    const decision = decisionFromSentiment(fit.sentiment);
+    const ungated = decisionFromSentiment(fit.sentiment);
+    // Hopping gate first (repeated short completed stints), then the interview bar
+    // (borderline evidence / answers that own nothing). Neither can be overridden
+    // by a model read: both are properties of the file, not of the read.
+    const decision = applyInterviewBar(applyTenureDecisionGate(ungated, tenure), bar);
+    const demoted = ungated === "interview" && decision !== "interview";
     return {
       decision,
-      ungated: decision,
+      ungated,
       tenure,
       bar,
-      demoted: false,
-      demotionNote: "",
+      demoted,
+      demotionNote: demoted ? demotionNoteFor(tenure, bar) : "",
     };
   }
 
@@ -285,8 +290,12 @@ function interviewBarFor(input: MapInput): InterviewBar {
  * The gate as carried to the client on the mapped candidate: what the gates would
  * do to an Interview call on this file, whatever the current decision is.
  */
-function interviewGateFrom(_derived: DecisionDerivation): InterviewGate {
-  return { clears: true, note: "" };
+function interviewGateFrom(derived: DecisionDerivation): InterviewGate {
+  const clears =
+    applyInterviewBar(applyTenureDecisionGate("interview", derived.tenure), derived.bar) === "interview";
+  return clears
+    ? { clears: true, note: "" }
+    : { clears: false, note: demotionNoteFor(derived.tenure, derived.bar) };
 }
 
 function narrativeRolesForTenure(input: MapInput) {
