@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { env } from "@/lib/env";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
 import { processCanonicalAnalysisBatches } from "@/lib/analysis/batch";
 
 export const runtime = "nodejs";
@@ -11,8 +11,7 @@ export const maxDuration = 300;
  * and queues anyone still waiting on a first write-up.
  */
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get("authorization");
-  if (env.CRON_SECRET && auth !== `Bearer ${env.CRON_SECRET}`) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

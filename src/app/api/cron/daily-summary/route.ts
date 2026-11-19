@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { env, summaryRecipients } from "@/lib/env";
+import { isAuthorizedCronRequest } from "@/lib/cron-auth";
+import { summaryRecipients } from "@/lib/env";
 import {
   collectDailySummary,
   renderSummaryHtml,
@@ -21,8 +22,7 @@ export const maxDuration = 300;
  *   ?to=<csv>   — override recipients (testing); defaults to SUMMARY_EMAIL_TO
  */
 export async function GET(request: NextRequest) {
-  const auth = request.headers.get("authorization");
-  if (env.CRON_SECRET && auth !== `Bearer ${env.CRON_SECRET}`) {
+  if (!isAuthorizedCronRequest(request)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
