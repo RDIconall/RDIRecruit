@@ -23,6 +23,8 @@ import { decisionReadFromEvaluation } from "../analysis/decision";
 import { analysisFingerprint } from "../analysis/fingerprint";
 import { claimAnalysisProjection, markAnalysisProjected } from "../analysis/store";
 import { loadOneCandidate } from "../triage/load";
+import { applyInterviewGate } from "../triage/interview-bar";
+import { DECISION_NEXT } from "../triage/app-theme";
 import { renderWorkingFile } from "../triage/working-file";
 import type { ParsedResumeReview } from "../resume/types";
 import type { CategoryKey } from "../types";
@@ -566,12 +568,16 @@ export async function scoreCandidate(
   // the score-derived pool call and the dossier prose came from one analysis.
   const one = await loadOneCandidate(candidateId);
   if (one) {
+    const decision = applyInterviewGate(decisionRead.decision, one.candidate.interviewGate);
+    const held = decision !== decisionRead.decision;
+    const why = decisionRead.why || one.candidate.why;
     const projectedCandidate = {
       ...one.candidate,
-      decision: decisionRead.decision,
-      why: decisionRead.why || one.candidate.why,
+      decision,
+      why: held && one.candidate.interviewGate?.note ? `${one.candidate.interviewGate.note} ${why}` : why,
       flag: decisionRead.risk || one.candidate.flag,
-      next: decisionRead.next || one.candidate.next,
+      next: held ? DECISION_NEXT[decision] : decisionRead.next || one.candidate.next,
+      survivor: decision === "interview",
       careerRead: decisionRead.careerRead ?? one.candidate.careerRead,
       assessment: decisionRead.assessment ?? one.candidate.assessment,
       assessedAt: decisionRead.assessment
