@@ -97,6 +97,39 @@ function deriveCareerContext(
   return { graduationYear, firstRoleYear, yearsOfCareer, assumedGradAge, approxCurrentAge };
 }
 
+function hasStructuredHistory(application: Record<string, unknown> | null): boolean {
+  const review = (application?.resume_parsed ?? null) as ParsedResumeReview | null;
+  if (review?.roles?.length) return true;
+  const parsed = application?.parsed_experience;
+  return Array.isArray(parsed) && parsed.length > 0;
+}
+
+/**
+ * Load the single-candidate record (the only Workable payload that carries work
+ * history and education) into the mirror. Returns false when nothing was written.
+ */
+async function hydrateFromWorkable(candidateId: string, jobShortcode: string | null): Promise<boolean> {
+  if (!jobShortcode || !hasWorkable()) return false;
+  try {
+    const { getCandidate } = await import("../workable/client");
+    const { upsertCandidateFromWorkable } = await import("../sync/workable-sync");
+    const full = await getCandidate(jobShortcode, candidateId);
+    await upsertCandidateFromWorkable(full, jobShortcode, {
+      analyze: false,
+      syncComments: false,
+      hydrate: true,
+    });
+    gradeLog("score.history.hydrated", { candidateId, jobShortcode });
+    return true;
+  } catch (error) {
+    gradeLog("score.history.hydrate.failed", {
+      candidateId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
+}
+
 export async function scoreCandidate(
   candidateId: string,
   options?: {
@@ -106,6 +139,8 @@ export async function scoreCandidate(
     evaluation?: EvaluatorOutput;
     expectedInputHash?: string;
     trigger?: string;
+    /** The caller already loaded the single-candidate record this pass. */
+    hydrated?: boolean;
   },
 ) {
   const supabase = getServiceSupabase();
@@ -135,12 +170,26 @@ export async function scoreCandidate(
 
   if (!candidate) throw new Error("Candidate not found");
 
-  const { data: applicationRows } = await supabase
-    .from("applications")
-    .select("*")
-    .eq("candidate_id", candidateId)
-    .limit(1);
-  const application = applicationRows?.[0] ?? null;
+  const loadApplication = async () => {
+    const { data: applicationRows } = await supabase
+      .from("applications")
+      .select("*")
+      .eq("candidate_id", candidateId)
+      .limit(1);
+    return applicationRows?.[0] ?? null;
+  };
+  let application = await loadApplication();
+
+  // Grading a file with no structured history rebuilds the timeline from nothing.
+  // A projection (evaluation supplied) is pinned to the graded input by its hash.
+  if (
+    !options?.evaluation &&
+    !options?.hydrated &&
+    !hasStructuredHistory(application) &&
+    (await hydrateFromWorkable(candidateId, candidate.job_shortcode ?? null))
+  ) {
+    application = await loadApplication();
+  }
 
   const resumeReview = (application?.resume_parsed ?? null) as ParsedResumeReview | null;
 
@@ -472,8 +521,9 @@ export async function scoreCandidate(
     }>,
     education,
   });
-  await supabase.from("narratives").delete().eq("candidate_id", candidateId);
+  // An empty rebuild means these inputs carried no chronology; keep the prior timeline.
   if (narrative.length) {
+    await supabase.from("narratives").delete().eq("candidate_id", candidateId);
     await supabase.from("narratives").insert({ candidate_id: candidateId, segments: narrative });
   }
 
