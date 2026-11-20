@@ -6,10 +6,11 @@ import {
   addCandidateNote,
   addCandidateTags,
   disqualifyCandidate,
-  listStages,
   moveCandidateStage,
 } from "@/lib/workable/client";
+import { getJobStages } from "@/lib/workable/stages-cache";
 import { upsertOverlay } from "@/lib/data/overlay";
+import { storedJobShortcodeFor } from "@/lib/data/candidate-job";
 import { enqueueWorkableWrite } from "@/lib/workable/write-queue";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 
@@ -42,8 +43,10 @@ export async function advanceCandidate(input: {
 }) {
   await requireAuth();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
+  const jobShortcode = await storedJobShortcodeFor(input.candidateId);
+  if (!jobShortcode) return { ok: false, error: "Candidate not on file" };
 
-  const stages = await listStages(input.jobShortcode);
+  const stages = await getJobStages(jobShortcode);
   const currentIndex = stages.findIndex((s) => s.slug === input.currentStage);
   const nextStage =
     input.targetStage ??
@@ -64,9 +67,9 @@ export async function advanceCandidate(input: {
       );
       if (hasSupabase()) {
         const { getCandidate } = await import("@/lib/workable/client");
-        const updated = await getCandidate(input.jobShortcode, input.candidateId);
+        const updated = await getCandidate(jobShortcode, input.candidateId);
         const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
-        await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
+        await upsertCandidateFromWorkable(updated, jobShortcode, { analyze: false });
       }
     });
   } catch (error) {
@@ -85,6 +88,9 @@ export async function holdCandidate(input: {
 }) {
   await requireAuth();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
+  if (!(await storedJobShortcodeFor(input.candidateId))) {
+    return { ok: false, error: "Candidate not on file" };
+  }
 
   // Best-effort: tags/comment writes never block the local hold state.
   try {
@@ -107,6 +113,8 @@ export async function denyCandidate(input: {
 }) {
   await requireAuth();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
+  const jobShortcode = await storedJobShortcodeFor(input.candidateId);
+  if (!jobShortcode) return { ok: false, error: "Candidate not on file" };
 
   // Best-effort Workable propagation; the local overlay below is the source of
   // truth and is written regardless of whether the Workable write succeeds/skips.
@@ -116,9 +124,9 @@ export async function denyCandidate(input: {
       if (hasSupabase()) {
         try {
           const { getCandidate } = await import("@/lib/workable/client");
-          const updated = await getCandidate(input.jobShortcode, input.candidateId);
+          const updated = await getCandidate(jobShortcode, input.candidateId);
           const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
-          await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
+          await upsertCandidateFromWorkable(updated, jobShortcode, { analyze: false });
         } catch (mirrorError) {
           console.warn(`Workable status mirror skipped for ${input.candidateId}`, mirrorError);
         }
