@@ -1,5 +1,9 @@
 import { CLAUDE_JUDGMENT_MODEL } from "../ai/models";
-import { enqueueCanonicalAnalysis, runCanonicalAnalysis } from "../analysis/run";
+import {
+  enqueueCanonicalAnalysis,
+  runCanonicalAnalysis,
+  type AnalysisSpendGate,
+} from "../analysis/run";
 import { hasAnthropic, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { upsertOverlay } from "../data/overlay";
@@ -106,6 +110,8 @@ export async function scoreCandidate(
     evaluation?: EvaluatorOutput;
     expectedInputHash?: string;
     trigger?: string;
+    /** Budget for a person-initiated analysis; checked before any new purchase. */
+    spend?: AnalysisSpendGate;
   },
 ) {
   const supabase = getServiceSupabase();
@@ -318,7 +324,11 @@ export async function scoreCandidate(
       candidateId,
       evaluatorInput,
       options?.trigger ?? "synchronous",
+      { spend: options?.spend },
     );
+    if (canonical.state === "limited") {
+      return { limited: true as const, retryAt: canonical.retryAt, message: canonical.message };
+    }
     if (canonical.state === "pending") {
       return { queued: true, analysisId: canonical.analysisId };
     }

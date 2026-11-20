@@ -40,6 +40,22 @@ export async function getCandidateAnalysis(id: string): Promise<CandidateAnalysi
   return (data as CandidateAnalysisRow | null) ?? null;
 }
 
+/** Look up the row for this exact input fingerprint without creating one. */
+export async function findCandidateAnalysis(
+  candidateId: string,
+  input: EvaluatorInput,
+): Promise<CandidateAnalysisRow | null> {
+  const inputHash = analysisFingerprint({ candidateId, model: CLAUDE_JUDGMENT_MODEL, input });
+  const { data, error } = await getServiceSupabase()
+    .from("candidate_analyses")
+    .select("*")
+    .eq("candidate_id", candidateId)
+    .eq("input_hash", inputHash)
+    .maybeSingle();
+  if (error) throw new Error(`Failed to load candidate analysis: ${error.message}`);
+  return (data as CandidateAnalysisRow | null) ?? null;
+}
+
 export async function getOrCreateCandidateAnalysis(
   candidateId: string,
   input: EvaluatorInput,
