@@ -1,6 +1,7 @@
 import { hasAnthropic, hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { INTERVIEW_EVIDENCE_TYPES } from "./candidate-hash";
+import type { AnalysisSpendGate } from "../analysis/run";
 
 export type RescoreReason =
   | "new_evidence"
@@ -13,10 +14,10 @@ export type RescoreReason =
 export async function rescoreCandidateOnNewEvidence(
   candidateId: string,
   reason: RescoreReason = "new_evidence",
-  options?: { immediate?: boolean },
+  options?: { immediate?: boolean; spend?: AnalysisSpendGate },
 ) {
   if (!hasSupabase() || !hasAnthropic()) {
-    return { scored: false, reason: "not_configured" as const };
+    return { scored: false, reason: "not_configured" as const, limited: undefined };
   }
 
   const { scoreCandidate } = await import("../scoring/run-score");
@@ -25,7 +26,11 @@ export async function rescoreCandidateOnNewEvidence(
     replace: true,
     ...(options?.immediate ? {} : { transport: "enqueue" as const }),
     trigger: reason,
+    spend: options?.spend,
   });
+  if ("limited" in result && result.limited) {
+    return { scored: false, queued: false, result, batch: null, limited: result.message };
+  }
   const batch = options?.immediate
     ? null
     : await (async () => {
@@ -47,6 +52,7 @@ export async function rescoreCandidateOnNewEvidence(
     queued: !("read" in result),
     result,
     batch,
+    limited: undefined,
   };
 }
 
