@@ -1,8 +1,7 @@
 import { cache } from "react";
 import { hasSupabase, hasWorkable } from "../env";
 import { getServiceSupabase } from "../supabase/server";
-import type { WorkableJob } from "../workable/client";
-import { getJob } from "../workable/client";
+import { isSafeWorkableId } from "../workable/client";
 
 export interface JobSummary {
   shortcode: string;
@@ -80,7 +79,14 @@ export const getPublishedJobs = cache(async (): Promise<JobSummary[]> => {
   return DEMO_JOBS;
 });
 
+/**
+ * Resolve a job code against jobs already stored for this account. Never calls
+ * Workable: the code usually comes from the page query string, and an unknown
+ * value must not turn into an account-token request or a new job row. Callers
+ * act on the returned `shortcode`, not on the value they passed in.
+ */
 export async function getJobByShortcode(shortcode: string): Promise<JobSummary | null> {
+  if (!isSafeWorkableId(shortcode)) return null;
   if (hasSupabase()) {
     const supabase = getServiceSupabase();
     const { data } = await supabase
@@ -100,21 +106,7 @@ export async function getJobByShortcode(shortcode: string): Promise<JobSummary |
   }
 
   const jobs = await getPublishedJobs();
-  const found = jobs.find((job) => job.shortcode === shortcode);
-  if (found) return found;
-
-  if (hasWorkable()) {
-    try {
-      const job = await getJob(shortcode);
-      const { upsertJob } = await import("../sync/workable-sync");
-      await upsertJob(job);
-      return mapWorkableJob(job);
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
+  return jobs.find((job) => job.shortcode === shortcode) ?? null;
 }
 
 export async function resolveActiveJobShortcode(
@@ -126,14 +118,4 @@ export async function resolveActiveJobShortcode(
     return requested;
   }
   return jobs[0]!.shortcode;
-}
-
-function mapWorkableJob(job: WorkableJob): JobSummary {
-  return {
-    shortcode: job.shortcode,
-    title: job.title,
-    status: job.state,
-    department: job.department,
-    location: job.location?.location_str,
-  };
 }
