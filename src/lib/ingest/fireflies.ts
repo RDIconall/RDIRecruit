@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import { env } from "../env";
 
 /**
@@ -112,6 +113,22 @@ function collectEmails(...sources: unknown[]): string[] {
     }
   }
   return [...out];
+}
+
+/**
+ * Verify the Fireflies `x-hub-signature` header: hex HMAC-SHA256 of the exact raw
+ * body with the webhook secret, optionally prefixed `sha256=` (webhooks V2).
+ */
+export function verifyFirefliesSignature(
+  rawBody: Buffer,
+  signature: string | null,
+  secret: string,
+): boolean {
+  if (!signature) return false;
+  const presented = Buffer.from(signature.trim().replace(/^sha256=/i, "").toLowerCase());
+  const expected = Buffer.from(createHmac("sha256", secret).update(rawBody).digest("hex"));
+  if (presented.length !== expected.length) return false;
+  return timingSafeEqual(presented, expected);
 }
 
 export function hasFirefliesApiKey(): boolean {
