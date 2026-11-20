@@ -258,6 +258,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   const isDq = !!ws.dq[id];
   const chat = ws.chat[id] ?? [];
   const chatThinking = !!wsApi.chatBusy[id];
+  const chatReplyDraft = wsApi.chatDrafts[id];
   const busy = !!wsApi.busy[id];
   const regenAt = ws.regen[id];
   const advanceSlug = nextStageSlug(c.workableStage, stages);
@@ -1108,7 +1109,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
         id="war-room"
         title="War room"
         right={
-          chat.length > 0 ? (
+          chat.length > 0 || chatReplyDraft ? (
             <button onClick={() => wsApi.clearChat(id)} style={mono({ cursor: "pointer", background: "transparent", border: "none", fontSize: 12, color: APP.muted })}>
               Clear
             </button>
@@ -1120,7 +1121,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
             ? "Interview evidence is on file — Claude’s job here is the next pipeline move: advance to the next round, hold, or pass. Chat is reasoning only; use Update assessment above to persist the call."
             : "Ask Claude whether this file clears the bar for an interview. Chat is reasoning only; use Update assessment above to persist the read."}
         </p>
-        {chat.length === 0 && !chatThinking && (
+        {chat.length === 0 && !chatThinking && !chatReplyDraft && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 14 }}>
             {warRoomStarters.map((q) => (
               <button
@@ -1167,6 +1168,40 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
               </div>
             );
           })}
+          {chatReplyDraft && !chatThinking && (
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
+              <div style={mono({ fontSize: 11.5, color: APP.muted })}>
+                Draft reply — shaped by applicant-written materials; not saved to the case file until you accept it
+              </div>
+              <div
+                style={{
+                  maxWidth: "86%",
+                  background: APP.surface,
+                  border: `1px dashed ${APP.hair}`,
+                  borderRadius: 10,
+                  padding: "10px 13px",
+                  fontSize: 14.5,
+                  lineHeight: 1.55,
+                  color: APP.ink2,
+                  whiteSpace: "pre-wrap",
+                }}
+              >
+                {chatReplyDraft}
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button type="button" onClick={() => wsApi.acceptChatDraft(id)} style={primaryBtn(false)}>
+                  Accept reply
+                </button>
+                <button
+                  type="button"
+                  onClick={() => wsApi.discardChatDraft(id)}
+                  style={mono({ cursor: "pointer", background: "transparent", border: "none", fontSize: 12, color: APP.muted })}
+                >
+                  Discard
+                </button>
+              </div>
+            </div>
+          )}
           {chatThinking && <div style={mono({ fontSize: 12.5, color: APP.muted })}>Claude is thinking…</div>}
         </div>
         <div style={{ display: "flex", gap: 8 }}>

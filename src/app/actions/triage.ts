@@ -589,15 +589,18 @@ export async function updateAssessment(input: {
 interface ChatResult {
   ok: boolean;
   messages: ChatMessage[];
+  /** Claude's reply, not yet saved to the thread — the reviewer must accept it. */
+  draft?: string;
   message?: string;
 }
 
 /**
- * Continue the per-candidate "war room" conversation with Claude. Appends the
- * human's turn, calls Claude grounded in the candidate's working file + rubric +
- * spec, appends the reply, and persists the whole thread to the workspace so the
- * conversation survives reloads. Resilient: on any AI failure the human turn is
- * still saved and a friendly notice is returned.
+ * Continue the per-candidate "war room" conversation with Claude. Appends and
+ * persists the human's turn, calls Claude grounded in the candidate's working
+ * file + rubric + spec, and returns the reply as an unsaved draft. The reply only
+ * joins the stored thread when a reviewer accepts it (acceptCandidateChatReply),
+ * because it is shaped by applicant-written materials. Resilient: on any AI
+ * failure the human turn is still saved and a friendly notice is returned.
  */
 export async function sendCandidateChat(input: {
   candidateId: string;
@@ -709,18 +712,43 @@ export async function sendCandidateChat(input: {
     history: withUser.slice(-24),
   });
 
-  const next: ChatMessage[] = reply
-    ? [...withUser, { role: "assistant", content: reply, ts: new Date().toISOString() }]
-    : withUser;
-
-  // Persist the human turn (and Claude's reply when we got one) either way.
-  await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, ident.label);
+  await upsertWorkingFile(input.candidateId, { workspace: { chat: withUser } }, ident.label);
 
   return {
     ok: Boolean(reply),
-    messages: next,
+    messages: withUser,
+    ...(reply ? { draft: reply } : {}),
     message: reply ? undefined : "Claude is unavailable right now (no API key or transient error) — your message was saved.",
   };
+}
+
+/**
+ * Save a war-room draft reply to the thread after the reviewer has read and
+ * accepted it. The stored turn records who accepted it.
+ */
+export async function acceptCandidateChatReply(input: {
+  candidateId: string;
+  content: string;
+}): Promise<ChatResult> {
+  await requireAuth();
+  const content = input.content.trim();
+  if (!content) return { ok: false, messages: [], message: "Empty reply" };
+  if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
+
+  const ident = await reviewerIdentity();
+  const existing = await getWorkingFile(input.candidateId);
+  const history = existing?.workspace.chat ?? [];
+  const next: ChatMessage[] = [
+    ...history,
+    {
+      role: "assistant",
+      content: content.slice(0, 20000),
+      ts: new Date().toISOString(),
+      ...(ident.label ? { acceptedBy: ident.label } : {}),
+    },
+  ];
+  await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, ident.label);
+  return { ok: true, messages: next };
 }
 
 /** Clear a candidate's war-room conversation. */

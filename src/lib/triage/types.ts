@@ -468,6 +468,8 @@ export interface ChatMessage {
   ts: string;
   // For user turns: the human reviewer's label (e.g. "Conall"). Omitted for Claude.
   author?: string;
+  // For Claude turns: the reviewer who accepted the draft into the thread.
+  acceptedBy?: string;
 }
 
 // One entry in the per-candidate activity log (HANDOFF-v2 §2) — human-authored
