@@ -15,6 +15,25 @@ export {
 const BASE_URL = () =>
   `https://${env.WORKABLE_SUBDOMAIN}.workable.com/spi/v3`;
 
+const SAFE_PATH_SEGMENT = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
+/**
+ * Workable shortcodes and ids are short alphanumeric tokens. Anything else (a
+ * slash, `?`, `#`, `\`, `%`, or a dot segment) would let the value rewrite the
+ * request path or query that runs with the account token, so it is refused
+ * before any request is made.
+ */
+export function isSafeWorkableId(value: unknown): value is string {
+  return typeof value === "string" && SAFE_PATH_SEGMENT.test(value);
+}
+
+function seg(value: string, label: string): string {
+  if (!isSafeWorkableId(value)) {
+    throw new Error(`Refusing Workable request: invalid ${label}`);
+  }
+  return encodeURIComponent(value);
+}
+
 function headers(): Record<string, string> {
   return {
     Authorization: `Bearer ${getWorkableToken()}`,
@@ -229,7 +248,7 @@ export async function getJob(shortcode: string): Promise<WorkableJob> {
   // therefore yielded `undefined`, so `full_description` was silently dropped and
   // every job spec resolved empty (blocking grading). Accept either shape.
   const data = await workableFetch<{ job?: WorkableJob } & Partial<WorkableJob>>(
-    `/jobs/${shortcode}`,
+    `/jobs/${seg(shortcode, "job shortcode")}`,
   );
   return (data.job ?? (data as WorkableJob));
 }
@@ -245,7 +264,7 @@ export async function listCandidates(
   if (params?.updated_after) query.set("updated_after", params.updated_after);
   const qs = query.toString() ? `?${query}` : "";
   const data = await workableFetch<{ candidates: WorkableCandidate[] }>(
-    `/jobs/${shortcode}/candidates${qs}`,
+    `/jobs/${seg(shortcode, "job shortcode")}/candidates${qs}`,
   );
   return data.candidates;
 }
@@ -255,7 +274,7 @@ export async function getCandidate(
   id: string,
 ): Promise<WorkableCandidate> {
   const data = await workableFetch<{ candidate: WorkableCandidate }>(
-    `/jobs/${shortcode}/candidates/${id}`,
+    `/jobs/${seg(shortcode, "job shortcode")}/candidates/${seg(id, "candidate id")}`,
   );
   return data.candidate;
 }
@@ -269,7 +288,7 @@ export async function getCandidate(
 export async function getCandidateById(id: string): Promise<WorkableCandidate> {
   const data = await workableFetch<
     { candidate?: WorkableCandidate } & Partial<WorkableCandidate>
-  >(`/candidates/${id}`);
+  >(`/candidates/${seg(id, "candidate id")}`);
   return data.candidate ?? (data as WorkableCandidate);
 }
 
@@ -287,7 +306,7 @@ export async function listAllCandidates(
   query.set("limit", "100");
   if (params?.updatedAfter) query.set("updated_after", params.updatedAfter);
   return fetchAllPages<WorkableCandidate>(
-    `/jobs/${shortcode}/candidates?${query}`,
+    `/jobs/${seg(shortcode, "job shortcode")}/candidates?${query}`,
     "candidates",
   );
 }
@@ -316,7 +335,7 @@ export async function listCandidateActivities(
   const query = new URLSearchParams();
   query.set("limit", String(params?.limit ?? 50));
   const data = await workableFetch<{ activities: WorkableActivity[] }>(
-    `/candidates/${candidateId}/activities?${query}`,
+    `/candidates/${seg(candidateId, "candidate id")}/activities?${query}`,
   );
   return data.activities ?? [];
 }
@@ -393,7 +412,7 @@ export async function moveCandidateStage(
 ): Promise<WorkableWriteResult> {
   const memberId = getWorkableMemberId();
   if (!memberId) return skipWrite("move");
-  await workableFetch<unknown>(`/candidates/${candidateId}/move`, {
+  await workableFetch<unknown>(`/candidates/${seg(candidateId, "candidate id")}/move`, {
     method: "POST",
     body: JSON.stringify({ member_id: memberId, target_stage: targetStage }),
   });
@@ -411,7 +430,7 @@ export async function addCandidateNote(
 ): Promise<WorkableWriteResult> {
   const memberId = getWorkableMemberId();
   if (!memberId) return skipWrite("comment");
-  await workableFetch<unknown>(`/candidates/${candidateId}/comments`, {
+  await workableFetch<unknown>(`/candidates/${seg(candidateId, "candidate id")}/comments`, {
     method: "POST",
     body: JSON.stringify({ member_id: memberId, comment: { body } }),
   });
@@ -440,7 +459,7 @@ export async function addCandidateTags(
     );
   }
   const merged = Array.from(new Set([...existing, ...tags]));
-  await workableFetch<unknown>(`/candidates/${candidateId}/tags`, {
+  await workableFetch<unknown>(`/candidates/${seg(candidateId, "candidate id")}/tags`, {
     method: "PUT",
     body: JSON.stringify({ tags: merged }),
   });
@@ -459,7 +478,7 @@ export async function disqualifyCandidate(
 ): Promise<WorkableWriteResult> {
   const memberId = getWorkableMemberId();
   if (!memberId) return skipWrite("disqualify");
-  await workableFetch<unknown>(`/candidates/${candidateId}/disqualify`, {
+  await workableFetch<unknown>(`/candidates/${seg(candidateId, "candidate id")}/disqualify`, {
     method: "POST",
     body: JSON.stringify({
       member_id: memberId,
@@ -476,7 +495,7 @@ export async function disqualifyCandidate(
 export async function revertCandidate(candidateId: string): Promise<WorkableWriteResult> {
   const memberId = getWorkableMemberId();
   if (!memberId) return skipWrite("revert");
-  await workableFetch<unknown>(`/candidates/${candidateId}/revert`, {
+  await workableFetch<unknown>(`/candidates/${seg(candidateId, "candidate id")}/revert`, {
     method: "POST",
     body: JSON.stringify({ member_id: memberId }),
   });
@@ -491,7 +510,7 @@ export interface WorkableStage {
 
 export async function listStages(shortcode: string): Promise<WorkableStage[]> {
   const data = await workableFetch<{ stages: WorkableStage[] }>(
-    `/jobs/${shortcode}/stages`,
+    `/jobs/${seg(shortcode, "job shortcode")}/stages`,
   );
   return data.stages;
 }
