@@ -309,14 +309,8 @@ export async function reanalyze(input: { candidateId: string }): Promise<RecalcR
 type WorkableSync = "disqualified" | "reinstated" | "skipped" | "failed";
 
 async function jobShortcodeFor(candidateId: string): Promise<string | null> {
-  if (!hasSupabase()) return null;
-  const supabase = getServiceSupabase();
-  const { data } = await supabase
-    .from("candidates")
-    .select("job_shortcode")
-    .eq("workable_id", candidateId)
-    .maybeSingle();
-  return (data?.job_shortcode as string | null) ?? null;
+  const { storedJobShortcodeFor } = await import("@/lib/data/candidate-job");
+  return storedJobShortcodeFor(candidateId);
 }
 
 /**
@@ -334,6 +328,7 @@ async function pushDisqualifyToWorkable(
   if (!hasWorkable()) return "skipped";
   try {
     const shortcode = await jobShortcodeFor(candidateId);
+    if (!shortcode) return "skipped";
     const { enqueueWorkableWrite } = await import("@/lib/workable/write-queue");
     const { disqualifyCandidate, revertCandidate, getCandidate } = await import("@/lib/workable/client");
     // The SPI v3 write returns a skip sentinel (instead of throwing) when no
@@ -349,7 +344,7 @@ async function pushDisqualifyToWorkable(
         return;
       }
       // Mirror the fresh Workable status back into Supabase when we can.
-      if (shortcode && hasSupabase()) {
+      if (hasSupabase()) {
         try {
           const updated = await getCandidate(shortcode, candidateId);
           const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
@@ -848,6 +843,8 @@ export async function moveCandidateToStage(input: {
     return { ok: false, error: "Use Disqualify for Workable disposition" };
   }
   if (!hasWorkable()) return { ok: false, error: "Workable not configured", workable: "skipped" };
+  const jobShortcode = await jobShortcodeFor(input.candidateId);
+  if (!jobShortcode) return { ok: false, error: "Candidate not on file", workable: "skipped" };
 
   try {
     const { enqueueWorkableWrite } = await import("@/lib/workable/write-queue");
@@ -861,9 +858,9 @@ export async function moveCandidateToStage(input: {
       }
       await addCandidateNote(input.candidateId, `Moved to ${target} via RDIRecruit`);
       if (hasSupabase()) {
-        const updated = await getCandidate(input.jobShortcode, input.candidateId);
+        const updated = await getCandidate(jobShortcode, input.candidateId);
         const { upsertCandidateFromWorkable } = await import("@/lib/sync/workable-sync");
-        await upsertCandidateFromWorkable(updated, input.jobShortcode, { analyze: false });
+        await upsertCandidateFromWorkable(updated, jobShortcode, { analyze: false });
       }
     });
     revalidatePath("/");
@@ -884,14 +881,16 @@ export async function sendCandidateToScreen(input: {
 }): Promise<{ ok: boolean; stage?: string; error?: string; workable?: "moved" | "skipped" | "failed" }> {
   await requireAuth();
   if (!hasWorkable()) return { ok: false, error: "Workable not configured", workable: "skipped" };
+  const jobShortcode = await jobShortcodeFor(input.candidateId);
+  if (!jobShortcode) return { ok: false, error: "Candidate not on file", workable: "skipped" };
   try {
-    const { listStages } = await import("@/lib/workable/client");
+    const { getJobStages } = await import("@/lib/workable/stages-cache");
     const { buildStageColumns, phoneScreenSlug } = await import("@/lib/triage/stages");
-    const stages = await listStages(input.jobShortcode);
+    const stages = await getJobStages(jobShortcode);
     const slug = phoneScreenSlug(buildStageColumns(stages));
     if (!slug) return { ok: false, error: "No screen stage on this job" };
     return moveCandidateToStage({
-      jobShortcode: input.jobShortcode,
+      jobShortcode,
       candidateId: input.candidateId,
       targetStage: slug,
     });

@@ -63,8 +63,8 @@ function toActivityEntry(r: ActivityRow): ActivityEntry {
 async function loadJobStages(jobShortcode: string): Promise<StageColumn[]> {
   if (!hasWorkable()) return FALLBACK_STAGES;
   try {
-    const { listStages } = await import("../workable/client");
-    const stages = await listStages(jobShortcode);
+    const { getJobStages } = await import("../workable/stages-cache");
+    const stages = await getJobStages(jobShortcode);
     if (!stages?.length) return FALLBACK_STAGES;
     return buildStageColumns(stages);
   } catch (error) {
@@ -640,13 +640,19 @@ async function buildCrossRolePool(
   };
 }
 
-export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> {
-  if (jobShortcode === CROSS_ROLE_SHORTCODE) return loadCrossRolePool();
+export async function loadTriagePool(requestedShortcode: string): Promise<TriagePool> {
+  if (requestedShortcode === CROSS_ROLE_SHORTCODE) return loadCrossRolePool();
+
+  // The requested code is untrusted (page query string). Only a job already
+  // stored for this account is loaded, and everything below — including the
+  // Workable stage read — uses the stored row's shortcode, never the request.
+  const jobMeta = await getJobByShortcode(requestedShortcode);
+  if (!jobMeta) return loadCrossRolePool();
+  const jobShortcode = jobMeta.shortcode;
+  const title = jobMeta.title;
 
   const jobSummaries = await getPublishedJobs();
   const jobs = withCrossRoleOption(jobSummaries.map((j) => ({ shortcode: j.shortcode, title: j.title })));
-  const jobMeta = await getJobByShortcode(jobShortcode);
-  const title = jobMeta?.title ?? jobShortcode;
   const [rubric, methodology, stages] = await Promise.all([
     getJobRubric(jobShortcode),
     getMethodDoc(),
