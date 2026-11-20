@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
-import { hasSupabase, hasWorkable } from "@/lib/env";
+import { hasAnthropic, hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
 import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
@@ -15,6 +15,9 @@ import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-ph
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import { requireHiringTeam, type HiringTeamMember } from "@/lib/auth/hiring-team";
+import { reserveModelSpend } from "@/lib/ai/spend-budget";
+import type { AnalysisSpendGate } from "@/lib/analysis/run";
 import type {
   ActivityEntry,
   ActivityType,
@@ -50,6 +53,15 @@ interface ReviewerIdentity {
   id?: string;
   label?: string;
   kind: ReviewerKind;
+}
+
+function memberIdentity(member: HiringTeamMember): ReviewerIdentity {
+  return { id: member.userId, label: member.label, kind: member.kind };
+}
+
+/** Grading budget for this hiring-team member on this candidate. */
+function gradingSpend(member: HiringTeamMember, candidateId: string): AnalysisSpendGate {
+  return { reserve: () => reserveModelSpend("grading", { userId: member.userId, subject: candidateId }) };
 }
 
 /** Resolve the acting reviewer from Clerk, mapping name/email → reviewer kind (#7). */
@@ -109,9 +121,10 @@ interface RecalcResult {
 async function persistAndMaybeRecalc(
   candidateId: string,
   patch: WorkspaceSlice,
-  opts: { recalc: boolean; trigger?: string; reviewer?: ReviewerIdentity },
+  opts: { recalc: boolean; trigger?: string; reviewer?: ReviewerIdentity; spend?: AnalysisSpendGate },
 ): Promise<RecalcResult> {
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
+  if (opts.recalc && !opts.spend) throw new Error("A re-analysis needs a spend budget");
 
   const reviewer = opts.reviewer;
   const updatedBy = reviewer?.label ?? (await reviewerLabel());
@@ -141,6 +154,7 @@ async function persistAndMaybeRecalc(
 
   let read: DecisionRead | null = null;
   let blocked = false;
+  let limited: { retryAt: string; message: string } | undefined;
 
   if (opts.recalc && prepared) {
     const result = await gradeCandidate({
@@ -153,9 +167,11 @@ async function persistAndMaybeRecalc(
       replies: one.slice.replies ?? {},
       reviewer: reviewer ? { label: reviewer.label, kind: reviewer.kind } : undefined,
       prepared,
+      spend: opts.spend,
     });
     read = result.read;
     blocked = result.blocked;
+    limited = result.limited;
     if (read) {
       // #7: carry the reviewer-signal lens (rev/revNote) on the persisted read so
       // the pool + candidate views show the human's signal, not a generic "none".
@@ -201,6 +217,8 @@ async function persistAndMaybeRecalc(
   let message: string | undefined;
   if (opts.recalc && blocked && read?.missingInputs?.length) {
     message = `Saved. Review blocked — waiting on ${describeMissing(read.missingInputs)} before a read can be made.`;
+  } else if (opts.recalc && limited) {
+    message = `Saved, but not re-analyzed. ${limited.message} The current read stays in place.`;
   } else if (opts.recalc && !read) {
     message =
       "Saved. Analysis is queued or already in progress; the current read stays in place until it completes.";
@@ -219,12 +237,13 @@ export async function saveCorrection(input: {
   text: string;
   reviewerKind?: ReviewerKind;
 }): Promise<RecalcResult> {
-  await requireAuth();
+  const member = await requireHiringTeam();
   const text = input.text.trim();
   if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
 
   // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
-  const ident = await reviewerIdentity();
+  // The picker only labels the note; it never grants access.
+  const ident = memberIdentity(member);
   const kind = input.reviewerKind ?? ident.kind;
   const label =
     ident.label && reviewerKindFrom(ident.label) === kind ? ident.label : reviewerKindLabel(kind);
@@ -239,18 +258,34 @@ export async function saveCorrection(input: {
   };
   const existing = await getWorkingFile(input.candidateId);
   const corrections = [...(existing?.workspace.corrections ?? []), entry];
-  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction", reviewer });
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    { corrections },
+    { recalc: true, trigger: "Human correction", reviewer, spend: gradingSpend(member, input.candidateId) },
+  );
 }
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
-  await requireAuth();
-  const reviewer = await reviewerIdentity();
-  return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
+  const member = await requireHiringTeam();
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    { transcript: input.transcript },
+    {
+      recalc: true,
+      trigger: "Interview transcript",
+      reviewer: memberIdentity(member),
+      spend: gradingSpend(member, input.candidateId),
+    },
+  );
 }
 
 export async function runDeepAnalysis(input: { candidateId: string }): Promise<RecalcResult> {
-  await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { deep: true }, { recalc: true, trigger: "Deep analysis" });
+  const member = await requireHiringTeam();
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    { deep: true },
+    { recalc: true, trigger: "Deep analysis", spend: gradingSpend(member, input.candidateId) },
+  );
 }
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {
@@ -301,8 +336,12 @@ export async function setProcessStatus(input: {
 
 /** Re-run Claude on the current materials (with the per-role rubric). Clears any manual override. */
 export async function reanalyze(input: { candidateId: string }): Promise<RecalcResult> {
-  await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, {}, { recalc: true, trigger: "Re-analysis" });
+  const member = await requireHiringTeam();
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    {},
+    { recalc: true, trigger: "Re-analysis", spend: gradingSpend(member, input.candidateId) },
+  );
 }
 
 /** What happened to the candidate's status in Workable as a result of a triage cut. */
@@ -428,9 +467,17 @@ export async function bulkDisqualify(input: {
  * (or refreshing) the rubric-fit section. No workspace edit — just a recalc pass.
  */
 export async function compareToRubric(input: { candidateId: string }): Promise<RecalcResult> {
-  await requireAuth();
-  const reviewer = await reviewerIdentity();
-  return persistAndMaybeRecalc(input.candidateId, {}, { recalc: true, trigger: "Rubric comparison", reviewer });
+  const member = await requireHiringTeam();
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    {},
+    {
+      recalc: true,
+      trigger: "Rubric comparison",
+      reviewer: memberIdentity(member),
+      spend: gradingSpend(member, input.candidateId),
+    },
+  );
 }
 
 // ---- Activity log (HANDOFF-v2 §2) — the human-authored record ----
@@ -516,7 +563,7 @@ export async function logActivity(input: {
 export async function updateAssessment(input: {
   candidateId: string;
 }): Promise<RecalcResult & { regenAt?: string }> {
-  await requireAuth();
+  const member = await requireHiringTeam();
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
 
   let one = await loadOneCandidate(input.candidateId);
@@ -546,8 +593,13 @@ export async function updateAssessment(input: {
     transcript: combinedTranscript,
     replies: one.slice.replies ?? {},
     prepared,
+    spend: gradingSpend(member, input.candidateId),
   });
   let read = result.read;
+
+  if (result.limited) {
+    return { ok: false, recalculated: false, read: null, message: `${result.limited.message} The current read stays in place.` };
+  }
 
   if (result.blocked && read?.missingInputs?.length) {
     // Persist the blocked read so the UI shows exactly what grading is waiting on.
@@ -603,14 +655,19 @@ export async function sendCandidateChat(input: {
   candidateId: string;
   message: string;
 }): Promise<ChatResult> {
-  await requireAuth();
+  const member = await requireHiringTeam();
   const text = input.message.trim();
   if (!text) return { ok: false, messages: [], message: "Empty message" };
   if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
 
-  const ident = await reviewerIdentity();
+  const ident = memberIdentity(member);
   const existing = await getWorkingFile(input.candidateId);
   const history = existing?.workspace.chat ?? [];
+  if (hasAnthropic()) {
+    // One turn can be several tool rounds; the turn is reserved before any of them.
+    const reservation = await reserveModelSpend("chat", { userId: member.userId, subject: input.candidateId });
+    if (!reservation.ok) return { ok: false, messages: history, message: reservation.message };
+  }
   const userMsg: ChatMessage = {
     role: "user",
     content: text,

@@ -1,4 +1,5 @@
 import "server-only";
+import type { AnalysisSpendGate } from "../analysis/run";
 import { gradeLog } from "./grade-log";
 import {
   describeMissing,
@@ -27,6 +28,8 @@ export interface GradeRequest {
   reviewer?: { label?: string; kind?: ReviewerKind };
   /** Pre-assembled inputs + readiness, when the caller already ran the gate. */
   prepared?: { inputs: GradingInputs; readiness: CandidateReadiness };
+  /** Budget checked before a new Claude purchase (identical fingerprints are reused). */
+  spend?: AnalysisSpendGate;
 }
 
 export interface GradeResult {
@@ -34,6 +37,8 @@ export interface GradeResult {
   readiness: CandidateReadiness;
   /** True when the gate blocked grading because a required input is missing. */
   blocked: boolean;
+  /** Set when the spend budget refused a new purchase. */
+  limited?: { retryAt: string; message: string };
 }
 
 /**
@@ -84,7 +89,17 @@ export async function gradeCandidate(req: GradeRequest): Promise<GradeResult> {
     force: true,
     replace: true,
     trigger: req.reviewer?.label ? `human:${req.reviewer.label}` : "human_reanalysis",
+    spend: req.spend,
   });
+  if ("limited" in result && result.limited) {
+    gradeLog("grade.limited", { candidateId: req.candidate.id, retryAt: result.retryAt });
+    return {
+      read: null,
+      readiness,
+      blocked: false,
+      limited: { retryAt: result.retryAt, message: result.message },
+    };
+  }
   const read = "read" in result ? (result.read ?? null) : null;
 
   gradeLog("grade.done", {

@@ -2,15 +2,15 @@
 
 import { randomUUID } from "crypto";
 import { revalidatePath } from "next/cache";
-import { auth } from "@clerk/nextjs/server";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { requireHiringTeam } from "@/lib/auth/hiring-team";
+import { reserveModelSpend } from "@/lib/ai/spend-budget";
+import type { AnalysisSpendGate } from "@/lib/analysis/run";
 
-async function requireAuth() {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
-  return userId;
+function gradingSpend(userId: string, candidateId: string): AnalysisSpendGate {
+  return { reserve: () => reserveModelSpend("grading", { userId, subject: candidateId }) };
 }
 
 export type InterviewKind = "interview" | "phone_screen";
@@ -30,7 +30,7 @@ export async function addInterviewEvidence(input: {
   date?: string | null;
   transcript: string;
 }) {
-  await requireAuth();
+  const member = await requireHiringTeam();
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const transcript = input.transcript.trim();
@@ -56,12 +56,12 @@ export async function addInterviewEvidence(input: {
   const rescore = await rescoreCandidateOnNewEvidence(
     input.candidateId,
     "interview",
-    { immediate: true },
+    { immediate: true, spend: gradingSpend(member.userId, input.candidateId) },
   );
 
   revalidatePath(`/candidates/${input.candidateId}`);
   revalidatePath("/board");
-  return { ok: true as const, scored: rescore.scored };
+  return { ok: true as const, scored: rescore.scored, limited: rescore.limited };
 }
 
 /**
@@ -77,7 +77,7 @@ export async function addVideoAskAnswers(input: {
   date?: string | null;
   answers: string;
 }) {
-  await requireAuth();
+  const member = await requireHiringTeam();
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const answers = input.answers.trim();
@@ -102,12 +102,12 @@ export async function addVideoAskAnswers(input: {
   const rescore = await rescoreCandidateOnNewEvidence(
     input.candidateId,
     "async_video",
-    { immediate: true },
+    { immediate: true, spend: gradingSpend(member.userId, input.candidateId) },
   );
 
   revalidatePath(`/candidates/${input.candidateId}`);
   revalidatePath("/board");
-  return { ok: true as const, scored: rescore.scored };
+  return { ok: true as const, scored: rescore.scored, limited: rescore.limited };
 }
 
 function parseDate(value: string | null | undefined): string {

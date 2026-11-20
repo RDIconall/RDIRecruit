@@ -20,6 +20,12 @@ const envSchema = z.object({
   CLAUDE_MODEL_JUDGMENT: z.string().optional(),
   CLAUDE_MODEL_EXTRACTION: z.string().optional(),
   CRON_SECRET: z.string().optional(),
+  // Hiring-team allowlist for model-backed review actions (re-analysis, war room,
+  // calibration, rubric/method re-scores, radar scoring). Comma-separated. When
+  // either is set, only these Clerk user ids / verified email addresses may start
+  // a Claude call; when both are unset, the Conall/Lara reviewer match is used.
+  HIRING_TEAM_USER_IDS: z.string().optional(),
+  HIRING_TEAM_EMAILS: z.string().optional(),
   // Outbound email (SMTP) for the daily applicant summary. Defaults are tuned
   // for Google Workspace / Gmail with an app password, so the summary is sent
   // from your own address to you + Lara — no third-party service, no domain to
