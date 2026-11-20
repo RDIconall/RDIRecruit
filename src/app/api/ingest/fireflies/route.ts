@@ -5,6 +5,7 @@ import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
 import {
   extractInlineTranscript,
+  exactEmailIlikePattern,
   extractTranscriptId,
   fetchFirefliesTranscript,
   hasFirefliesApiKey,
@@ -77,13 +78,18 @@ export async function POST(request: NextRequest) {
     );
     const emailsToTry = candidateEmails.length ? candidateEmails : transcript.participantEmails;
     for (const email of emailsToTry) {
+      const pattern = exactEmailIlikePattern(email);
+      if (!pattern) continue;
       const { data } = await supabase
         .from("candidates")
-        .select("workable_id")
-        .ilike("email", email)
-        .maybeSingle();
-      if (data?.workable_id) {
-        workableId = data.workable_id as string;
+        .select("workable_id, email")
+        .ilike("email", pattern)
+        .limit(2);
+      const matches = (data ?? []).filter(
+        (row) => typeof row.email === "string" && row.email.trim().toLowerCase() === email,
+      );
+      if (matches.length === 1 && matches[0].workable_id) {
+        workableId = matches[0].workable_id as string;
         break;
       }
     }

@@ -97,21 +97,34 @@ export function extractInlineTranscript(
 
 function collectEmails(...sources: unknown[]): string[] {
   const out = new Set<string>();
+  const add = (value: unknown) => {
+    if (typeof value !== "string") return;
+    const email = value.trim().toLowerCase();
+    if (email.includes("@")) out.add(email);
+  };
   for (const source of sources) {
     if (!source) continue;
     if (Array.isArray(source)) {
       for (const entry of source) {
-        if (typeof entry === "string" && entry.includes("@")) out.add(entry.toLowerCase());
-        else if (entry && typeof entry === "object") {
-          const email = (entry as { email?: string }).email;
-          if (email) out.add(email.toLowerCase());
-        }
+        if (typeof entry === "string") add(entry);
+        else if (entry && typeof entry === "object") add((entry as { email?: unknown }).email);
       }
-    } else if (typeof source === "string" && source.includes("@")) {
-      out.add(source.toLowerCase());
+    } else {
+      add(source);
     }
   }
   return [...out];
+}
+
+/**
+ * Turn a participant address into an `ilike` pattern that only matches that exact
+ * address (case-insensitively). `%`, `_` and `\` are escaped for Postgres LIKE.
+ * PostgREST rewrites every `*` in a like/ilike value to `%` and offers no escape
+ * for it, so an address containing `*` cannot be matched literally and yields null.
+ */
+export function exactEmailIlikePattern(email: string): string | null {
+  if (!email || email.includes("*")) return null;
+  return email.replace(/[\\%_]/g, (char) => `\\${char}`);
 }
 
 export function hasFirefliesApiKey(): boolean {
