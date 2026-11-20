@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
+  acceptCandidateChatReply,
   bulkDisqualify,
   clearCandidateChat,
   compareToRubric,
@@ -30,9 +31,13 @@ export interface WorkspaceApi {
   hydrated: boolean;
   busy: Record<string, boolean>;
   chatBusy: Record<string, boolean>;
+  /** Claude's latest war-room reply per candidate, shown but not saved until accepted. */
+  chatDrafts: Record<string, string>;
   notice: string | null;
   clearNotice: () => void;
   sendChat: (id: string, text: string) => void;
+  acceptChatDraft: (id: string) => void;
+  discardChatDraft: (id: string) => void;
   clearChat: (id: string) => void;
   /** Flip disqualified; the optional reason is stored on the overlay + pushed to Workable. */
   toggleDq: (id: string, reason?: string) => void;
@@ -66,6 +71,13 @@ export interface WorkspaceApi {
   updateAssessment: (id: string) => void;
 }
 
+function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const next = { ...record };
+  delete next[key];
+  return next;
+}
+
 function nowStamp(): string {
   const d = new Date();
   return (
@@ -88,6 +100,9 @@ export function useWorkspace(
   const [ws, setWs] = useState<Workspace>(initial);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [chatBusy, setChatBusy] = useState<Record<string, boolean>>({});
+  const [chatDrafts, setChatDrafts] = useState<Record<string, string>>({});
+  const chatDraftsRef = useRef(chatDrafts);
+  chatDraftsRef.current = chatDrafts;
   const [notice, setNotice] = useState<string | null>(null);
   const wsRef = useRef(ws);
   wsRef.current = ws;
@@ -393,26 +408,57 @@ export function useWorkspace(
     const v = text.trim();
     if (!v) return;
     // Optimistic: show the human's turn immediately; the server returns the
-    // authoritative thread (with Claude's reply) which we then swap in.
+    // authoritative thread plus Claude's reply as an unsaved draft. Sending a new
+    // message discards any draft the reviewer did not accept.
     const optimistic: ChatMessage = { role: "user", content: v, ts: new Date().toISOString() };
     const log = [...(wsRef.current.chat[id] || []), optimistic];
     setWs((w) => ({ ...w, chat: { ...w.chat, [id]: log } }));
+    setChatDrafts((d) => withoutKey(d, id));
     setChatBusy((b) => ({ ...b, [id]: true }));
     void sendCandidateChat({ candidateId: id, message: v })
       .then((res) => {
         if (res.messages?.length) {
           setWs((w) => ({ ...w, chat: { ...w.chat, [id]: res.messages } }));
         }
+        const draft = res.draft;
+        if (draft) setChatDrafts((d) => ({ ...d, [id]: draft }));
         if (res.message) setNotice(res.message);
       })
       .catch(() => setNotice("Chat failed — please retry."))
       .finally(() => setChatBusy((b) => ({ ...b, [id]: false })));
   }, []);
 
-  const clearChat = useCallback((id: string) => {
-    setWs((w) => ({ ...w, chat: { ...w.chat, [id]: [] } }));
-    void clearCandidateChat({ candidateId: id });
+  const discardChatDraft = useCallback((id: string) => {
+    setChatDrafts((d) => withoutKey(d, id));
   }, []);
+
+  const acceptChatDraft = useCallback(
+    (id: string) => {
+      const draft = chatDraftsRef.current[id];
+      if (!draft) return;
+      const accepted: ChatMessage = { role: "assistant", content: draft, ts: new Date().toISOString() };
+      setWs((w) => ({ ...w, chat: { ...w.chat, [id]: [...(w.chat[id] || []), accepted] } }));
+      discardChatDraft(id);
+      void acceptCandidateChatReply({ candidateId: id, content: draft })
+        .then((res) => {
+          if (res.messages?.length) {
+            setWs((w) => ({ ...w, chat: { ...w.chat, [id]: res.messages } }));
+          }
+          if (res.message) setNotice(res.message);
+        })
+        .catch(() => setNotice("Saving the reply failed — please retry."));
+    },
+    [discardChatDraft],
+  );
+
+  const clearChat = useCallback(
+    (id: string) => {
+      setWs((w) => ({ ...w, chat: { ...w.chat, [id]: [] } }));
+      discardChatDraft(id);
+      void clearCandidateChat({ candidateId: id });
+    },
+    [discardChatDraft],
+  );
 
   const logActivity = useCallback((id: string, type: ActivityType, body: string) => {
     const v = body.trim();
@@ -464,9 +510,12 @@ export function useWorkspace(
     hydrated: true,
     busy,
     chatBusy,
+    chatDrafts,
     notice,
     clearNotice,
     sendChat,
+    acceptChatDraft,
+    discardChatDraft,
     clearChat,
     toggleDq,
     bulkDq,
