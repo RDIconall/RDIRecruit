@@ -53,6 +53,46 @@ function resolveWorkablePhoto(candidate: WorkableCandidate): string | null {
   return typeof img === "string" && img.startsWith("http") ? img : null;
 }
 
+/**
+ * Profile fields only the single-candidate endpoint returns. The LIST endpoint
+ * (and webhook summaries) omit them, so a summary must never overwrite them.
+ */
+const FULL_PROFILE_KEYS = [
+  "experience_entries",
+  "education_entries",
+  "answers",
+  "resume_url",
+  "cover_letter",
+  "cover_letter_url",
+] as const;
+
+/**
+ * Whether the incoming payload actually carries this profile field. A missing key
+ * never does. A summary payload also does not get to clear a field with an empty
+ * value: only the single-candidate fetch is authoritative for an empty list.
+ */
+function carriesProfileField(value: unknown, authoritative: boolean): boolean {
+  if (value === undefined || value === null) return false;
+  if (authoritative) return true;
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== "";
+}
+
+/** The incoming payload with every profile field it does not carry filled from the stored copy. */
+function mergeStoredProfile(
+  candidate: WorkableCandidate,
+  storedRaw: Record<string, unknown> | null,
+  authoritative: boolean,
+): WorkableCandidate {
+  const merged: Record<string, unknown> = { ...(candidate as unknown as Record<string, unknown>) };
+  for (const key of FULL_PROFILE_KEYS) {
+    if (carriesProfileField(merged[key], authoritative)) continue;
+    if (storedRaw && storedRaw[key] !== undefined) merged[key] = storedRaw[key];
+    else if (!authoritative) delete merged[key];
+  }
+  return merged as unknown as WorkableCandidate;
+}
+
 function answersToRecord(candidate: WorkableCandidate): Record<string, string> {
   const answers: Record<string, string> = {};
   for (const item of candidate.answers ?? []) {
@@ -193,13 +233,19 @@ export async function upsertCandidateFromWorkable(
     syncComments?: boolean;
     /** Force the candidate + application write even if metadata is unchanged, without résumé ingest. */
     hydrate?: boolean;
+    /**
+     * The payload is a LIST / webhook summary, not the single-candidate fetch.
+     * Stored work history, education, and cached profile fields are kept unless
+     * the summary carries a non-empty value for them.
+     */
+    summary?: boolean;
   },
 ): Promise<UpsertCandidateResult> {
   const shortcode = jobShortcode ?? candidate.job?.shortcode;
   if (!shortcode) {
     throw new Error(`Candidate ${candidate.id} has no job shortcode`);
   }
-  const applicationFingerprint = computeApplicationFingerprint(candidate);
+  const authoritative = !options?.summary;
   const result: UpsertCandidateResult = {
     candidateId: candidate.id,
     isNew: false,
@@ -216,11 +262,15 @@ export async function upsertCandidateFromWorkable(
   const supabase = getServiceSupabase();
   const { data: existing } = await supabase
     .from("candidates")
-    .select("analysis_hash, workable_updated_at, photo_url")
+    .select("analysis_hash, workable_updated_at, photo_url, raw")
     .eq("workable_id", candidate.id)
     .maybeSingle();
 
   result.isNew = !existing;
+
+  const storedRaw = ((existing as { raw?: Record<string, unknown> | null } | null)?.raw ?? null);
+  const profile = mergeStoredProfile(candidate, storedRaw, authoritative);
+  const applicationFingerprint = computeApplicationFingerprint(profile);
 
   // The LIST endpoint omits `image_url`, so a bulk mirror must NEVER null-out a
   // photo we previously captured from a single fetch. Carry the stored value
@@ -253,7 +303,7 @@ export async function upsertCandidateFromWorkable(
       source: candidate.sourced ? "sourced" : "applied",
       // Keep raw.image_url consistent with the durable photo_url so the read-side
       // fallback never disagrees with the column even after a photo-less mirror.
-      raw: { ...(candidate as unknown as Record<string, unknown>), image_url: photoUrl },
+      raw: { ...(profile as unknown as Record<string, unknown>), image_url: photoUrl },
       photo_url: photoUrl,
       created_at: candidate.created_at,
       workable_updated_at: candidate.updated_at,
@@ -271,7 +321,7 @@ export async function upsertCandidateFromWorkable(
 
   const { data: existingApps } = await supabase
     .from("applications")
-    .select("id, resume_url, answers, cover_letter")
+    .select("id, resume_url, answers, cover_letter, parsed_experience, parsed_education")
     .eq("candidate_id", candidate.id)
     .order("resume_ingested_at", { ascending: false, nullsFirst: false })
     .limit(1);
@@ -284,10 +334,14 @@ export async function upsertCandidateFromWorkable(
   // (stage move, etc.) — the bug class already fixed for resume_url and
   // photo_url. Never overwrite stored answers / cover letter / résumé URL with
   // an empty value: only update when the authoritative fetch actually carries one.
+  // Work history and education follow the same rule, except that the single-
+  // candidate fetch may clear them with an explicit empty list.
   const prior = existingApp as {
     resume_url?: string | null;
     answers?: Record<string, string> | null;
     cover_letter?: string | null;
+    parsed_experience?: ReturnType<typeof parseExperience> | null;
+    parsed_education?: ReturnType<typeof parseEducation> | null;
   } | null;
   const incomingAnswers = answersToRecord(candidate);
   const applicationPayload = {
@@ -295,8 +349,12 @@ export async function upsertCandidateFromWorkable(
     answers: Object.keys(incomingAnswers).length ? incomingAnswers : prior?.answers ?? {},
     cover_letter: candidate.cover_letter ?? prior?.cover_letter ?? null,
     resume_url: candidate.resume_url ?? prior?.resume_url ?? null,
-    parsed_experience: parseExperience(candidate),
-    parsed_education: parseEducation(candidate),
+    parsed_experience: carriesProfileField(candidate.experience_entries, authoritative)
+      ? parseExperience(candidate)
+      : prior?.parsed_experience ?? parseExperience(profile),
+    parsed_education: carriesProfileField(candidate.education_entries, authoritative)
+      ? parseEducation(candidate)
+      : prior?.parsed_education ?? parseEducation(profile),
   };
 
   const { error: applicationError } = await supabase
@@ -446,6 +504,7 @@ export async function syncChangedCandidatesForJob(
       const upsert = await upsertCandidateFromWorkable(candidate, jobShortcode, {
         analyze: false,
         syncComments: false,
+        summary: true,
       });
       if (upsert.skipped) {
         skipped += 1;
@@ -598,6 +657,8 @@ async function runScoreUnscoredPass(options?: {
           // endpoint only returns summaries — then evaluate. Stale re-scores are
           // already fully mirrored, so skip the Workable round-trip for them
           // (keeps the bulk re-score fast enough to finish inside the budget).
+          // scoreCandidate still hydrates a stale file whose structured history is empty.
+          let hydrated = false;
           if (!entry.scored && entry.jobShortcode) {
             try {
               const full = await getCandidate(entry.jobShortcode, entry.id);
@@ -606,6 +667,7 @@ async function runScoreUnscoredPass(options?: {
                 syncComments: false,
                 hydrate: true,
               });
+              hydrated = true;
             } catch (hydrateError) {
               if (isPermanentWorkableNotFound(hydrateError)) {
                 await tombstoneMissingWorkableCandidate(entry.id, "score hydrate (Workable 404)");
@@ -616,6 +678,7 @@ async function runScoreUnscoredPass(options?: {
           }
           const result = await scoreCandidate(entry.id, {
             ...(entry.stale ? { replace: true } : {}),
+            hydrated,
             transport: "enqueue",
             trigger: entry.stale ? "scoring_epoch" : "new_candidate",
           });
@@ -726,5 +789,6 @@ export async function patchCandidateFromWorkable(candidate: WorkableCandidate, j
   await upsertCandidateFromWorkable(candidate, jobShortcode, {
     analyze: false,
     syncComments: true,
+    summary: true,
   });
 }
