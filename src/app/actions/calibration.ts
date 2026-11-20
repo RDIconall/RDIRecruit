@@ -1,12 +1,13 @@
 "use server";
 
-import { auth } from "@clerk/nextjs/server";
 import { revalidatePath } from "next/cache";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { learnFromFeedback } from "@/lib/calibration/service";
 import { getActiveRubric } from "@/lib/rubric/service";
 import { scoreCandidate } from "@/lib/scoring/run-score";
+import { requireHiringTeam } from "@/lib/auth/hiring-team";
+import { reserveModelSpend } from "@/lib/ai/spend-budget";
 import type { CategoryKey, CategoryScores } from "@/lib/types";
 
 const OVERRIDE_MODEL = "reviewer-override";
@@ -31,10 +32,14 @@ export async function submitReadAdjustment(input: {
   correctedTotal?: number | null;
   note: string;
 }) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  const member = await requireHiringTeam();
+  const userId = member.userId;
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
   if (!input.note.trim()) return { ok: false as const, error: "Add your reasoning so Claude can learn from it." };
+
+  // Learning calls Claude and bumps the job's scoring epoch (a pool-wide re-score).
+  const reservation = await reserveModelSpend("calibration", { userId, subject: input.jobShortcode });
+  if (!reservation.ok) return { ok: false as const, error: reservation.message };
 
   const supabase = getServiceSupabase();
 
@@ -99,7 +104,10 @@ export async function submitReadAdjustment(input: {
   } else if (!alreadyLocked) {
     // Directional only: let the candidate move with the new calibration.
     try {
-      await scoreCandidate(input.candidateId, { replace: true });
+      await scoreCandidate(input.candidateId, {
+        replace: true,
+        spend: { reserve: () => reserveModelSpend("grading", { userId, subject: input.candidateId }) },
+      });
     } catch (error) {
       console.error("Re-score after adjustment failed", error);
     }

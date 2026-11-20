@@ -5,6 +5,8 @@ import { auth } from "@clerk/nextjs/server";
 import { parseRubricMarkdown } from "@/lib/rubric/parser";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
+import { requireHiringTeam } from "@/lib/auth/hiring-team";
+import { reserveModelSpend } from "@/lib/ai/spend-budget";
 
 export async function saveRubric(input: {
   jobShortcode: string;
@@ -80,8 +82,10 @@ export async function extractRubricFromFile(formData: FormData) {
 
 /** Save the global "How We Evaluate" method doc (re-scores all seats via the epoch). */
 export async function saveMethod(markdown: string) {
-  const { userId } = await auth();
-  if (!userId) throw new Error("Unauthorized");
+  const member = await requireHiringTeam();
+  // Saving bumps the global scoring epoch, which re-scores every pool.
+  const reservation = await reserveModelSpend("rescore", { userId: member.userId, subject: "method:global" });
+  if (!reservation.ok) return { ok: false as const, error: reservation.message };
   const { saveMethodDoc } = await import("@/lib/evaluation/method");
   const result = await saveMethodDoc(markdown);
   revalidatePath("/rubrics");

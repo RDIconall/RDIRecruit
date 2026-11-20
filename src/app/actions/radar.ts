@@ -3,6 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { hasAnthropic } from "@/lib/env";
+import { requireHiringTeam, type HiringTeamMember } from "@/lib/auth/hiring-team";
+import { reserveModelSpend } from "@/lib/ai/spend-budget";
 import { csvToRawContacts } from "@/lib/radar/csv";
 import { isRadarEnabled, RADAR_DISABLED_MESSAGE } from "@/lib/radar/enabled";
 import { draftOutreach, unsubscribeFooter } from "@/lib/radar/outreach";
@@ -40,6 +42,26 @@ async function requireAuth(): Promise<string> {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
   return userId;
+}
+
+/** Radar actions that call Claude: hiring team only. */
+async function requireRadarModelAccess(): Promise<HiringTeamMember> {
+  if (!isRadarEnabled()) throw new Error(RADAR_DISABLED_MESSAGE);
+  return requireHiringTeam();
+}
+
+/** Reserve one radar Claude call; returns the refusal message when over budget. */
+async function reserveRadarCall(member: HiringTeamMember): Promise<string | null> {
+  if (!hasAnthropic()) return null;
+  const reservation = await reserveModelSpend("radar", { userId: member.userId });
+  return reservation.ok ? null : reservation.message;
+}
+
+const MAX_SCORE_BATCH = 25;
+
+function batchSize(requested: number | undefined, fallback: number): number {
+  const n = Number.isFinite(requested) ? Math.floor(requested as number) : fallback;
+  return Math.max(0, Math.min(MAX_SCORE_BATCH, n));
 }
 
 async function actorLabel(): Promise<string> {
@@ -152,9 +174,11 @@ export async function runAiSourcingAction(input: {
   error?: string;
 }> {
   try {
-    await requireAuth();
+    const member = await requireRadarModelAccess();
     const owner = await actorLabel();
     const scorecard = await getActiveScorecard(input.pipeline);
+    const refused = await reserveRadarCall(member);
+    if (refused) return { ok: false, error: refused };
     const plan = await planSourcingSearches({
       pipeline: input.pipeline,
       brief: input.brief,
@@ -204,10 +228,11 @@ export async function runAiSourcingAction(input: {
 
     let scored = 0;
     if (hasAnthropic()) {
-      const scoreTargets = Array.from(ids).slice(0, input.scoreLimit ?? 20);
+      const scoreTargets = Array.from(ids).slice(0, batchSize(input.scoreLimit, 20));
       for (const id of scoreTargets) {
         const contact = await getContact(id);
         if (!contact || contact.optOut) continue;
+        if (await reserveRadarCall(member)) break;
         const result = await scoreContact(contact, input.pipeline, scorecard.content);
         if (!result) continue;
         await saveScore({
@@ -310,10 +335,12 @@ export async function scoreContactAction(input: {
   pipeline: Pipeline;
 }): Promise<{ ok: boolean; error?: string }> {
   try {
-    await requireAuth();
+    const member = await requireRadarModelAccess();
     const contact = await getContact(input.contactId);
     if (!contact) return { ok: false, error: "Contact not found" };
     const scorecard = await getActiveScorecard(input.pipeline);
+    const refused = await reserveRadarCall(member);
+    if (refused) return { ok: false, error: refused };
     const result = await scoreContact(contact, input.pipeline, scorecard.content);
     if (!result) return { ok: false, error: "Scoring unavailable (no ANTHROPIC_API_KEY or the model call failed)." };
     await saveScore({
@@ -343,12 +370,17 @@ export async function scoreAllAction(input: {
   limit?: number;
 }): Promise<{ ok: boolean; scored?: number; error?: string }> {
   try {
-    await requireAuth();
+    const member = await requireRadarModelAccess();
     const scorecard = await getActiveScorecard(input.pipeline);
     const contacts = await loadContacts({ pipeline: input.pipeline, searchId: input.searchId ?? null });
-    const targets = (input.onlyUnscored ? contacts.filter((c) => !c.score) : contacts).slice(0, input.limit ?? 25);
+    const targets = (input.onlyUnscored ? contacts.filter((c) => !c.score) : contacts).slice(0, batchSize(input.limit, 25));
     let scored = 0;
     for (const contact of targets) {
+      const refused = await reserveRadarCall(member);
+      if (refused) {
+        if (!scored) return { ok: false, error: refused };
+        break;
+      }
       const result = await scoreContact(contact, input.pipeline, scorecard.content);
       if (!result) continue;
       await saveScore({
@@ -382,11 +414,13 @@ export async function draftOutreachAction(input: {
   pipeline: Pipeline;
 }): Promise<{ ok: boolean; emailSubject?: string; emailBody?: string; linkedinMessage?: string; outreachId?: string; error?: string }> {
   try {
-    await requireAuth();
+    const member = await requireRadarModelAccess();
     const owner = await actorLabel();
     const base = await getContact(input.contactId);
     if (!base) return { ok: false, error: "Contact not found" };
     if (base.optOut) return { ok: false, error: "This person has opted out — outreach is blocked." };
+    const refused = await reserveRadarCall(member);
+    if (refused) return { ok: false, error: refused };
     // Pull the latest score in for personalization context.
     const withScore = (await loadContacts({ pipeline: input.pipeline })).find((c) => c.id === base.id);
     const contact = withScore ?? base;
