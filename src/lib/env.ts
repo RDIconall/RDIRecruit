@@ -36,6 +36,9 @@ const envSchema = z.object({
   VIDEOASK_WEBHOOK_SECRET: z.string().optional(),
   CALENDLY_TOKEN: z.string().optional(),
   FIREFLIES_API_KEY: z.string().optional(),
+  // Signing secret configured on the Fireflies webhook. Required: the ingest
+  // route refuses every request until it is set.
+  FIREFLIES_WEBHOOK_SECRET: z.string().optional(),
   // Geoapify (free tier: 3,000 credits/day, no card) — geocoding + driving-time
   // for the candidate commute read. Optional: when unset we fall back to the
   // Claude geographic estimate. https://www.geoapify.com/

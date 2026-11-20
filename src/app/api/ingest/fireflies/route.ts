@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
-import { hasSupabase } from "@/lib/env";
+import { env, hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
 import {
   extractInlineTranscript,
   extractTranscriptId,
   fetchFirefliesTranscript,
   hasFirefliesApiKey,
+  verifyFirefliesSignature,
   type FirefliesTranscript,
 } from "@/lib/ingest/fireflies";
 
@@ -15,13 +16,28 @@ export const runtime = "nodejs";
 
 /**
  * Fireflies transcript ingest. Flows a meeting transcript into an `evidence` row
- * (source_type "fireflies") and triggers a re-score. The transcript is taken from
- * the webhook payload when present, otherwise fetched from the Fireflies GraphQL
- * API using FIREFLIES_API_KEY. The candidate is resolved from an explicit id in
- * the payload metadata, or by matching meeting participant emails to a candidate.
+ * (source_type "fireflies") and triggers a re-score. Every request must carry a
+ * valid `x-hub-signature` for FIREFLIES_WEBHOOK_SECRET; nothing runs before that
+ * check, and only the signed body is read. The transcript is taken from the
+ * payload when present, otherwise fetched from the Fireflies GraphQL API using
+ * FIREFLIES_API_KEY. The candidate is resolved from an explicit id in the signed
+ * payload, or by matching meeting participant emails to a candidate.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = Buffer.from(await request.arrayBuffer());
+  const secret = env.FIREFLIES_WEBHOOK_SECRET;
+  if (!secret || !verifyFirefliesSignature(rawBody, request.headers.get("x-hub-signature"), secret)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(rawBody.toString("utf8"));
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
   await recordEvent("fireflies", "transcript_ready", payload);
 
   if (!hasSupabase()) {
@@ -50,10 +66,7 @@ export async function POST(request: NextRequest) {
       source = "api";
     } catch (error) {
       console.error("Fireflies fetch failed", error);
-      return NextResponse.json(
-        { ok: false, error: error instanceof Error ? error.message : "fireflies_fetch_failed" },
-        { status: 502 },
-      );
+      return NextResponse.json({ ok: false, error: "fireflies_fetch_failed" }, { status: 502 });
     }
   }
 
@@ -94,7 +107,6 @@ export async function POST(request: NextRequest) {
       ok: true,
       skipped: "candidate_not_resolved",
       hint: "Pass metadata.workable_id, or ensure a candidate email matches a meeting participant.",
-      participants: transcript.participantEmails,
     });
   }
 
