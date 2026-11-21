@@ -11,6 +11,7 @@ import {
 import { readSyncState, writeSyncState } from "./sync-state";
 import { getServiceSupabase } from "../supabase/server";
 import { getCandidate } from "../workable/client";
+import { CALENDLY_EVENT_MAX_AGE_MS } from "../ingest/calendly";
 import {
   eventFailureStatus,
   shouldRetryEvent,
@@ -192,8 +193,19 @@ export async function processPendingWorkableEvents(options?: {
   limit?: number;
   budgetMs?: number;
 }): Promise<{ processed: number; failed: number; permanent: number; remaining: number }> {
-  if (!hasSupabase() || !hasWorkable()) return { processed: 0, failed: 0, permanent: 0, remaining: 0 };
+  if (!hasSupabase()) return { processed: 0, failed: 0, permanent: 0, remaining: 0 };
   const supabase = getServiceSupabase();
+
+  const { error: purgeError } = await supabase
+    .from("events")
+    .delete()
+    .eq("source", "calendly")
+    .lt("received_at", new Date(Date.now() - CALENDLY_EVENT_MAX_AGE_MS).toISOString());
+  if (purgeError) {
+    console.error("Failed to purge expired Calendly events", purgeError);
+  }
+
+  if (!hasWorkable()) return { processed: 0, failed: 0, permanent: 0, remaining: 0 };
   const limit = options?.limit ?? 25;
   const budgetMs = options?.budgetMs ?? 30_000;
   const staleBefore = new Date(Date.now() - 10 * 60_000).toISOString();
