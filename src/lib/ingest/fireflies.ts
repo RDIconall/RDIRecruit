@@ -1,4 +1,5 @@
 import { env } from "../env";
+import { verifyHmacSha256 } from "./webhook";
 
 /**
  * Fireflies transcript ingestion helpers.
@@ -112,6 +113,20 @@ function collectEmails(...sources: unknown[]): string[] {
     }
   }
   return [...out];
+}
+
+/**
+ * True when the request carries a valid HMAC-SHA256 of the raw body keyed with
+ * FIREFLIES_WEBHOOK_SECRET. Fireflies sends it as `x-hub-signature`; relays may
+ * use `x-fireflies-signature`. Always false when the secret is unset.
+ */
+export function isSignedFirefliesRequest(rawBody: string, headers: Headers): boolean {
+  const secret = env.FIREFLIES_WEBHOOK_SECRET;
+  if (!secret) return false;
+  for (const name of ["x-fireflies-signature", "x-hub-signature"]) {
+    if (verifyHmacSha256(rawBody, headers.get(name), secret)) return true;
+  }
+  return false;
 }
 
 export function hasFirefliesApiKey(): boolean {
