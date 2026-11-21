@@ -2,7 +2,7 @@ import "server-only";
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { chunkIds } from "../data/chunk";
-import type { DecisionRead, WorkspaceSlice } from "./types";
+import type { CorrectionEntry, Decision, DecisionRead, ProcessStatus, WorkspaceSlice } from "./types";
 
 export interface WorkingFileRow {
   candidate_id: string;
@@ -39,6 +39,54 @@ export async function getWorkingFiles(
     if (error) console.error("Failed to load working files batch", error);
     for (const row of (data ?? []) as WorkingFileRow[]) {
       map.set(row.candidate_id, normalize(row));
+    }
+  }
+  return map;
+}
+
+/** The slice of a working file a multi-candidate list needs. */
+export interface PoolWorkingFile {
+  read: DecisionRead | null;
+  decisionOverride: Decision | null;
+  processStatus: ProcessStatus | null;
+  /** At most the newest correction — what the board's reviewer-signal lens reads. */
+  corrections: CorrectionEntry[];
+}
+
+/**
+ * Load the list-view fields of many working files. Never selects `content` or the
+ * whole `workspace`: those carry every pasted transcript, chat turn, and note for
+ * the candidate, and reading them for a whole pool lets one account's edits make
+ * the board slow or impossible to build. Open one candidate with getWorkingFile.
+ */
+export async function getPoolWorkingFiles(candidateIds: string[]): Promise<Map<string, PoolWorkingFile>> {
+  const map = new Map<string, PoolWorkingFile>();
+  if (!hasSupabase() || !candidateIds.length) return map;
+
+  const supabase = getServiceSupabase();
+  for (const batch of chunkIds(candidateIds)) {
+    const { data, error } = await supabase
+      .from("candidate_working_files")
+      .select(
+        "candidate_id, read, decisionOverride:workspace->decisionOverride, processStatus:workspace->processStatus, lastCorrection:workspace->corrections->-1",
+      )
+      .in("candidate_id", batch);
+    if (error) console.error("Failed to load working files batch", error);
+    // supabase-js cannot type a negative JSON index; PostgREST (>= v10.2) accepts it.
+    for (const row of (data ?? []) as unknown as Array<{
+      candidate_id: string;
+      read?: DecisionRead | null;
+      decisionOverride?: Decision | null;
+      processStatus?: ProcessStatus | null;
+      lastCorrection?: CorrectionEntry | null;
+    }>) {
+      const last = row.lastCorrection;
+      map.set(row.candidate_id, {
+        read: row.read ?? null,
+        decisionOverride: row.decisionOverride ?? null,
+        processStatus: row.processStatus ?? null,
+        corrections: last && typeof last === "object" && typeof last.text === "string" ? [last] : [],
+      });
     }
   }
   return map;

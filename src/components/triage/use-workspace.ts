@@ -10,6 +10,7 @@ import {
   compareToRubric,
   logActivity as logActivityAction,
   moveCandidateToStage,
+  openCandidateDetail,
   sendCandidateToScreen,
   reanalyze as reanalyzeAction,
   resyncCandidate,
@@ -64,6 +65,10 @@ export interface WorkspaceApi {
   logActivity: (id: string, type: ActivityType, body: string) => void;
   /** Re-run the evaluator over the activity-log delta and re-persist the pinned assessment. */
   updateAssessment: (id: string) => void;
+  /** Fetch an opened candidate's activity, recordings, and workspace edits (once per page load). */
+  loadDetail: (id: string) => void;
+  /** Whether that fetch is pending, done, or failed for a candidate. */
+  detailState: Record<string, "loading" | "ready" | "error">;
 }
 
 function nowStamp(): string {
@@ -89,6 +94,8 @@ export function useWorkspace(
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [chatBusy, setChatBusy] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [detailState, setDetailState] = useState<Record<string, "loading" | "ready" | "error">>({});
+  const detailRequested = useRef<Set<string>>(new Set());
   const wsRef = useRef(ws);
   wsRef.current = ws;
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
@@ -457,6 +464,41 @@ export function useWorkspace(
     [handleRecalc],
   );
 
+  const loadDetail = useCallback((id: string) => {
+    if (!id || detailRequested.current.has(id)) return;
+    detailRequested.current.add(id);
+    setDetailState((s) => ({ ...s, [id]: "loading" }));
+    void openCandidateDetail({ candidateId: id })
+      .then((detail) => {
+        if (!detail) {
+          setDetailState((s) => ({ ...s, [id]: "ready" }));
+          return;
+        }
+        setWs((w) => {
+          // Keep anything the reviewer changed while the fetch was in flight.
+          const fill = <T,>(rec: Record<string, T>, value: T | undefined): Record<string, T> =>
+            value === undefined || rec[id] !== undefined ? rec : { ...rec, [id]: value };
+          const serverIds = new Set(detail.activity.map((e) => e.id));
+          const localOnly = (w.activity[id] ?? []).filter((e) => !serverIds.has(e.id));
+          return {
+            ...w,
+            activity: { ...w.activity, [id]: [...detail.activity, ...localOnly] },
+            recordings: { ...w.recordings, [id]: detail.recordings },
+            ovr: fill(w.ovr, detail.ovr),
+            replies: fill(w.replies, detail.replies),
+            corrections: fill(w.corrections, detail.corrections),
+            transcripts: fill(w.transcripts, detail.transcript),
+            chat: fill(w.chat, detail.chat),
+          };
+        });
+        setDetailState((s) => ({ ...s, [id]: "ready" }));
+      })
+      .catch(() => {
+        detailRequested.current.delete(id);
+        setDetailState((s) => ({ ...s, [id]: "error" }));
+      });
+  }, []);
+
   const clearNotice = useCallback(() => setNotice(null), []);
 
   return {
@@ -489,5 +531,7 @@ export function useWorkspace(
     addCorrection,
     logActivity,
     updateAssessment: updateAssessmentCb,
+    loadDetail,
+    detailState,
   };
 }

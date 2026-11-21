@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
-import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
+import { loadCandidateDetail, loadOneCandidate, loadPoolRoster, type CandidateDetail } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
@@ -864,6 +864,12 @@ export async function resyncCandidate(input: {
     console.error(`Resync failed for ${input.candidateId}`, error);
     return { ok: false, message: "Sync failed — please retry." };
   }
+}
+
+/** The activity log, recordings, and workspace edits for the candidate a reviewer just opened. */
+export async function openCandidateDetail(input: { candidateId: string }): Promise<CandidateDetail | null> {
+  await requireAuth();
+  return loadCandidateDetail(input.candidateId);
 }
 
 /** Returns the stored .md, regenerating from current data if none has been saved yet. */
