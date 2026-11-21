@@ -5,7 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
 import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
-import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
+import { getWorkingFile, updateWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
 import { gradeCandidate } from "@/lib/triage/grade";
@@ -108,7 +108,7 @@ interface RecalcResult {
  */
 async function persistAndMaybeRecalc(
   candidateId: string,
-  patch: WorkspaceSlice,
+  patch: WorkspaceSlice | ((current: WorkspaceSlice) => WorkspaceSlice),
   opts: { recalc: boolean; trigger?: string; reviewer?: ReviewerIdentity },
 ): Promise<RecalcResult> {
   if (!hasSupabase()) return { ok: false, recalculated: false, read: null, message: "Supabase not configured" };
@@ -116,7 +116,11 @@ async function persistAndMaybeRecalc(
   const reviewer = opts.reviewer;
   const updatedBy = reviewer?.label ?? (await reviewerLabel());
   // Write the human edit first so it survives even if Claude is unavailable.
-  await upsertWorkingFile(candidateId, { workspace: patch }, updatedBy);
+  await updateWorkingFile(
+    candidateId,
+    (current) => ({ workspace: typeof patch === "function" ? patch(current?.workspace ?? {}) : patch }),
+    updatedBy,
+  );
 
   let one = await loadOneCandidate(candidateId);
   if (!one) return { ok: false, recalculated: false, read: null, message: "Candidate not found" };
@@ -237,9 +241,11 @@ export async function saveCorrection(input: {
     reviewerLabel: label,
     reviewerKind: kind,
   };
-  const existing = await getWorkingFile(input.candidateId);
-  const corrections = [...(existing?.workspace.corrections ?? []), entry];
-  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction", reviewer });
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    (current) => ({ corrections: [...(current.corrections ?? []), entry] }),
+    { recalc: true, trigger: "Human correction", reviewer },
+  );
 }
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
@@ -255,9 +261,11 @@ export async function runDeepAnalysis(input: { candidateId: string }): Promise<R
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {
   await requireAuth();
-  const existing = await getWorkingFile(input.candidateId);
-  const replies = { ...(existing?.workspace.replies ?? {}), [input.key]: input.value };
-  return persistAndMaybeRecalc(input.candidateId, { replies }, { recalc: false });
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    (current) => ({ replies: { ...(current.replies ?? {}), [input.key]: input.value } }),
+    { recalc: false },
+  );
 }
 
 export async function saveTimeline(input: { candidateId: string; ovr: TimelineRow[] }): Promise<RecalcResult> {
@@ -709,12 +717,18 @@ export async function sendCandidateChat(input: {
     history: withUser.slice(-24),
   });
 
-  const next: ChatMessage[] = reply
-    ? [...withUser, { role: "assistant", content: reply, ts: new Date().toISOString() }]
-    : withUser;
+  const turn: ChatMessage[] = reply
+    ? [userMsg, { role: "assistant", content: reply, ts: new Date().toISOString() }]
+    : [userMsg];
 
-  // Persist the human turn (and Claude's reply when we got one) either way.
-  await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, ident.label);
+  // Persist the human turn (and Claude's reply when we got one) either way, appended
+  // to the thread as stored now so turns saved meanwhile by others are kept.
+  const saved = await updateWorkingFile(
+    input.candidateId,
+    (current) => ({ workspace: { chat: [...(current?.workspace.chat ?? []), ...turn] } }),
+    ident.label,
+  );
+  const next = saved?.workspace.chat ?? [...history, ...turn];
 
   return {
     ok: Boolean(reply),

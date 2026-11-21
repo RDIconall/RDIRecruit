@@ -61,33 +61,78 @@ export interface WorkingFilePatch {
   workspace?: WorkspaceSlice;
 }
 
+const MAX_WRITE_ATTEMPTS = 8;
+
+/**
+ * A version stamp strictly different from the one read, so the compare-and-swap
+ * below can never match a row another writer has already replaced.
+ */
+function nextVersion(previous: string | null): string {
+  const now = Date.now();
+  const prior = previous ? Date.parse(previous) : NaN;
+  return new Date(Number.isFinite(prior) && now <= prior ? prior + 1 : now).toISOString();
+}
+
+/**
+ * Read-modify-write a candidate's working file without losing concurrent edits.
+ * `mutate` receives the row as it is committed right now and returns the fields
+ * to change (workspace keys are shallow-merged). The write only lands if the row
+ * is still at the version that was read (`updated_at`); otherwise the row is
+ * re-read and `mutate` runs again on the newer state.
+ */
+export async function updateWorkingFile(
+  candidateId: string,
+  mutate: (current: WorkingFileRow | null) => WorkingFilePatch,
+  updatedBy?: string,
+): Promise<WorkingFileRow | null> {
+  if (!hasSupabase()) return null;
+  const supabase = getServiceSupabase();
+
+  for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt++) {
+    const existing = await getWorkingFile(candidateId);
+    const patch = mutate(existing);
+    const next: Record<string, unknown> = {
+      candidate_id: candidateId,
+      content: patch.content !== undefined ? patch.content : existing?.content ?? null,
+      read: patch.read !== undefined ? patch.read : existing?.read ?? null,
+      workspace:
+        patch.workspace !== undefined
+          ? { ...(existing?.workspace ?? {}), ...patch.workspace }
+          : existing?.workspace ?? {},
+      updated_at: nextVersion(existing?.updated_at ?? null),
+      updated_by: updatedBy ?? existing?.updated_by ?? null,
+    };
+
+    if (!existing) {
+      const { data, error } = await supabase.from("candidate_working_files").insert(next).select("*");
+      if (error?.code === "23505") continue;
+      if (error) {
+        console.error(`Failed to create working file for ${candidateId}`, error);
+        return null;
+      }
+      const row = (data ?? [])[0];
+      return row ? normalize(row as WorkingFileRow) : null;
+    }
+
+    const base = supabase.from("candidate_working_files").update(next).eq("candidate_id", candidateId);
+    const guarded = existing.updated_at === null ? base.is("updated_at", null) : base.eq("updated_at", existing.updated_at);
+    const { data, error } = await guarded.select("*");
+    if (error) {
+      console.error(`Failed to update working file for ${candidateId}`, error);
+      return null;
+    }
+    const row = (data ?? [])[0];
+    if (row) return normalize(row as WorkingFileRow);
+  }
+
+  throw new Error(`Working file for ${candidateId} kept changing during save; please retry.`);
+}
+
 /** Merge-patch a candidate's working file. Only the provided fields are written. */
 export async function upsertWorkingFile(
   candidateId: string,
   patch: WorkingFilePatch,
   updatedBy?: string,
 ): Promise<WorkingFileRow | null> {
-  if (!hasSupabase()) return null;
-  const supabase = getServiceSupabase();
-
-  const existing = await getWorkingFile(candidateId);
-  const next: Record<string, unknown> = {
-    candidate_id: candidateId,
-    content: patch.content !== undefined ? patch.content : existing?.content ?? null,
-    read: patch.read !== undefined ? patch.read : existing?.read ?? null,
-    workspace:
-      patch.workspace !== undefined
-        ? { ...(existing?.workspace ?? {}), ...patch.workspace }
-        : existing?.workspace ?? {},
-    updated_at: new Date().toISOString(),
-    updated_by: updatedBy ?? existing?.updated_by ?? null,
-  };
-
-  const { data } = await supabase
-    .from("candidate_working_files")
-    .upsert(next, { onConflict: "candidate_id" })
-    .select("*")
-    .maybeSingle();
-
-  return data ? normalize(data as WorkingFileRow) : normalize(next as unknown as WorkingFileRow);
+  return updateWorkingFile(candidateId, () => patch, updatedBy);
 }
