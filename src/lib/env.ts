@@ -35,6 +35,9 @@ const envSchema = z.object({
   VIDEOASK_API_KEY: z.string().optional(),
   VIDEOASK_WEBHOOK_SECRET: z.string().optional(),
   CALENDLY_TOKEN: z.string().optional(),
+  // Webhook signing key from the Calendly webhook subscription. Required: the
+  // Calendly hook refuses every booking while it is unset.
+  CALENDLY_WEBHOOK_SIGNING_KEY: z.string().optional(),
   FIREFLIES_API_KEY: z.string().optional(),
   // Geoapify (free tier: 3,000 credits/day, no card) — geocoding + driving-time
   // for the candidate commute read. Optional: when unset we fall back to the
