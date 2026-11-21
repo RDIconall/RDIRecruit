@@ -9,6 +9,7 @@ import { wbJob } from "../workable/links";
 import { getJobRubric } from "../rubric/store";
 import type { WorkspaceSlice } from "./types";
 import { INTERVIEW_EVIDENCE_TYPES } from "../sync/candidate-hash";
+import { INBOX_TRANSCRIPT_EXCERPT_CHARS } from "../ingest/limits";
 import type {
   AnswerGradePayload,
   BoardCandidate,
@@ -54,6 +55,18 @@ function emptyWorkspace(): Workspace {
 }
 
 type ActivityRow = { id: string; candidate_id: string; type: string | null; author: string | null; body: string; created_at: string };
+
+/** Pool views read interview rows without the raw `extracted` payload copy. */
+function fetchPoolInterviewEvidence(supabase: ReturnType<typeof getServiceSupabase>, ids: string[]) {
+  return fetchByCandidatePaged<EvidenceRow>(
+    supabase,
+    "evidence",
+    "id, candidate_id, source_type, label, captured_at, transcript, created_at",
+    ids,
+    "created_at",
+    { column: "source_type", values: [...INTERVIEW_EVIDENCE_TYPES] },
+  );
+}
 
 function toActivityEntry(r: ActivityRow): ActivityEntry {
   const type = r.type === "interview" || r.type === "comment" ? r.type : "note";
@@ -152,15 +165,15 @@ async function fetchByCandidatePaged<T>(
   columns: string,
   ids: string[],
   tieBreaker: string,
+  only?: { column: string; values: string[] },
 ): Promise<T[]> {
   const PAGE = 1000;
   const out: T[] = [];
   for (const batch of chunkIds(ids)) {
     for (let from = 0; ; from += PAGE) {
-      const { data, error } = await supabase
-        .from(table)
-        .select(columns)
-        .in("candidate_id", batch)
+      let query = supabase.from(table).select(columns).in("candidate_id", batch);
+      if (only) query = query.in(only.column, only.values);
+      const { data, error } = await query
         .order(tieBreaker, { ascending: false })
         .range(from, from + PAGE - 1);
       if (error) {
@@ -497,7 +510,7 @@ async function buildCrossRolePool(
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchPoolInterviewEvidence(supabase, ids),
     fetchByCandidatePaged<ActivityRow>(
       supabase,
       "activity",
@@ -556,6 +569,7 @@ async function buildCrossRolePool(
       narrative: narrByCandidate.get(id) ?? [],
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
       interviewEvidence: evidenceByCandidate.get(id) ?? [],
+      transcriptExcerptChars: INBOX_TRANSCRIPT_EXCERPT_CHARS,
       read,
       corrections: wf?.workspace?.corrections ?? [],
       decisionOverride: wf?.workspace?.decisionOverride ?? null,
@@ -677,7 +691,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchPoolInterviewEvidence(supabase, ids),
     fetchByCandidatePaged<ActivityRow>(
       supabase,
       "activity",
@@ -736,6 +750,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       narrative: narrByCandidate.get(id) ?? [],
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
       interviewEvidence: evidenceByCandidate.get(id) ?? [],
+      transcriptExcerptChars: INBOX_TRANSCRIPT_EXCERPT_CHARS,
       read,
       corrections: wf?.workspace?.corrections ?? [],
       decisionOverride: wf?.workspace?.decisionOverride ?? null,

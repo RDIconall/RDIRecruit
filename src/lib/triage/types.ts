@@ -280,6 +280,10 @@ export interface FirefliesRecording {
   date: string;
   dur: string;
   transcript: string;
+  /** Source `evidence.id`, so a clipped inbox excerpt can fetch its full text. */
+  evidenceId?: string;
+  /** True when `transcript` is only an excerpt of the stored text. */
+  truncated?: boolean;
 }
 
 export interface InterviewPoint {

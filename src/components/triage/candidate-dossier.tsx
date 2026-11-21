@@ -12,7 +12,7 @@ import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } fr
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
-import { getWorkingFileContent } from "@/app/actions/triage";
+import { getInterviewTranscript, getWorkingFileContent } from "@/app/actions/triage";
 import { Avatar, WorkableStageChip } from "./pool-shared";
 import { nextStageSlug, type StageColumn } from "@/lib/triage/stages";
 import { CM } from "@/lib/triage/theme";
@@ -342,12 +342,20 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     setActDraft("");
   };
 
-  const pullFireflies = () => {
+  const pullFireflies = async () => {
     const t = (c.fireflies ?? []).find((f) => f.transcript?.trim());
-    if (t) {
-      setActType("interview");
-      setActDraft(t.transcript.trim());
+    if (!t) return;
+    let text = t.transcript;
+    if (t.truncated && t.evidenceId) {
+      try {
+        const full = await getInterviewTranscript({ candidateId: id, evidenceId: t.evidenceId });
+        if (full.transcript) text = full.transcript;
+      } catch {
+        /* fall back to the excerpt */
+      }
     }
+    setActType("interview");
+    setActDraft(text.trim());
   };
 
   const wrap: CSSProperties = { maxWidth: 880, margin: "0 auto", padding: narrow ? "16px 16px 110px" : "22px 28px 130px" };

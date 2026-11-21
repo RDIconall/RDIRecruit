@@ -40,6 +40,7 @@ import {
   type TenureStability,
 } from "./tenure-stability";
 import { decisionFromSentiment, type FitRead } from "./fit-read";
+import { clipText, EVIDENCE_LABEL_MAX_CHARS } from "../ingest/limits";
 import type {
   AnswerRow,
   Candidate,
@@ -102,6 +103,8 @@ export interface MapInput {
   narrative: NarrativeSegment[];
   evals: CandidateEvaluations;
   interviewEvidence: EvidenceRow[];
+  /** Clip each interview transcript to this many characters (pool views). */
+  transcriptExcerptChars?: number;
   read: DecisionRead | null;
   /** Persisted human corrections (with optional reviewer identity) — drives rev/revNote (#7). */
   corrections?: CorrectionEntry[];
@@ -632,15 +635,21 @@ function logisticsFrom(input: MapInput, location: string): Logistics {
   };
 }
 
-function firefliesFrom(evidence: EvidenceRow[]): FirefliesRecording[] {
+function firefliesFrom(evidence: EvidenceRow[], excerptChars?: number): FirefliesRecording[] {
   return evidence
     .filter((e) => e.transcript && e.transcript.trim())
-    .map((e) => ({
-      title: e.label || e.source_type || "Interview recording",
-      date: e.captured_at ? new Date(e.captured_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—",
-      dur: "—",
-      transcript: e.transcript as string,
-    }));
+    .map((e) => {
+      const full = e.transcript as string;
+      const transcript = excerptChars ? clipText(full, excerptChars) : full;
+      return {
+        title: clipText(e.label || e.source_type || "Interview recording", EVIDENCE_LABEL_MAX_CHARS),
+        date: e.captured_at ? new Date(e.captured_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—",
+        dur: "—",
+        transcript,
+        evidenceId: e.id,
+        truncated: transcript !== full,
+      };
+    });
 }
 
 function redFlagsFrom(input: MapInput, tenure: TenureStability): RedFlag[] {
@@ -1145,7 +1154,7 @@ export function mapCandidate(input: MapInput): Candidate {
     cover: coverFromApplication(input.application?.cover_letter ?? null),
     answers: answersFrom(input.evals.answerGrades, input.application),
     logistics: logisticsFrom(input, location),
-    fireflies: firefliesFrom(input.interviewEvidence),
+    fireflies: firefliesFrom(input.interviewEvidence, input.transcriptExcerptChars),
     redFlags: baseRedFlags,
     resume: resumeFrom(input.application),
     careerProgression: careerProgressionFrom(ro),
