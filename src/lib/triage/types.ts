@@ -276,10 +276,17 @@ export interface Logistics {
 }
 
 export interface FirefliesRecording {
+  /** Evidence row id, used to fetch an omitted transcript. */
+  id?: string;
   title: string;
   date: string;
   dur: string;
   transcript: string;
+  /**
+   * The pool list leaves transcript bodies out (`transcript` is ""); the text is
+   * fetched from /api/candidates/[id]/transcripts when a reviewer needs it.
+   */
+  transcriptOmitted?: boolean;
 }
 
 export interface InterviewPoint {

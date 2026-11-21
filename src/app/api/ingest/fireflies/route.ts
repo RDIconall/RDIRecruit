@@ -8,10 +8,24 @@ import {
   extractTranscriptId,
   fetchFirefliesTranscript,
   hasFirefliesApiKey,
+  isSignedFirefliesRequest,
   type FirefliesTranscript,
 } from "@/lib/ingest/fireflies";
+import {
+  MAX_TRANSCRIPT_CHARS,
+  parseJsonObject,
+  payloadTooLarge,
+  readBodyCapped,
+} from "@/lib/ingest/webhook";
 
 export const runtime = "nodejs";
+
+/** Title and organizer are shown in the pool list, so keep them short. */
+const MAX_LABEL_CHARS = 300;
+
+function shortText(value: unknown, fallback: string): string {
+  return typeof value === "string" && value ? value.slice(0, MAX_LABEL_CHARS) : fallback;
+}
 
 /**
  * Fireflies transcript ingest. Flows a meeting transcript into an `evidence` row
@@ -19,9 +33,29 @@ export const runtime = "nodejs";
  * the webhook payload when present, otherwise fetched from the Fireflies GraphQL
  * API using FIREFLIES_API_KEY. The candidate is resolved from an explicit id in
  * the payload metadata, or by matching meeting participant emails to a candidate.
+ *
+ * The route is public (no Clerk session), so every delivery must be signed with
+ * FIREFLIES_WEBHOOK_SECRET, and transcripts over MAX_TRANSCRIPT_CHARS are refused
+ * before anything is written.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = await readBodyCapped(request);
+  if (rawBody === null) return payloadTooLarge();
+
+  if (!isSignedFirefliesRequest(rawBody, request.headers)) {
+    return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 401 });
+  }
+
+  const payload = parseJsonObject(rawBody);
+  if (!payload) {
+    return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const inline = extractInlineTranscript(payload);
+  if (inline && inline.text.length > MAX_TRANSCRIPT_CHARS) {
+    return payloadTooLarge("transcript_too_long");
+  }
+
   await recordEvent("fireflies", "transcript_ready", payload);
 
   if (!hasSupabase()) {
@@ -29,7 +63,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 1) Get the transcript text — inline first, then via the API by id.
-  let transcript: FirefliesTranscript | null = extractInlineTranscript(payload);
+  let transcript: FirefliesTranscript | null = inline;
   let source: "inline" | "api" = "inline";
 
   if (!transcript) {
@@ -59,6 +93,9 @@ export async function POST(request: NextRequest) {
 
   if (!transcript || !transcript.text) {
     return NextResponse.json({ ok: true, skipped: "empty_transcript" });
+  }
+  if (transcript.text.length > MAX_TRANSCRIPT_CHARS) {
+    return payloadTooLarge("transcript_too_long");
   }
 
   // 2) Resolve the candidate.
@@ -102,8 +139,8 @@ export async function POST(request: NextRequest) {
   const { error: insertError } = await supabase.from("evidence").insert({
     candidate_id: workableId,
     source_type: "fireflies",
-    author: transcript.organizerEmail ?? "fireflies",
-    label: transcript.title ?? "Fireflies meeting",
+    author: shortText(transcript.organizerEmail, "fireflies"),
+    label: shortText(transcript.title, "Fireflies meeting"),
     captured_at: new Date().toISOString(),
     raw_ref: transcript.id ? `fireflies:${transcript.id}` : null,
     transcript: transcript.text,

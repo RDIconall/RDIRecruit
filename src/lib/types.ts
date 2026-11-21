@@ -227,6 +227,8 @@ export interface EvidenceRow {
   transcript: string | null;
   extracted: Record<string, unknown> | null;
   created_at: string;
+  /** Set by list loaders that leave the body out: the stored transcript is non-empty. */
+  transcript_omitted?: boolean;
 }
 
 export interface CandidateOverlayRow {
