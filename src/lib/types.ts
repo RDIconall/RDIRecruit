@@ -229,6 +229,19 @@ export interface EvidenceRow {
   created_at: string;
 }
 
+/**
+ * Interview evidence as the triage mapper reads it. Pool loads leave the
+ * transcript text out and set `has_transcript`; the text is fetched only when a
+ * reviewer opens that applicant.
+ */
+export type InterviewEvidenceRow = Pick<
+  EvidenceRow,
+  "id" | "candidate_id" | "source_type" | "label" | "captured_at" | "created_at"
+> & {
+  transcript?: string | null;
+  has_transcript?: boolean;
+};
+
 export interface CandidateOverlayRow {
   candidate_id: string;
   status: "active" | "disqualified" | "withdrawn";

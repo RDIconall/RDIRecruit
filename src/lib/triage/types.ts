@@ -276,10 +276,13 @@ export interface Logistics {
 }
 
 export interface FirefliesRecording {
+  id?: string;
   title: string;
   date: string;
   dur: string;
   transcript: string;
+  /** A transcript is on file but left out of the pool payload; load it when the applicant is opened. */
+  deferred?: boolean;
 }
 
 export interface InterviewPoint {

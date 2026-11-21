@@ -11,7 +11,7 @@ import type {
   CandidateOverlayRow,
   CandidateRow,
   DigInPayload,
-  EvidenceRow,
+  InterviewEvidenceRow,
   InvestPayload,
   NarrativeSegment,
   RoAssessmentRow,
@@ -101,7 +101,7 @@ export interface MapInput {
   application: ApplicationLite | null;
   narrative: NarrativeSegment[];
   evals: CandidateEvaluations;
-  interviewEvidence: EvidenceRow[];
+  interviewEvidence: InterviewEvidenceRow[];
   read: DecisionRead | null;
   /** Persisted human corrections (with optional reviewer identity) — drives rev/revNote (#7). */
   corrections?: CorrectionEntry[];
@@ -276,7 +276,7 @@ function interviewBarFor(input: MapInput): InterviewBar {
     total: input.score?.total ?? null,
     answersLevel: summarizeAnswerGrades(input.evals.answerGrades).level,
     refusedToAnswer: refusedToAnswerFrom(input.application, input.evals.answerGrades),
-    hasLiveEvidence: input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
+    hasLiveEvidence: input.interviewEvidence.some(hasTranscript),
     unsupportedExpertise: hasMaterialSyntheticExpertise(input.evals.answerGrades),
   });
 }
@@ -632,15 +632,22 @@ function logisticsFrom(input: MapInput, location: string): Logistics {
   };
 }
 
-function firefliesFrom(evidence: EvidenceRow[]): FirefliesRecording[] {
-  return evidence
-    .filter((e) => e.transcript && e.transcript.trim())
-    .map((e) => ({
+function hasTranscript(e: InterviewEvidenceRow): boolean {
+  return Boolean(e.transcript?.trim()) || e.has_transcript === true;
+}
+
+export function firefliesFrom(evidence: InterviewEvidenceRow[]): FirefliesRecording[] {
+  return evidence.filter(hasTranscript).map((e) => {
+    const text = e.transcript?.trim() ? (e.transcript as string) : "";
+    return {
+      id: e.id,
       title: e.label || e.source_type || "Interview recording",
       date: e.captured_at ? new Date(e.captured_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—",
       dur: "—",
-      transcript: e.transcript as string,
-    }));
+      transcript: text,
+      ...(text ? {} : { deferred: true }),
+    };
+  });
 }
 
 function redFlagsFrom(input: MapInput, tenure: TenureStability): RedFlag[] {

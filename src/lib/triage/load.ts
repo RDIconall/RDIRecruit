@@ -14,6 +14,7 @@ import type {
   BoardCandidate,
   DigInPayload,
   EvidenceRow,
+  InterviewEvidenceRow,
   InvestPayload,
   NarrativeSegment,
   RoleReadPayload,
@@ -169,6 +170,39 @@ async function fetchByCandidatePaged<T>(
       }
       const rows = (data ?? []) as T[];
       out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Interview evidence for a pool load: which applicants have a stored transcript,
+ * never the transcript text (or the raw `extracted` payload) itself. Pool pages
+ * carry every applicant at once, so the text is loaded per applicant on open.
+ */
+async function fetchInterviewEvidenceRefs(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  ids: string[],
+): Promise<InterviewEvidenceRow[]> {
+  const PAGE = 1000;
+  const out: InterviewEvidenceRow[] = [];
+  for (const batch of chunkIds(ids)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("evidence")
+        .select("id, candidate_id, source_type, label, captured_at, created_at")
+        .in("candidate_id", batch)
+        .in("source_type", [...INTERVIEW_EVIDENCE_TYPES])
+        .neq("transcript", "")
+        .order("created_at", { ascending: false })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error("Failed to load evidence batch", error);
+        break;
+      }
+      const rows = (data ?? []) as InterviewEvidenceRow[];
+      for (const row of rows) out.push({ ...row, transcript: null, has_transcript: true });
       if (rows.length < PAGE) break;
     }
   }
@@ -497,7 +531,7 @@ async function buildCrossRolePool(
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchInterviewEvidenceRefs(supabase, ids),
     fetchByCandidatePaged<ActivityRow>(
       supabase,
       "activity",
@@ -533,8 +567,8 @@ async function buildCrossRolePool(
   for (const n of narrRows) {
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
-  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
+  const evidenceByCandidate = new Map<string, InterviewEvidenceRow[]>();
+  for (const e of evidenceRows) {
     const list = evidenceByCandidate.get(e.candidate_id) ?? [];
     list.push(e);
     evidenceByCandidate.set(e.candidate_id, list);
@@ -677,7 +711,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchInterviewEvidenceRefs(supabase, ids),
     fetchByCandidatePaged<ActivityRow>(
       supabase,
       "activity",
@@ -714,8 +748,8 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
 
-  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
+  const evidenceByCandidate = new Map<string, InterviewEvidenceRow[]>();
+  for (const e of evidenceRows) {
     const list = evidenceByCandidate.get(e.candidate_id) ?? [];
     list.push(e);
     evidenceByCandidate.set(e.candidate_id, list);

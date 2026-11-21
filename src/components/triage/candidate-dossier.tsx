@@ -8,7 +8,7 @@ import {
   detectPipelinePhase,
   type PipelinePhase,
 } from "@/lib/triage/pipeline-phase";
-import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, Decision, FirefliesRecording, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -78,7 +78,7 @@ function reviewedList(c: Candidate, activityCount: number): string[] {
   if (c.answers?.length) out.push(`${c.answers.length} application ${c.answers.length === 1 ? "answer" : "answers"}`);
   if (c.salary && c.salary !== "—") out.push(`Stated salary — ${c.salary}`);
   out.push(`Logistics — ${c.logistics.location || "—"}`);
-  const interviews = (c.fireflies ?? []).filter((f) => f.transcript?.trim()).length;
+  const interviews = (c.fireflies ?? []).filter((f) => f.deferred || f.transcript?.trim()).length;
   if (interviews) out.push(`${interviews} interview ${interviews === 1 ? "transcript" : "transcripts"}`);
   if (activityCount) out.push(`Activity log — ${activityCount} ${activityCount === 1 ? "entry" : "entries"}`);
   return out;
@@ -210,6 +210,9 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   // behind a toggle whenever the actual file is on screen.
   const [showParsed, setShowParsed] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+  // Pool payloads omit transcript text; it is fetched for the open applicant only.
+  const [loadedRecordings, setLoadedRecordings] = useState<{ id: string; list: FirefliesRecording[] } | null>(null);
+  const needsTranscripts = Boolean(candidate?.fireflies?.some((f) => f.deferred));
 
   /* eslint-disable react-hooks/set-state-in-effect -- These effects intentionally reset local drafts when the selected candidate changes. */
   useEffect(() => {
@@ -240,10 +243,25 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    if (!needsTranscripts) return;
+    let cancelled = false;
+    fetch(`/api/candidates/${id}/transcripts`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("no transcripts"))))
+      .then((d: { recordings?: FirefliesRecording[] }) => {
+        if (!cancelled) setLoadedRecordings({ id, list: d.recordings ?? [] });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [id, needsTranscripts]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   if (!candidate) return null;
   const c = candidate;
+  const fireflies = loadedRecordings?.id === id ? loadedRecordings.list : (c.fireflies ?? []);
 
   const activity = ws.activity[id] ?? [];
   const phase: PipelinePhase = detectPipelinePhase({
@@ -343,7 +361,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   };
 
   const pullFireflies = () => {
-    const t = (c.fireflies ?? []).find((f) => f.transcript?.trim());
+    const t = fireflies.find((f) => f.transcript?.trim());
     if (t) {
       setActType("interview");
       setActDraft(t.transcript.trim());
@@ -1083,7 +1101,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
             </button>
           ))}
           <span style={{ flex: 1 }} />
-          {actType === "interview" && (c.fireflies ?? []).some((f) => f.transcript?.trim()) && (
+          {actType === "interview" && fireflies.some((f) => f.transcript?.trim()) && (
             <button onClick={pullFireflies} style={mono({ cursor: "pointer", background: "transparent", color: APP.accent, border: `1px solid ${APP.accentBorder}`, borderRadius: 5, padding: "4px 11px", fontSize: 12 })}>
               Pull from Fireflies
             </button>

@@ -13,10 +13,10 @@ export function hasInterviewEvidence(input: {
   activity?: ActivityEntry[] | null;
   /** Workspace / Fireflies / pasted transcript body. */
   transcript?: string | null;
-  fireflies?: Array<{ transcript?: string | null }> | null;
+  fireflies?: Array<{ transcript?: string | null; deferred?: boolean }> | null;
 }): boolean {
   if ((input.transcript ?? "").trim()) return true;
-  if ((input.fireflies ?? []).some((f) => (f.transcript ?? "").trim())) return true;
+  if ((input.fireflies ?? []).some((f) => f.deferred || (f.transcript ?? "").trim())) return true;
   if ((input.activity ?? []).some((a) => a.type === "interview" && a.body.trim())) return true;
   return false;
 }
@@ -25,7 +25,7 @@ export function hasInterviewEvidence(input: {
 export function detectPipelinePhase(input: {
   activity?: ActivityEntry[] | null;
   transcript?: string | null;
-  fireflies?: Array<{ transcript?: string | null }> | null;
+  fireflies?: Array<{ transcript?: string | null; deferred?: boolean }> | null;
   workableStage?: string | null;
   processStatus?: ProcessStatus | null;
 }): PipelinePhase {
