@@ -156,14 +156,24 @@ function hasDiscrepancy(v: VerificationPayload | null): boolean {
   return (v.claims ?? []).some((c) => (c.verdict ?? "").toUpperCase() === "DISCREPANCY");
 }
 
+// Integrity is a gate, not part of the seat read: the grader keeps it out of
+// the seat verdict (and so out of the fit sentiment), so it must be checked on
+// its own stored fields.
+function hasIntegrityFailure(input: MapInput): boolean {
+  if (input.evals.fitRead?.integrityFailed) return true;
+  const gate = String(input.score?.gate_results?.integrity?.status ?? "").trim().toLowerCase();
+  if (gate === "fail") return true;
+  const integrity = String(input.evals.dig?.integrity ?? "").trim().toLowerCase();
+  return integrity.startsWith("material");
+}
+
 // A file is only put on the do-not-interview list when something concrete says
 // so: a material integrity finding, or genuinely empty answers. A low total on
 // its own is NOT enough. The seat rubrics score against demanding evidence bars,
 // so a merely-unproven candidate lands low without being a "no" — calling that a
 // reject buried real people on the cut list.
 function hasRejectEvidence(input: MapInput, total: number): boolean {
-  const integrity = (input.evals.dig?.integrity ?? "").toLowerCase();
-  if (integrity.startsWith("material")) return true;
+  if (hasIntegrityFailure(input)) return true;
   if (refusedToAnswerFrom(input.application, input.evals.answerGrades)) return true;
   const answers = summarizeAnswerGrades(input.evals.answerGrades);
   return total < 55 && answers.level === "weak";
@@ -241,6 +251,9 @@ export function deriveDecisionDetail(input: MapInput): DecisionDerivation {
   // deleted at the source) is terminal: it outranks any stored read — including a
   // stale "blocked" read — and a cut candidate is NEVER surfaced as "Review blocked".
   if (humanCut(input)) return settled("reject");
+
+  // A failed integrity gate or a material dig-in finding outranks any fit read.
+  if (hasIntegrityFailure(input)) return settled("reject");
 
   const fit = input.evals.fitRead ?? null;
   if (fit) {
