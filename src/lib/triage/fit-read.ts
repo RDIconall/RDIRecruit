@@ -10,6 +10,12 @@ export interface FitRead {
   appliedFit: string;
   rdiFit: string;
   suggestedSeat: string;
+  /**
+   * The integrity gate failed or dig-in integrity was material on the analysis
+   * this read was projected from. Kept apart from `sentiment`, which reads the
+   * seat verdict only.
+   */
+  integrityFailed?: boolean;
 }
 
 export function parseFitRead(raw: unknown): FitRead | null {
@@ -25,6 +31,7 @@ export function parseFitRead(raw: unknown): FitRead | null {
     appliedFit: String(o.appliedFit ?? "").trim(),
     rdiFit: String(o.rdiFit ?? "").trim(),
     suggestedSeat: String(o.suggestedSeat ?? "").trim(),
+    ...(o.integrityFailed === true ? { integrityFailed: true } : {}),
   };
 }
 
@@ -75,7 +82,15 @@ export interface FitReadEvaluationSource {
   seatFit?: { verdict?: string | null; summary?: string | null } | null;
   triage?: { why?: string | null } | null;
   alternateSeatSignals?: Array<{ fit?: string | null; seatLabel?: string | null }> | null;
+  integrityGate?: { status?: string | null } | null;
+  digIn?: { integrity?: string | null } | null;
   heuristic?: boolean | null;
+}
+
+function integrityFailedFrom(evaluation: FitReadEvaluationSource): boolean {
+  const gate = String(evaluation.integrityGate?.status ?? "").trim().toLowerCase();
+  if (gate === "fail") return true;
+  return String(evaluation.digIn?.integrity ?? "").trim().toLowerCase().startsWith("material");
 }
 
 /**
@@ -88,7 +103,7 @@ export function fitReadFromEvaluation(evaluation: FitReadEvaluationSource): FitR
     evaluation.alternateSeatSignals?.find((s) => s.fit === "high_potential") ??
     evaluation.alternateSeatSignals?.[0];
   const verdict = evaluation.seatFit?.verdict ?? null;
-  return fitReadFromCanonical({
+  const read = fitReadFromCanonical({
     why: (evaluation.triage?.why || evaluation.summary || "").trim(),
     personQuality: evaluation.personQuality,
     seatVerdict: verdict,
@@ -97,6 +112,8 @@ export function fitReadFromEvaluation(evaluation: FitReadEvaluationSource): FitR
     suggestedSeat:
       verdict === "routing" || verdict === "wrong_seat" ? (altSeat?.seatLabel ?? "") : "",
   });
+  if (read && integrityFailedFrom(evaluation)) read.integrityFailed = true;
+  return read;
 }
 
 const SYSTEM = `You are reading one job applicant for RDI Trials (a diagnostics CRO). Conall and Lara are hiring complements — people who take work or risk off their plate — not replacements.
