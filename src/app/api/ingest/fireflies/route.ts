@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
-import { hasSupabase } from "@/lib/env";
+import { env, hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { provesWebhookSecret } from "@/lib/ingest/webhook-auth";
+import { boundJson, capTranscript, clipText, EVIDENCE_LABEL_MAX_CHARS } from "@/lib/ingest/limits";
 import {
   extractInlineTranscript,
   extractTranscriptId,
@@ -19,10 +21,29 @@ export const runtime = "nodejs";
  * the webhook payload when present, otherwise fetched from the Fireflies GraphQL
  * API using FIREFLIES_API_KEY. The candidate is resolved from an explicit id in
  * the payload metadata, or by matching meeting participant emails to a candidate.
+ *
+ * The request must prove FIREFLIES_WEBHOOK_SECRET: Fireflies' own `X-Hub-Signature`
+ * (HMAC-SHA256 of the body, `sha256=` prefix optional), or the raw secret in
+ * `x-fireflies-secret` for relays that cannot sign. Unset secret refuses everything.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  await recordEvent("fireflies", "transcript_ready", payload);
+  const rawBody = await request.text();
+  const authorized = provesWebhookSecret(rawBody, request.headers, env.FIREFLIES_WEBHOOK_SECRET, {
+    sharedHeaders: ["x-fireflies-secret"],
+    signatureHeaders: ["x-hub-signature"],
+  });
+  if (!authorized) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(rawBody);
+    payload = parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    payload = {};
+  }
+  await recordEvent("fireflies", "transcript_ready", boundJson(payload));
 
   if (!hasSupabase()) {
     return NextResponse.json({ ok: true, skipped: "supabase_not_configured" });
@@ -102,12 +123,12 @@ export async function POST(request: NextRequest) {
   const { error: insertError } = await supabase.from("evidence").insert({
     candidate_id: workableId,
     source_type: "fireflies",
-    author: transcript.organizerEmail ?? "fireflies",
-    label: transcript.title ?? "Fireflies meeting",
+    author: clipText(transcript.organizerEmail ?? "fireflies", EVIDENCE_LABEL_MAX_CHARS),
+    label: clipText(transcript.title ?? "Fireflies meeting", EVIDENCE_LABEL_MAX_CHARS),
     captured_at: new Date().toISOString(),
     raw_ref: transcript.id ? `fireflies:${transcript.id}` : null,
-    transcript: transcript.text,
-    extracted: { source, title: transcript.title, participants: transcript.participantEmails },
+    transcript: capTranscript(transcript.text),
+    extracted: boundJson({ source, title: transcript.title, participants: transcript.participantEmails }),
   });
 
   if (insertError) {

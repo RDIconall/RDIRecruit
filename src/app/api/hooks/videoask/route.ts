@@ -1,41 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHmac, timingSafeEqual } from "crypto";
 import { env } from "@/lib/env";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { provesWebhookSecret } from "@/lib/ingest/webhook-auth";
+import { boundJson, capTranscript } from "@/lib/ingest/limits";
 
 export const runtime = "nodejs";
 
-function safeEqual(a: string, b: string): boolean {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-  if (ab.length !== bb.length) return false;
-  return timingSafeEqual(ab, bb);
-}
-
 /**
- * Accepts the webhook when VIDEOASK_WEBHOOK_SECRET is unset (back-compat), or when
- * the request proves the secret: either a raw shared-secret header, or an HMAC-SHA256
- * signature of the body. Keeps the previously-working webhook flowing while letting
- * production lock it down by setting the env var + configuring the secret in VideoAsk.
+ * The request must prove VIDEOASK_WEBHOOK_SECRET with either a raw shared-secret
+ * header or an HMAC-SHA256 signature of the body. With the secret unset the
+ * webhook refuses everything: the route is public and writes candidate evidence.
  */
 function isAuthorized(rawBody: string, request: NextRequest): boolean {
-  const secret = env.VIDEOASK_WEBHOOK_SECRET;
-  if (!secret) return true;
-
-  const shared =
-    request.headers.get("x-videoask-secret") ?? request.headers.get("videoask-secret");
-  if (shared && safeEqual(shared, secret)) return true;
-
-  const signature =
-    request.headers.get("x-videoask-signature") ?? request.headers.get("videoask-signature");
-  if (signature) {
-    const digest = createHmac("sha256", secret).update(rawBody).digest("hex");
-    if (safeEqual(signature, digest)) return true;
-  }
-
-  return false;
+  return provesWebhookSecret(rawBody, request.headers, env.VIDEOASK_WEBHOOK_SECRET, {
+    sharedHeaders: ["x-videoask-secret", "videoask-secret"],
+    signatureHeaders: ["x-videoask-signature", "videoask-signature"],
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -52,7 +34,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  await recordEvent("videoask", "response", payload);
+  await recordEvent("videoask", "response", boundJson(payload));
 
   const p = payload as {
     contact?: { email?: string };
@@ -87,8 +69,8 @@ export async function POST(request: NextRequest) {
     label: "VideoAsk",
     captured_at: new Date().toISOString(),
     raw_ref: p.form_response?.response_id ?? p.id,
-    transcript: p.transcript ?? p.form_response?.transcription,
-    extracted: payload,
+    transcript: capTranscript(p.transcript ?? p.form_response?.transcription),
+    extracted: boundJson(payload),
   });
 
   if (insertError) {

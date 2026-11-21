@@ -82,6 +82,8 @@ Copy `.env.example` to `.env.local` and fill in (auto-provisioned on Vercel):
 | `WORKABLE_SUBDOMAIN` | Your Workable subdomain (e.g. `rditrials`) |
 | `WORKABLE_TOKEN` | Workable API token |
 | `WORKABLE_WEBHOOK_SECRET` | HMAC secret for webhook verification |
+| `VIDEOASK_WEBHOOK_SECRET` | Required by `/api/hooks/videoask` (shared-secret header or HMAC); unset refuses all posts |
+| `FIREFLIES_WEBHOOK_SECRET` | Required by `/api/ingest/fireflies` (Fireflies `X-Hub-Signature` or `x-fireflies-secret`); unset refuses all posts |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` | Database + storage |
 | `ANTHROPIC_API_KEY` | LLM extraction / drafting |
 | `CRON_SECRET` | Protects the cron routes |

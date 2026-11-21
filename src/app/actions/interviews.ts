@@ -6,6 +6,9 @@ import { auth } from "@clerk/nextjs/server";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { TRANSCRIPT_MAX_CHARS } from "@/lib/ingest/limits";
+
+const TOO_LONG = `That text is over ${TRANSCRIPT_MAX_CHARS.toLocaleString("en-US")} characters — trim it and try again.`;
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -35,6 +38,7 @@ export async function addInterviewEvidence(input: {
 
   const transcript = input.transcript.trim();
   if (!transcript) return { ok: false as const, error: "Paste the interview transcript first." };
+  if (transcript.length > TRANSCRIPT_MAX_CHARS) return { ok: false as const, error: TOO_LONG };
 
   const label = input.label.trim() || (input.kind === "phone_screen" ? "Phone screen" : "Interview");
   const author = input.author?.trim() || null;
@@ -82,6 +86,7 @@ export async function addVideoAskAnswers(input: {
 
   const answers = input.answers.trim();
   if (!answers) return { ok: false as const, error: "Enter the candidate's VideoAsk answers first." };
+  if (answers.length > TRANSCRIPT_MAX_CHARS) return { ok: false as const, error: TOO_LONG };
 
   const label = input.label?.trim() || "VideoAsk answers";
   const capturedAt = parseDate(input.date);

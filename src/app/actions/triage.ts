@@ -15,6 +15,8 @@ import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-ph
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import { INTERVIEW_EVIDENCE_TYPES } from "@/lib/sync/candidate-hash";
+import { clipText, TRANSCRIPT_MAX_CHARS } from "@/lib/ingest/limits";
 import type {
   ActivityEntry,
   ActivityType,
@@ -815,6 +817,24 @@ export async function resyncCandidate(input: {
     console.error(`Resync failed for ${input.candidateId}`, error);
     return { ok: false, message: "Sync failed — please retry." };
   }
+}
+
+/** Full text of one interview transcript; the pool only carries an excerpt. */
+export async function getInterviewTranscript(input: {
+  candidateId: string;
+  evidenceId: string;
+}): Promise<{ transcript: string | null }> {
+  await requireAuth();
+  if (!hasSupabase()) return { transcript: null };
+  const { data } = await getServiceSupabase()
+    .from("evidence")
+    .select("transcript")
+    .eq("id", input.evidenceId)
+    .eq("candidate_id", input.candidateId)
+    .in("source_type", [...INTERVIEW_EVIDENCE_TYPES])
+    .maybeSingle();
+  const text = (data?.transcript as string | null | undefined) ?? null;
+  return { transcript: text ? clipText(text, TRANSCRIPT_MAX_CHARS) : null };
 }
 
 /** Returns the stored .md, regenerating from current data if none has been saved yet. */

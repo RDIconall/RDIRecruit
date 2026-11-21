@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import { boundJson } from "@/lib/ingest/limits";
 
 export async function POST(request: NextRequest) {
   const payload = await request.json();
-  await recordEvent("calendly", "booking", payload);
+  await recordEvent("calendly", "booking", boundJson(payload));
 
   const email = payload.payload?.email ?? payload.invitee?.email;
   if (!email) return NextResponse.json({ ok: true });
@@ -23,7 +24,7 @@ export async function POST(request: NextRequest) {
       direction: "inbound",
       template: "screen_booked",
       status: "sent",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(boundJson(payload)),
     });
   }
 
