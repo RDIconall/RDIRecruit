@@ -33,7 +33,8 @@ const allOwned = summarizeAnswerGrades([
 assert.equal(allOwned.level, "strong");
 assert.match(allOwned.label, /3 owned concepts/);
 
-// AI as editor on experience-backed judgment still ranks as strong answers.
+// An AI verdict stays in the AI bucket even when the model calls it
+// experience-backed with high credit — it never reads as an owned answer.
 const backedAi = summarizeAnswerGrades([
   {
     verdict: "AI",
@@ -50,7 +51,9 @@ const backedAi = summarizeAnswerGrades([
     candidateEvidenceCredit: "high",
   },
 ]);
-assert.equal(backedAi.level, "strong");
-assert.doesNotMatch(backedAi.label, /AI-heavy/i);
+assert.equal(backedAi.level, "weak");
+assert.match(backedAi.label, /AI-heavy/i);
+assert.match(backedAi.label, /1 owned · 1 AI/);
+assert.doesNotMatch(backedAi.label, /Strong/i);
 
 console.log("answer-grades.test.ts: ok");
