@@ -1,3 +1,4 @@
+import { createHmac, timingSafeEqual } from "crypto";
 import { env } from "../env";
 
 /**
@@ -20,6 +21,24 @@ export interface FirefliesTranscript {
   text: string;
   organizerEmail: string | null;
   participantEmails: string[];
+}
+
+/**
+ * Verify the `x-hub-signature` header Fireflies sends: an HMAC-SHA256 hex digest
+ * of the raw request body keyed with the webhook secret. Fails closed when the
+ * secret is not configured or the header is missing.
+ */
+export function verifyFirefliesSignature(
+  rawBody: string,
+  signature: string | null,
+  secret: string | undefined,
+): boolean {
+  if (!secret || !signature) return false;
+  const provided = signature.trim().replace(/^sha256=/i, "").toLowerCase();
+  const expected = createHmac("sha256", secret).update(rawBody).digest("hex");
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 
 /** Pull a transcript id out of the many shapes Fireflies/relays send. */

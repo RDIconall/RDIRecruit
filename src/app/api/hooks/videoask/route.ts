@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { MAX_TRANSCRIPT_CHARS, readCappedBody, transcriptTooLong } from "@/lib/ingest/limits";
 
 export const runtime = "nodejs";
 
@@ -15,14 +16,14 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Accepts the webhook when VIDEOASK_WEBHOOK_SECRET is unset (back-compat), or when
- * the request proves the secret: either a raw shared-secret header, or an HMAC-SHA256
- * signature of the body. Keeps the previously-working webhook flowing while letting
- * production lock it down by setting the env var + configuring the secret in VideoAsk.
+ * Accepts the webhook when the request proves VIDEOASK_WEBHOOK_SECRET: either a raw
+ * shared-secret header, or an HMAC-SHA256 signature of the body. With the secret
+ * unset, unsigned posts are accepted only outside production (local development);
+ * a production deployment without the secret rejects everything.
  */
 function isAuthorized(rawBody: string, request: NextRequest): boolean {
   const secret = env.VIDEOASK_WEBHOOK_SECRET;
-  if (!secret) return true;
+  if (!secret) return process.env.NODE_ENV !== "production";
 
   const shared =
     request.headers.get("x-videoask-secret") ?? request.headers.get("videoask-secret");
@@ -39,7 +40,10 @@ function isAuthorized(rawBody: string, request: NextRequest): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
+  const rawBody = await readCappedBody(request);
+  if (rawBody === null) {
+    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+  }
 
   if (!isAuthorized(rawBody, request)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
@@ -47,21 +51,32 @@ export async function POST(request: NextRequest) {
 
   let payload: Record<string, unknown>;
   try {
-    payload = JSON.parse(rawBody) as Record<string, unknown>;
+    const parsed: unknown = JSON.parse(rawBody);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    payload = parsed as Record<string, unknown>;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-
-  await recordEvent("videoask", "response", payload);
 
   const p = payload as {
     contact?: { email?: string };
     respondent?: { email?: string };
     metadata?: { candidate_id?: string; workable_id?: string };
-    form_response?: { response_id?: string; transcription?: string };
-    transcript?: string;
+    form_response?: { response_id?: string; transcription?: unknown };
+    transcript?: unknown;
     id?: string;
   };
+
+  const rawTranscript = p.transcript ?? p.form_response?.transcription;
+  const transcript = typeof rawTranscript === "string" ? rawTranscript.trim() || null : null;
+  if (transcriptTooLong(transcript)) {
+    return NextResponse.json(
+      { error: `Transcript exceeds ${MAX_TRANSCRIPT_CHARS} characters` },
+      { status: 413 },
+    );
+  }
+
+  await recordEvent("videoask", "response", payload);
 
   const email = p.contact?.email ?? p.respondent?.email ?? p.metadata?.candidate_id;
   if (!email) {
@@ -87,7 +102,7 @@ export async function POST(request: NextRequest) {
     label: "VideoAsk",
     captured_at: new Date().toISOString(),
     raw_ref: p.form_response?.response_id ?? p.id,
-    transcript: p.transcript ?? p.form_response?.transcription,
+    transcript,
     extracted: payload,
   });
 

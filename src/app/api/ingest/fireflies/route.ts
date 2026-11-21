@@ -1,17 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
-import { hasSupabase } from "@/lib/env";
+import { env, hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
 import {
   extractInlineTranscript,
   extractTranscriptId,
   fetchFirefliesTranscript,
   hasFirefliesApiKey,
+  verifyFirefliesSignature,
   type FirefliesTranscript,
 } from "@/lib/ingest/fireflies";
+import { MAX_TRANSCRIPT_CHARS, readCappedBody, transcriptTooLong } from "@/lib/ingest/limits";
 
 export const runtime = "nodejs";
+
+function transcriptTooLongResponse() {
+  return NextResponse.json(
+    { ok: false, error: `Transcript exceeds ${MAX_TRANSCRIPT_CHARS} characters` },
+    { status: 413 },
+  );
+}
 
 /**
  * Fireflies transcript ingest. Flows a meeting transcript into an `evidence` row
@@ -19,9 +28,38 @@ export const runtime = "nodejs";
  * the webhook payload when present, otherwise fetched from the Fireflies GraphQL
  * API using FIREFLIES_API_KEY. The candidate is resolved from an explicit id in
  * the payload metadata, or by matching meeting participant emails to a candidate.
+ *
+ * Every request must carry a valid `x-hub-signature` made with
+ * FIREFLIES_WEBHOOK_SECRET; nothing is recorded or stored otherwise.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = await readCappedBody(request);
+  if (rawBody === null) {
+    return NextResponse.json({ ok: false, error: "Payload too large" }, { status: 413 });
+  }
+
+  if (
+    !verifyFirefliesSignature(
+      rawBody,
+      request.headers.get("x-hub-signature"),
+      env.FIREFLIES_WEBHOOK_SECRET,
+    )
+  ) {
+    return NextResponse.json({ ok: false, error: "Invalid signature" }, { status: 401 });
+  }
+
+  let payload: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(rawBody);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("not an object");
+    payload = parsed as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const inline = extractInlineTranscript(payload);
+  if (transcriptTooLong(inline?.text)) return transcriptTooLongResponse();
+
   await recordEvent("fireflies", "transcript_ready", payload);
 
   if (!hasSupabase()) {
@@ -29,7 +67,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 1) Get the transcript text — inline first, then via the API by id.
-  let transcript: FirefliesTranscript | null = extractInlineTranscript(payload);
+  let transcript: FirefliesTranscript | null = inline;
   let source: "inline" | "api" = "inline";
 
   if (!transcript) {
@@ -60,6 +98,7 @@ export async function POST(request: NextRequest) {
   if (!transcript || !transcript.text) {
     return NextResponse.json({ ok: true, skipped: "empty_transcript" });
   }
+  if (transcriptTooLong(transcript.text)) return transcriptTooLongResponse();
 
   // 2) Resolve the candidate.
   const supabase = getServiceSupabase();

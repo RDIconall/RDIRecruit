@@ -6,6 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { MAX_TRANSCRIPT_CHARS, transcriptTooLong } from "@/lib/ingest/limits";
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -35,6 +36,9 @@ export async function addInterviewEvidence(input: {
 
   const transcript = input.transcript.trim();
   if (!transcript) return { ok: false as const, error: "Paste the interview transcript first." };
+  if (transcriptTooLong(transcript)) {
+    return { ok: false as const, error: `Transcript is longer than ${MAX_TRANSCRIPT_CHARS.toLocaleString("en-US")} characters.` };
+  }
 
   const label = input.label.trim() || (input.kind === "phone_screen" ? "Phone screen" : "Interview");
   const author = input.author?.trim() || null;
@@ -82,6 +86,9 @@ export async function addVideoAskAnswers(input: {
 
   const answers = input.answers.trim();
   if (!answers) return { ok: false as const, error: "Enter the candidate's VideoAsk answers first." };
+  if (transcriptTooLong(answers)) {
+    return { ok: false as const, error: `Answers are longer than ${MAX_TRANSCRIPT_CHARS.toLocaleString("en-US")} characters.` };
+  }
 
   const label = input.label?.trim() || "VideoAsk answers";
   const capturedAt = parseDate(input.date);

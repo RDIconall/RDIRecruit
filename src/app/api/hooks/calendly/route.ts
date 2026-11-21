@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import { readCappedBody } from "@/lib/ingest/limits";
 
 export async function POST(request: NextRequest) {
-  const payload = await request.json();
+  const rawBody = await readCappedBody(request);
+  if (rawBody === null) {
+    return NextResponse.json({ ok: false, error: "Payload too large" }, { status: 413 });
+  }
+  const payload = JSON.parse(rawBody);
   await recordEvent("calendly", "booking", payload);
 
   const email = payload.payload?.email ?? payload.invitee?.email;
