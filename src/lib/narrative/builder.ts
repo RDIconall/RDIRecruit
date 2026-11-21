@@ -7,9 +7,9 @@ function monthDiff(start: Date, end: Date): number {
   );
 }
 
-function formatSpan(start?: string, end?: string): string {
+function formatSpan(start?: string, end?: string, current?: boolean): string {
   if (!start) return "unknown";
-  const endLabel = end ? end.slice(0, 7) : "present";
+  const endLabel = current ? "present" : end ? end.slice(0, 7) : "no end date";
   return `${start.slice(0, 7)} – ${endLabel}`;
 }
 
@@ -45,7 +45,7 @@ export function buildLifeNarrative(input: {
   let previousEnd: Date | null = null;
   for (const role of roles) {
     const start = role.start ? new Date(role.start) : null;
-    const end = role.end && !role.current ? new Date(role.end) : new Date();
+    const end = role.current ? new Date() : role.end ? new Date(role.end) : null;
 
     if (start && previousEnd) {
       const gapMonths = monthDiff(previousEnd, start);
@@ -60,12 +60,12 @@ export function buildLifeNarrative(input: {
     }
 
     segments.push({
-      span: formatSpan(role.start, role.current ? undefined : role.end),
+      span: formatSpan(role.start, role.end, role.current),
       type: "role",
       text: `${role.title} at ${role.company}`,
     });
 
-    if (start && end) previousEnd = end;
+    if (start) previousEnd = end;
   }
 
   return segments;

@@ -24,6 +24,9 @@ export type TenureStability = {
   /** Measurable completed roles considered. */
   completedRoleCount: number;
   shortRoles: Array<{ title: string; company: string; months: number }>;
+  /** Listed roles whose tenure could not be measured (missing/unreadable dates). */
+  unmeasuredRoleCount: number;
+  unmeasuredRoles: Array<{ title: string; company: string }>;
   /** One-line recruiter caveat when severity ≠ none. */
   caveat: string | null;
   /** Red-flag detail when pattern/severe. */
@@ -60,11 +63,19 @@ const MONTHS: Record<string, number> = {
   december: 11,
 };
 
+// Word-bounded so free text like "Unknown" (contains "now") is not read as current.
+const CURRENT_END = /\b(?:present|current(?:ly)?|now|ongoing|today)\b/i;
+
+/** True only when the end text explicitly says the role is still held. */
+export function endSaysCurrent(end: string | null | undefined): boolean {
+  return Boolean(end && CURRENT_END.test(end));
+}
+
 /** Parse a loose résumé date into year+month. Returns null if unparseable. */
 export function parseResumeDate(value: string | null | undefined): { y: number; m: number } | null {
   if (!value) return null;
   const t = value.trim();
-  if (!t || /present|current|now|ongoing/i.test(t)) return null;
+  if (!t || CURRENT_END.test(t)) return null;
 
   const iso = t.match(/\b((?:19|20)\d{2})[-/.](\d{1,2})\b/);
   if (iso) {
@@ -95,21 +106,58 @@ function monthsBetween(start: { y: number; m: number }, end: { y: number; m: num
   return Math.max(0, (end.y - start.y) * 12 + (end.m - start.m));
 }
 
-function isCurrent(role: TenureRole): boolean {
-  if (role.current) return true;
-  const end = (role.end ?? "").trim();
-  return !end || /present|current|now|ongoing/i.test(end);
+/**
+ * A role is open only when it is flagged current or its end text says so.
+ * A blank end is unknown, never "still employed".
+ */
+function claimsCurrent(role: TenureRole): boolean {
+  return Boolean(role.current) || endSaysCurrent(role.end);
 }
 
-/** Tenure in whole months for one role, or null if dates insufficient. */
-export function roleTenureMonths(role: TenureRole, now = new Date()): number | null {
+function tenureMonths(role: TenureRole, open: boolean, now: Date): number | null {
   const start = parseResumeDate(role.start ?? undefined);
   if (!start) return null;
-  const end = isCurrent(role)
+  const end = open
     ? { y: now.getFullYear(), m: now.getMonth() }
     : parseResumeDate(role.end ?? undefined);
   if (!end) return null;
   return monthsBetween(start, end);
+}
+
+/** Tenure in whole months for one role, or null if dates insufficient. */
+export function roleTenureMonths(role: TenureRole, now = new Date()): number | null {
+  return tenureMonths(role, claimsCurrent(role), now);
+}
+
+function isListedRole(role: TenureRole | null | undefined): role is TenureRole {
+  return Boolean(role && (role.title || role.company || role.start));
+}
+
+type MeasuredRole = { role: TenureRole; open: boolean; months: number | null };
+
+/**
+ * Measure a résumé's roles together. Only the latest-starting role that claims
+ * to be current is treated as ongoing; any other "current" claim is measured by
+ * its own end date (unknown when there is none), so flagging every job current
+ * cannot turn each one into an open, long tenure.
+ */
+function measureRoles(roles: TenureRole[], now: Date): MeasuredRole[] {
+  const listed = roles.filter(isListedRole);
+  let openIndex = -1;
+  let openKey = -Infinity;
+  listed.forEach((role, i) => {
+    if (!claimsCurrent(role)) return;
+    const start = parseResumeDate(role.start ?? undefined);
+    const key = start ? start.y * 12 + start.m : -Infinity;
+    if (openIndex === -1 || key > openKey) {
+      openIndex = i;
+      openKey = key;
+    }
+  });
+  return listed.map((role, i) => {
+    const open = i === openIndex;
+    return { role, open, months: tenureMonths(role, open, now) };
+  });
 }
 
 /**
@@ -129,42 +177,47 @@ export function roleFromPeriodSpan(
   const endRaw = parts.length > 1 ? parts[parts.length - 1]! : "";
   const start = parseResumeDate(startRaw);
   if (!start) return null;
-  const current = !endRaw || /present|current|now|ongoing/i.test(endRaw);
+  const current = endSaysCurrent(endRaw);
   return {
     title,
     company,
     start: startRaw,
-    end: current ? null : endRaw,
+    end: current || !endRaw ? null : endRaw,
     current,
   };
+}
+
+function measuredCount(roles: TenureRole[], now: Date): number {
+  return measureRoles(roles, now).filter((m) => m.months != null).length;
 }
 
 /** Prefer structured experience; fall back to narrative role spans when dates are missing. */
 export function coalesceTenureRoles(
   parsed: TenureRole[] | null | undefined,
   narrativeRoles?: Array<{ title?: string; company?: string; span?: string | null }> | null,
+  now = new Date(),
 ): TenureRole[] {
-  const fromParsed = (parsed ?? []).filter((r) => r && (r.title || r.company || r.start));
-  const dated = fromParsed.filter((r) => roleTenureMonths(r) != null);
-  if (dated.length >= 2) return fromParsed;
-  if (dated.length === 1 && !narrativeRoles?.length) return fromParsed;
+  const fromParsed = (parsed ?? []).filter(isListedRole);
+  const dated = measuredCount(fromParsed, now);
+  if (dated >= 2) return fromParsed;
+  if (dated === 1 && !narrativeRoles?.length) return fromParsed;
 
   const fromNarrative: TenureRole[] = [];
   for (const n of narrativeRoles ?? []) {
     const role = roleFromPeriodSpan(n.title || "Role", n.company || "—", n.span);
     if (role) fromNarrative.push(role);
   }
-  const narrativeDated = fromNarrative.filter((r) => roleTenureMonths(r) != null);
-  if (narrativeDated.length > dated.length) return fromNarrative;
+  if (measuredCount(fromNarrative, now) > dated) return fromNarrative;
   return fromParsed.length ? fromParsed : fromNarrative;
 }
 
 /**
  * Analyze hopping / short-stint pattern from parsed résumé roles.
  *
- * - Current (open-ended) roles are not counted as "short completed".
- * - Completed roles under 18 months count as short stints.
+ * - The one open-ended current role is not counted as "short completed".
+ * - Completed roles under 18 months (including 0-month ranges) count as short stints.
  * - A long anchor (≥36 months) softens severity from severe → pattern when only 2 shorts.
+ * - Roles whose tenure cannot be measured are reported, never treated as long or clean.
  */
 export function analyzeTenureStability(
   roles: TenureRole[] | null | undefined,
@@ -176,33 +229,42 @@ export function analyzeTenureStability(
     longAnchorCount: 0,
     completedRoleCount: 0,
     shortRoles: [],
+    unmeasuredRoleCount: 0,
+    unmeasuredRoles: [],
     caveat: null,
     flagDetail: null,
   };
   if (!roles?.length) return empty;
 
   const shortRoles: TenureStability["shortRoles"] = [];
+  const unmeasuredRoles: TenureStability["unmeasuredRoles"] = [];
   let completedRoleCount = 0;
   let longAnchorCount = 0;
 
-  for (const role of roles) {
-    if (!role.title && !role.company && !role.start) continue;
-    const months = roleTenureMonths(role, now);
-    if (months == null) continue;
+  for (const { role, open, months } of measureRoles(roles, now)) {
+    const title = (role.title || "Role").trim();
+    const company = (role.company || "—").trim();
+    if (months == null) {
+      unmeasuredRoles.push({ title, company });
+      continue;
+    }
 
     if (months >= LONG_ANCHOR_MONTHS) longAnchorCount++;
 
-    if (isCurrent(role)) continue;
+    if (open) continue;
 
     completedRoleCount++;
-    if (months > 0 && months < SHORT_TENURE_MONTHS) {
-      shortRoles.push({
-        title: (role.title || "Role").trim(),
-        company: (role.company || "—").trim(),
-        months,
-      });
+    if (months < SHORT_TENURE_MONTHS) {
+      shortRoles.push({ title, company, months });
     }
   }
+
+  const unmeasuredRoleCount = unmeasuredRoles.length;
+  const unmeasuredCaveat = unmeasuredRoleCount
+    ? `Tenure could not be measured for ${unmeasuredRoleCount} role${unmeasuredRoleCount === 1 ? "" : "s"} ` +
+      `with missing or unreadable dates — confirm start and end dates: ` +
+      `${unmeasuredRoles.slice(0, 3).map((r) => `${r.title} @ ${r.company}`).join("; ")}.`
+    : null;
 
   const shortCompletedCount = shortRoles.length;
   let severity: TenureSeverity = "none";
@@ -215,7 +277,15 @@ export function analyzeTenureStability(
   }
 
   if (severity === "none") {
-    return { ...empty, shortCompletedCount, longAnchorCount, completedRoleCount };
+    return {
+      ...empty,
+      shortCompletedCount,
+      longAnchorCount,
+      completedRoleCount,
+      unmeasuredRoleCount,
+      unmeasuredRoles,
+      caveat: unmeasuredCaveat,
+    };
   }
 
   const examples = shortRoles
@@ -223,10 +293,11 @@ export function analyzeTenureStability(
     .map((r) => `${r.title} @ ${r.company} (${r.months} mo)`)
     .join("; ");
 
-  const caveat =
+  const shortCaveat =
     severity === "mild"
       ? `Confirm why they left after a short stint: ${examples}.`
       : `Short-tenure pattern — confirm join/leave reasons before interviewing: ${examples}.`;
+  const caveat = unmeasuredCaveat ? `${shortCaveat} ${unmeasuredCaveat}` : shortCaveat;
 
   const flagDetail =
     severity === "mild"
@@ -241,6 +312,8 @@ export function analyzeTenureStability(
     longAnchorCount,
     completedRoleCount,
     shortRoles,
+    unmeasuredRoleCount,
+    unmeasuredRoles,
     caveat,
     flagDetail,
   };
@@ -263,6 +336,7 @@ export function applyTenureDecisionGate(
 /**
  * Cap the soft LLM "tenure" category points once a hopping pattern is visible.
  * Pattern/severe must not keep near-max tenure points that inflate the total.
+ * Unmeasurable tenure is unproven and cannot keep more than half the points.
  */
 export function capTenureCategoryScore(
   rawTenure: number,
@@ -271,8 +345,10 @@ export function capTenureCategoryScore(
 ): number {
   const base = Math.max(0, Math.min(maxWeight, Math.round(rawTenure)));
   if (maxWeight <= 0) return 0;
-  if (stability.severity === "severe") return Math.min(base, Math.round(maxWeight * 0.2));
-  if (stability.severity === "pattern") return Math.min(base, Math.round(maxWeight * 0.4));
-  if (stability.severity === "mild") return Math.min(base, Math.round(maxWeight * 0.7));
-  return base;
+  let capRatio = 1;
+  if (stability.severity === "severe") capRatio = 0.2;
+  else if (stability.severity === "pattern") capRatio = 0.4;
+  else if (stability.severity === "mild") capRatio = 0.7;
+  if (stability.unmeasuredRoleCount > 0) capRatio = Math.min(capRatio, 0.5);
+  return Math.min(base, Math.round(maxWeight * capRatio));
 }
