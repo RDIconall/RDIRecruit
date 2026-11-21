@@ -8,6 +8,7 @@ import { learnFromFeedback } from "@/lib/calibration/service";
 import { getActiveRubric } from "@/lib/rubric/service";
 import { scoreCandidate } from "@/lib/scoring/run-score";
 import type { CategoryKey, CategoryScores } from "@/lib/types";
+import { AUTHOR_MAX_CHARS, NOTE_MAX_CHARS, tooLong, tooLongMessage } from "@/lib/triage/limits";
 
 const OVERRIDE_MODEL = "reviewer-override";
 
@@ -34,7 +35,14 @@ export async function submitReadAdjustment(input: {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
+  if (typeof input.note !== "string" || typeof input.candidateName !== "string") {
+    return { ok: false as const, error: "Invalid adjustment" };
+  }
   if (!input.note.trim()) return { ok: false as const, error: "Add your reasoning so Claude can learn from it." };
+  if (tooLong(input.note, NOTE_MAX_CHARS)) return { ok: false as const, error: tooLongMessage("Reasoning", NOTE_MAX_CHARS) };
+  if (tooLong(input.candidateName, AUTHOR_MAX_CHARS)) {
+    return { ok: false as const, error: tooLongMessage("Candidate name", AUTHOR_MAX_CHARS) };
+  }
 
   const supabase = getServiceSupabase();
 

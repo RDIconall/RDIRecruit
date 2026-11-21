@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { env, hasAnthropic, hasSupabase } from "@/lib/env";
 import { getBoardFromSupabase } from "@/lib/data/board-queries";
-import { getWorkingFiles } from "@/lib/triage/store";
+import { getWorkingFileSummaries } from "@/lib/triage/store";
 import { assembleGradingInputs, computeReadiness } from "@/lib/triage/readiness";
 import { scoreCandidate } from "@/lib/scoring/run-score";
 import { processCanonicalAnalysisBatches } from "@/lib/analysis/batch";
@@ -60,7 +60,7 @@ export async function GET(request: NextRequest) {
   }
 
   const ids = board.map((b) => b.candidate.workable_id as string);
-  const workingFiles = await getWorkingFiles(ids);
+  const workingFiles = await getWorkingFileSummaries(ids);
 
   // Build the eligible worklist: active, not human-overridden, not already fresh.
   const worklist: string[] = [];
@@ -77,7 +77,7 @@ export async function GET(request: NextRequest) {
       continue;
     }
     const wf = workingFiles.get(id);
-    if (wf?.workspace?.decisionOverride) {
+    if (wf?.decisionOverride) {
       skippedOverride += 1;
       continue;
     }

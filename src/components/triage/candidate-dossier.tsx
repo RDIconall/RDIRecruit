@@ -16,6 +16,7 @@ import { getWorkingFileContent } from "@/app/actions/triage";
 import { Avatar, WorkableStageChip } from "./pool-shared";
 import { nextStageSlug, type StageColumn } from "@/lib/triage/stages";
 import { CM } from "@/lib/triage/theme";
+import { NOTE_MAX_CHARS } from "@/lib/triage/limits";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
@@ -242,10 +243,18 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   }, [id]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
+  const { loadDetail } = wsApi;
+  useEffect(() => {
+    loadDetail(id);
+  }, [id, loadDetail]);
+
   if (!candidate) return null;
   const c = candidate;
 
   const activity = ws.activity[id] ?? [];
+  const detailReady = !!wsApi.detailLoaded[id];
+  const actTooLong = actDraft.trim().length > NOTE_MAX_CHARS;
+  const chatTooLong = chatDraft.trim().length > NOTE_MAX_CHARS;
   const phase: PipelinePhase = detectPipelinePhase({
     activity,
     transcript: ws.transcripts[id],
@@ -330,14 +339,14 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
 
   const sendChat = () => {
     const v = chatDraft.trim();
-    if (!v || chatThinking) return;
+    if (!v || chatThinking || chatTooLong) return;
     wsApi.sendChat(id, v);
     setChatDraft("");
   };
 
   const addActivity = () => {
     const v = actDraft.trim();
-    if (!v) return;
+    if (!v || actTooLong) return;
     wsApi.logActivity(id, actType, v);
     setActDraft("");
   };
@@ -1060,6 +1069,8 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
               <ActivityEvent key={e.id} e={e} />
             ))}
           </div>
+        ) : !detailReady ? (
+          <p style={{ margin: "0 0 14px", fontSize: 14, color: APP.muted }}>Loading activity…</p>
         ) : (
           <p style={{ margin: "0 0 14px", fontSize: 14, color: APP.muted }}>No activity logged yet. Record interviews, notes, and comments here — Claude reads this on Update assessment.</p>
         )}
@@ -1096,8 +1107,9 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
           rows={actType === "interview" ? 5 : 3}
           style={textareaStyle}
         />
-        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
-          <button onClick={addActivity} disabled={!actDraft.trim()} style={primaryBtn(!actDraft.trim())}>
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 12, marginTop: 8 }}>
+          {actTooLong && <DraftTooLong length={actDraft.trim().length} />}
+          <button onClick={addActivity} disabled={!actDraft.trim() || actTooLong} style={primaryBtn(!actDraft.trim() || actTooLong)}>
             {actType === "interview" ? "Add transcript" : actType === "comment" ? "Add comment" : "Add note"}
           </button>
         </div>
@@ -1187,10 +1199,19 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
             rows={2}
             style={{ ...textareaStyle, flex: 1 }}
           />
-          <button onClick={sendChat} disabled={!chatDraft.trim() || chatThinking} style={{ ...primaryBtn(!chatDraft.trim() || chatThinking), alignSelf: "flex-end" }}>
+          <button
+            onClick={sendChat}
+            disabled={!chatDraft.trim() || chatThinking || chatTooLong}
+            style={{ ...primaryBtn(!chatDraft.trim() || chatThinking || chatTooLong), alignSelf: "flex-end" }}
+          >
             Send
           </button>
         </div>
+        {chatTooLong && (
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 6 }}>
+            <DraftTooLong length={chatDraft.trim().length} />
+          </div>
+        )}
       </Section>
 
     </div>
@@ -1198,6 +1219,14 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
 }
 
 // ---------------------------------- subcomponents ----------------------------------
+
+function DraftTooLong({ length }: { length: number }) {
+  return (
+    <span role="status" style={mono({ fontSize: 12, color: APP.weak })}>
+      {length.toLocaleString("en-US")} / {NOTE_MAX_CHARS.toLocaleString("en-US")} characters — shorten to save
+    </span>
+  );
+}
 
 const cell: CSSProperties = { padding: "8px 10px 8px 0", fontSize: 13.5, color: APP.ink, verticalAlign: "top" };
 const cellMono: CSSProperties = { ...cell, fontFamily: APP.mono, fontSize: 12.5, whiteSpace: "nowrap" };

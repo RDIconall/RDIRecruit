@@ -12,11 +12,16 @@ import {
 import { upsertOverlay } from "@/lib/data/overlay";
 import { enqueueWorkableWrite } from "@/lib/workable/write-queue";
 import { hasSupabase, hasWorkable } from "@/lib/env";
+import { REASON_MAX_CHARS, tooLong } from "@/lib/triage/limits";
 
 async function requireAuth() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
   return userId;
+}
+
+function validReason(reason: unknown): boolean {
+  return reason === undefined || (typeof reason === "string" && !tooLong(reason, REASON_MAX_CHARS));
 }
 
 /** A human-readable owner label (first name / email prefix) for the board, or the id. */
@@ -106,6 +111,7 @@ export async function denyCandidate(input: {
   reason?: string;
 }) {
   await requireAuth();
+  if (!validReason(input.reason)) return { ok: false, error: "Reason is too long" };
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
 
   // Best-effort Workable propagation; the local overlay below is the source of
@@ -146,6 +152,7 @@ export async function withdrawCandidate(input: {
   reason?: string;
 }) {
   await requireAuth();
+  if (!validReason(input.reason)) return { ok: false, error: "Reason is too long" };
   if (hasSupabase()) {
     await upsertOverlay(
       input.candidateId,

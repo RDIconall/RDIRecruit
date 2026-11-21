@@ -10,6 +10,8 @@ import {
   hasFirefliesApiKey,
   type FirefliesTranscript,
 } from "@/lib/ingest/fireflies";
+import { readTextWithLimit } from "@/lib/ingest/read-body";
+import { TRANSCRIPT_MAX_CHARS, WEBHOOK_BODY_MAX_BYTES, tooLong } from "@/lib/triage/limits";
 
 export const runtime = "nodejs";
 
@@ -21,16 +23,30 @@ export const runtime = "nodejs";
  * the payload metadata, or by matching meeting participant emails to a candidate.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  await recordEvent("fireflies", "transcript_ready", payload);
-
-  if (!hasSupabase()) {
-    return NextResponse.json({ ok: true, skipped: "supabase_not_configured" });
+  const raw = await readTextWithLimit(request, WEBHOOK_BODY_MAX_BYTES);
+  if (raw === null) {
+    return NextResponse.json({ ok: false, error: "payload_too_large" }, { status: 413 });
+  }
+  let payload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) payload = parsed as Record<string, unknown>;
+  } catch {
+    // Non-JSON bodies are treated as an empty payload, as before.
   }
 
   // 1) Get the transcript text — inline first, then via the API by id.
   let transcript: FirefliesTranscript | null = extractInlineTranscript(payload);
   let source: "inline" | "api" = "inline";
+  if (transcript && tooLong(transcript.text, TRANSCRIPT_MAX_CHARS)) {
+    return NextResponse.json({ ok: false, error: "transcript_too_long" }, { status: 413 });
+  }
+
+  await recordEvent("fireflies", "transcript_ready", payload);
+
+  if (!hasSupabase()) {
+    return NextResponse.json({ ok: true, skipped: "supabase_not_configured" });
+  }
 
   if (!transcript) {
     const transcriptId = extractTranscriptId(payload);
@@ -59,6 +75,9 @@ export async function POST(request: NextRequest) {
 
   if (!transcript || !transcript.text) {
     return NextResponse.json({ ok: true, skipped: "empty_transcript" });
+  }
+  if (tooLong(transcript.text, TRANSCRIPT_MAX_CHARS)) {
+    return NextResponse.json({ ok: true, skipped: "transcript_too_long" });
   }
 
   // 2) Resolve the candidate.

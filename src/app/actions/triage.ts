@@ -4,7 +4,22 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
-import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
+import { loadActivity, loadCandidateDetail, loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
+import {
+  AUTHOR_MAX_CHARS,
+  CHAT_MAX_MESSAGES,
+  CORRECTIONS_MAX,
+  NOTE_MAX_CHARS,
+  REASON_MAX_CHARS,
+  REPLIES_MAX_KEYS,
+  REVIEWER_NOTE_MAX_CHARS,
+  RUBRIC_MAX_CHARS,
+  TIMELINE_FIELD_MAX_CHARS,
+  TIMELINE_MAX_ROWS,
+  TRANSCRIPT_MAX_CHARS,
+  tooLong,
+  tooLongMessage,
+} from "@/lib/triage/limits";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
@@ -19,6 +34,7 @@ import type {
   ActivityEntry,
   ActivityType,
   Candidate,
+  CandidateDetail,
   ChatMessage,
   CorrectionEntry,
   Decision,
@@ -40,10 +56,36 @@ const VALID_PROCESS_STATUS: ProcessStatus[] = [
   "passed",
 ];
 
+const VALID_ACTIVITY_TYPES: ActivityType[] = ["note", "comment", "interview"];
+const VALID_REVIEWER_KINDS: ReviewerKind[] = ["conall", "lara", "other"];
+const TIMELINE_FIELDS = ["type", "period", "org", "role", "tenure", "scope", "lang", "signal"] as const;
+
 async function requireAuth(): Promise<string> {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
   return userId;
+}
+
+function refused(message: string): RecalcResult {
+  return { ok: false, recalculated: false, read: null, message };
+}
+
+/** Rebuild hand-edited timeline rows from their known string fields, or null if any is invalid. */
+function sanitizeTimeline(rows: unknown): TimelineRow[] | null {
+  if (!Array.isArray(rows) || rows.length > TIMELINE_MAX_ROWS) return null;
+  const out: TimelineRow[] = [];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") return null;
+    const src = row as Record<string, unknown>;
+    const clean: Record<string, string> = {};
+    for (const field of TIMELINE_FIELDS) {
+      const value = src[field] ?? "";
+      if (typeof value !== "string" || value.length > TIMELINE_FIELD_MAX_CHARS) return null;
+      clean[field] = value;
+    }
+    out.push(clean as unknown as TimelineRow);
+  }
+  return out;
 }
 
 interface ReviewerIdentity {
@@ -60,7 +102,7 @@ async function reviewerIdentity(): Promise<ReviewerIdentity> {
     if (!user) return { kind: "other" };
     const name = [user.firstName, user.lastName].filter(Boolean).join(" ").trim();
     const email = user.emailAddresses?.[0]?.emailAddress;
-    const label = name || (email ? email.split("@")[0] : undefined);
+    const label = (name || (email ? email.split("@")[0] : undefined))?.slice(0, AUTHOR_MAX_CHARS);
     return { id: user.id, label, kind: reviewerKindFrom(label || email) };
   } catch {
     return { kind: "other" };
@@ -220,12 +262,15 @@ export async function saveCorrection(input: {
   reviewerKind?: ReviewerKind;
 }): Promise<RecalcResult> {
   await requireAuth();
+  if (typeof input.text !== "string") return refused("Empty correction");
   const text = input.text.trim();
-  if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
+  if (!text) return refused("Empty correction");
+  if (tooLong(text, NOTE_MAX_CHARS)) return refused(tooLongMessage("Correction", NOTE_MAX_CHARS));
 
   // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
   const ident = await reviewerIdentity();
-  const kind = input.reviewerKind ?? ident.kind;
+  const kind =
+    input.reviewerKind && VALID_REVIEWER_KINDS.includes(input.reviewerKind) ? input.reviewerKind : ident.kind;
   const label =
     ident.label && reviewerKindFrom(ident.label) === kind ? ident.label : reviewerKindLabel(kind);
   const reviewer: ReviewerIdentity = { id: ident.id, label, kind };
@@ -238,12 +283,25 @@ export async function saveCorrection(input: {
     reviewerKind: kind,
   };
   const existing = await getWorkingFile(input.candidateId);
-  const corrections = [...(existing?.workspace.corrections ?? []), entry];
-  return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction", reviewer });
+  const prior = existing?.workspace.corrections ?? [];
+  if (prior.length >= CORRECTIONS_MAX) {
+    return refused(`This candidate already has ${CORRECTIONS_MAX} corrections on file.`);
+  }
+  const corrections = [...prior, entry];
+  const reviewerSignal = { kind, label, note: text.slice(0, REVIEWER_NOTE_MAX_CHARS), ts: entry.ts };
+  return persistAndMaybeRecalc(
+    input.candidateId,
+    { corrections, reviewerSignal },
+    { recalc: true, trigger: "Human correction", reviewer },
+  );
 }
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (typeof input.transcript !== "string") return refused("Invalid transcript");
+  if (tooLong(input.transcript, TRANSCRIPT_MAX_CHARS)) {
+    return refused(tooLongMessage("Transcript", TRANSCRIPT_MAX_CHARS));
+  }
   const reviewer = await reviewerIdentity();
   return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
 }
@@ -255,14 +313,27 @@ export async function runDeepAnalysis(input: { candidateId: string }): Promise<R
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (typeof input.key !== "string" || !input.key || typeof input.value !== "string") return refused("Invalid reply");
+  if (tooLong(input.key, NOTE_MAX_CHARS)) return refused(tooLongMessage("Reply question", NOTE_MAX_CHARS));
+  if (tooLong(input.value, NOTE_MAX_CHARS)) return refused(tooLongMessage("Reply", NOTE_MAX_CHARS));
   const existing = await getWorkingFile(input.candidateId);
-  const replies = { ...(existing?.workspace.replies ?? {}), [input.key]: input.value };
+  const prior = existing?.workspace.replies ?? {};
+  if (!Object.prototype.hasOwnProperty.call(prior, input.key) && Object.keys(prior).length >= REPLIES_MAX_KEYS) {
+    return refused(`This candidate already has ${REPLIES_MAX_KEYS} replies on file.`);
+  }
+  const replies = { ...prior, [input.key]: input.value };
   return persistAndMaybeRecalc(input.candidateId, { replies }, { recalc: false });
 }
 
 export async function saveTimeline(input: { candidateId: string; ovr: TimelineRow[] }): Promise<RecalcResult> {
   await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { ovr: input.ovr }, { recalc: false });
+  const ovr = sanitizeTimeline(input.ovr);
+  if (!ovr) {
+    return refused(
+      `Timeline edits are limited to ${TIMELINE_MAX_ROWS} rows of up to ${TIMELINE_FIELD_MAX_CHARS.toLocaleString("en-US")} characters per field.`,
+    );
+  }
+  return persistAndMaybeRecalc(input.candidateId, { ovr }, { recalc: false });
 }
 
 /**
@@ -374,6 +445,8 @@ export async function setDisqualified(input: {
 }): Promise<{ ok: boolean; workable: WorkableSync }> {
   await requireAuth();
   if (!hasSupabase()) return { ok: false, workable: "skipped" };
+  if (input.reason !== undefined && typeof input.reason !== "string") return { ok: false, workable: "skipped" };
+  if (tooLong(input.reason?.trim(), REASON_MAX_CHARS)) return { ok: false, workable: "skipped" };
   const reason = input.reason?.trim() || "Cut via triage";
   await upsertOverlay(
     input.candidateId,
@@ -435,22 +508,7 @@ export async function compareToRubric(input: { candidateId: string }): Promise<R
 
 // ---- Activity log (HANDOFF-v2 §2) — the human-authored record ----
 
-async function fetchActivity(candidateId: string): Promise<ActivityEntry[]> {
-  if (!hasSupabase()) return [];
-  const supabase = getServiceSupabase();
-  const { data } = await supabase
-    .from("activity")
-    .select("id, type, author, body, created_at")
-    .eq("candidate_id", candidateId)
-    .order("created_at", { ascending: true });
-  return ((data ?? []) as Array<{ id: string; type: string | null; author: string | null; body: string; created_at: string }>).map((r) => ({
-    id: r.id,
-    type: r.type === "interview" || r.type === "comment" ? r.type : "note",
-    author: r.author || "—",
-    body: r.body,
-    at: r.created_at,
-  }));
-}
+const fetchActivity = loadActivity;
 
 function renderActivityForWarRoom(acts: ActivityEntry[], label = "Activity log"): string {
   if (!acts.length) return "";
@@ -487,12 +545,22 @@ export async function logActivity(input: {
   body: string;
 }): Promise<{ ok: boolean; entry: ActivityEntry | null; message?: string }> {
   await requireAuth();
+  if (!VALID_ACTIVITY_TYPES.includes(input.type)) return { ok: false, entry: null, message: "Invalid entry type" };
+  if (typeof input.body !== "string") return { ok: false, entry: null, message: "Empty entry" };
+  if (input.author !== undefined && typeof input.author !== "string") {
+    return { ok: false, entry: null, message: "Invalid author" };
+  }
   const body = input.body.trim();
   if (!body) return { ok: false, entry: null, message: "Empty entry" };
+  if (tooLong(body, NOTE_MAX_CHARS)) return { ok: false, entry: null, message: tooLongMessage("Entry", NOTE_MAX_CHARS) };
+  const requestedAuthor = input.author?.trim();
+  if (tooLong(requestedAuthor, AUTHOR_MAX_CHARS)) {
+    return { ok: false, entry: null, message: tooLongMessage("Author", AUTHOR_MAX_CHARS) };
+  }
   if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
-  const author = input.author?.trim() || ident.label || "You";
+  const author = requestedAuthor || ident.label || "You";
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("activity")
@@ -604,8 +672,10 @@ export async function sendCandidateChat(input: {
   message: string;
 }): Promise<ChatResult> {
   await requireAuth();
+  if (typeof input.message !== "string") return { ok: false, messages: [], message: "Empty message" };
   const text = input.message.trim();
   if (!text) return { ok: false, messages: [], message: "Empty message" };
+  if (tooLong(text, NOTE_MAX_CHARS)) return { ok: false, messages: [], message: tooLongMessage("Message", NOTE_MAX_CHARS) };
   if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
@@ -709,9 +779,9 @@ export async function sendCandidateChat(input: {
     history: withUser.slice(-24),
   });
 
-  const next: ChatMessage[] = reply
-    ? [...withUser, { role: "assistant", content: reply, ts: new Date().toISOString() }]
-    : withUser;
+  const next: ChatMessage[] = (
+    reply ? [...withUser, { role: "assistant" as const, content: reply, ts: new Date().toISOString() }] : withUser
+  ).slice(-CHAT_MAX_MESSAGES);
 
   // Persist the human turn (and Claude's reply when we got one) either way.
   await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, ident.label);
@@ -721,6 +791,13 @@ export async function sendCandidateChat(input: {
     messages: next,
     message: reply ? undefined : "Claude is unavailable right now (no API key or transient error) — your message was saved.",
   };
+}
+
+/** The candidate's notes, transcripts, edits, and chat — loaded when the dossier opens, never with the pool. */
+export async function getCandidateDetail(input: { candidateId: string }): Promise<CandidateDetail | null> {
+  await requireAuth();
+  if (typeof input.candidateId !== "string" || !input.candidateId) return null;
+  return loadCandidateDetail(input.candidateId);
 }
 
 /** Clear a candidate's war-room conversation. */
@@ -744,8 +821,12 @@ export async function saveJobRubric(input: {
   jobShortcode: string;
   rubricMd?: string;
   specMd?: string;
-}): Promise<{ ok: boolean }> {
+}): Promise<{ ok: boolean; message?: string }> {
   await requireAuth();
+  for (const value of [input.rubricMd, input.specMd]) {
+    if (value !== undefined && typeof value !== "string") return { ok: false, message: "Invalid rubric" };
+    if (tooLong(value, RUBRIC_MAX_CHARS)) return { ok: false, message: tooLongMessage("Rubric / role spec", RUBRIC_MAX_CHARS) };
+  }
   if (!hasSupabase()) return { ok: false };
   await upsertJobRubric(
     input.jobShortcode,

@@ -2,7 +2,14 @@ import "server-only";
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { chunkIds } from "../data/chunk";
-import type { DecisionRead, WorkspaceSlice } from "./types";
+import type {
+  CorrectionEntry,
+  Decision,
+  DecisionRead,
+  ProcessStatus,
+  ReviewerSignalSummary,
+  WorkspaceSlice,
+} from "./types";
 
 export interface WorkingFileRow {
   candidate_id: string;
@@ -42,6 +49,69 @@ export async function getWorkingFiles(
     }
   }
   return map;
+}
+
+/** The small per-candidate fields the pool board needs from a working file. */
+export interface WorkingFileSummary {
+  candidate_id: string;
+  read: DecisionRead | null;
+  decisionOverride: Decision | null;
+  processStatus: ProcessStatus | null;
+  deep: boolean;
+  reviewerSignal: ReviewerSignalSummary | null;
+}
+
+// Single JSON keys only: the rest of `workspace` and the rendered `content` hold
+// reviewer-pasted text that grows per candidate and must stay off pool loads.
+const SUMMARY_COLUMNS = [
+  "candidate_id",
+  "read",
+  "decisionOverride:workspace->decisionOverride",
+  "processStatus:workspace->processStatus",
+  "deep:workspace->deep",
+  "reviewerSignal:workspace->reviewerSignal",
+].join(", ");
+
+export async function getWorkingFileSummaries(
+  candidateIds: string[],
+): Promise<Map<string, WorkingFileSummary>> {
+  const map = new Map<string, WorkingFileSummary>();
+  if (!hasSupabase() || !candidateIds.length) return map;
+
+  const supabase = getServiceSupabase();
+  for (const batch of chunkIds(candidateIds)) {
+    const { data, error } = await supabase
+      .from("candidate_working_files")
+      .select(SUMMARY_COLUMNS)
+      .in("candidate_id", batch);
+    if (error) console.error("Failed to load working file summaries batch", error);
+    for (const row of (data ?? []) as unknown as Array<Partial<WorkingFileSummary> & { candidate_id: string }>) {
+      const signal = row.reviewerSignal;
+      map.set(row.candidate_id, {
+        candidate_id: row.candidate_id,
+        read: (row.read as DecisionRead | null) ?? null,
+        decisionOverride: typeof row.decisionOverride === "string" ? row.decisionOverride : null,
+        processStatus: typeof row.processStatus === "string" ? row.processStatus : null,
+        deep: row.deep === true,
+        reviewerSignal: signal && typeof signal === "object" && typeof signal.kind === "string" ? signal : null,
+      });
+    }
+  }
+  return map;
+}
+
+/** The latest reviewer-attributed correction as the mapper expects it, from a summary. */
+export function reviewerCorrectionsFrom(summary: WorkingFileSummary | undefined): CorrectionEntry[] {
+  const signal = summary?.reviewerSignal;
+  if (!signal) return [];
+  return [
+    {
+      ts: typeof signal.ts === "string" ? signal.ts : "",
+      text: typeof signal.note === "string" ? signal.note : "",
+      reviewerLabel: typeof signal.label === "string" ? signal.label : undefined,
+      reviewerKind: signal.kind,
+    },
+  ];
 }
 
 export async function getWorkingFile(candidateId: string): Promise<WorkingFileRow | null> {

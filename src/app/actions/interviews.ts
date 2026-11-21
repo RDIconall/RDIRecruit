@@ -6,6 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { AUTHOR_MAX_CHARS, TRANSCRIPT_MAX_CHARS, tooLong, tooLongMessage } from "@/lib/triage/limits";
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -31,12 +32,28 @@ export async function addInterviewEvidence(input: {
   transcript: string;
 }) {
   await requireAuth();
-  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
+  if (input.kind !== "interview" && input.kind !== "phone_screen") {
+    return { ok: false as const, error: "Invalid interview kind." };
+  }
+  if (
+    typeof input.transcript !== "string" ||
+    (input.label != null && typeof input.label !== "string") ||
+    (input.author != null && typeof input.author !== "string")
+  ) {
+    return { ok: false as const, error: "Invalid interview evidence." };
+  }
 
   const transcript = input.transcript.trim();
   if (!transcript) return { ok: false as const, error: "Paste the interview transcript first." };
+  if (tooLong(transcript, TRANSCRIPT_MAX_CHARS)) {
+    return { ok: false as const, error: tooLongMessage("Transcript", TRANSCRIPT_MAX_CHARS) };
+  }
+  if (tooLong(input.label?.trim(), AUTHOR_MAX_CHARS) || tooLong(input.author?.trim(), AUTHOR_MAX_CHARS)) {
+    return { ok: false as const, error: tooLongMessage("Label / interviewer", AUTHOR_MAX_CHARS) };
+  }
+  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
-  const label = input.label.trim() || (input.kind === "phone_screen" ? "Phone screen" : "Interview");
+  const label = input.label?.trim() || (input.kind === "phone_screen" ? "Phone screen" : "Interview");
   const author = input.author?.trim() || null;
   const capturedAt = parseDate(input.date);
 
@@ -78,10 +95,19 @@ export async function addVideoAskAnswers(input: {
   answers: string;
 }) {
   await requireAuth();
-  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
+  if (typeof input.answers !== "string" || (input.label != null && typeof input.label !== "string")) {
+    return { ok: false as const, error: "Invalid VideoAsk answers." };
+  }
 
   const answers = input.answers.trim();
   if (!answers) return { ok: false as const, error: "Enter the candidate's VideoAsk answers first." };
+  if (tooLong(answers, TRANSCRIPT_MAX_CHARS)) {
+    return { ok: false as const, error: tooLongMessage("VideoAsk answers", TRANSCRIPT_MAX_CHARS) };
+  }
+  if (tooLong(input.label?.trim(), AUTHOR_MAX_CHARS)) {
+    return { ok: false as const, error: tooLongMessage("Label", AUTHOR_MAX_CHARS) };
+  }
+  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const label = input.label?.trim() || "VideoAsk answers";
   const capturedAt = parseDate(input.date);

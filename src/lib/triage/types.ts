@@ -519,6 +519,33 @@ export interface WorkspaceSlice {
    * clears it back to "not in process". Untouched by Claude re-analysis.
    */
   processStatus?: ProcessStatus | null;
+  /**
+   * The latest reviewer-attributed correction, kept compact so the pool board can
+   * show the reviewer signal without loading every correction's full text.
+   */
+  reviewerSignal?: ReviewerSignalSummary | null;
+}
+
+export interface ReviewerSignalSummary {
+  kind: ReviewerKind;
+  label?: string;
+  /** Leading snippet of the correction text. */
+  note: string;
+  ts: string;
+}
+
+/**
+ * Per-candidate texts the pool board leaves out; loaded only when a reviewer
+ * opens that candidate.
+ */
+export interface CandidateDetail {
+  activity: ActivityEntry[];
+  ovr?: TimelineRow[];
+  replies?: Record<string, string>;
+  corrections?: CorrectionEntry[];
+  transcript?: string;
+  chat?: ChatMessage[];
+  fireflies: FirefliesRecording[];
 }
 
 // Claude's re-derived decision read, stored in candidate_working_files.read.

@@ -1,5 +1,6 @@
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
+import { RUBRIC_MAX_CHARS, tooLong, tooLongMessage } from "../triage/limits";
 
 /**
  * The global "How We Evaluate" method — the org-wide reasoning doc the evaluator
@@ -86,6 +87,10 @@ export async function getMethodDoc(): Promise<string> {
 
 /** Save a new version of the global method doc and bump the global scoring epoch. */
 export async function saveMethodDoc(markdown: string) {
+  if (typeof markdown !== "string") return { ok: false as const, error: "Invalid method doc" };
+  if (tooLong(markdown, RUBRIC_MAX_CHARS)) {
+    return { ok: false as const, error: tooLongMessage("Method doc", RUBRIC_MAX_CHARS) };
+  }
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
   const supabase = getServiceSupabase();
   const { data: latest } = await supabase

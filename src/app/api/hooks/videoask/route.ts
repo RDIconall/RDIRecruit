@@ -4,6 +4,8 @@ import { env } from "@/lib/env";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { readTextWithLimit } from "@/lib/ingest/read-body";
+import { TRANSCRIPT_MAX_CHARS, WEBHOOK_BODY_MAX_BYTES, tooLong } from "@/lib/triage/limits";
 
 export const runtime = "nodejs";
 
@@ -39,7 +41,10 @@ function isAuthorized(rawBody: string, request: NextRequest): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
+  const rawBody = await readTextWithLimit(request, WEBHOOK_BODY_MAX_BYTES);
+  if (rawBody === null) {
+    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+  }
 
   if (!isAuthorized(rawBody, request)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
@@ -51,8 +56,9 @@ export async function POST(request: NextRequest) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-
-  await recordEvent("videoask", "response", payload);
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
   const p = payload as {
     contact?: { email?: string };
@@ -62,6 +68,15 @@ export async function POST(request: NextRequest) {
     transcript?: string;
     id?: string;
   };
+  const transcript = p.transcript ?? p.form_response?.transcription;
+  if (transcript != null && typeof transcript !== "string") {
+    return NextResponse.json({ error: "Invalid transcript" }, { status: 400 });
+  }
+  if (tooLong(transcript, TRANSCRIPT_MAX_CHARS)) {
+    return NextResponse.json({ error: "Transcript too long" }, { status: 413 });
+  }
+
+  await recordEvent("videoask", "response", payload);
 
   const email = p.contact?.email ?? p.respondent?.email ?? p.metadata?.candidate_id;
   if (!email) {
@@ -87,7 +102,7 @@ export async function POST(request: NextRequest) {
     label: "VideoAsk",
     captured_at: new Date().toISOString(),
     raw_ref: p.form_response?.response_id ?? p.id,
-    transcript: p.transcript ?? p.form_response?.transcription,
+    transcript,
     extracted: payload,
   });
 
