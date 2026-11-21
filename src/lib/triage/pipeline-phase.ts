@@ -9,14 +9,21 @@ import type { ActivityEntry, Candidate, Decision, ProcessStatus } from "./types"
 
 export type PipelinePhase = "triage" | "post_interview";
 
+type RecordingLike = { transcript?: string | null; transcriptOmitted?: boolean };
+
+/** A recording has a transcript, whether its text is loaded or left out of the pool list. */
+export function recordingHasTranscript(f: RecordingLike): boolean {
+  return Boolean((f.transcript ?? "").trim()) || f.transcriptOmitted === true;
+}
+
 export function hasInterviewEvidence(input: {
   activity?: ActivityEntry[] | null;
   /** Workspace / Fireflies / pasted transcript body. */
   transcript?: string | null;
-  fireflies?: Array<{ transcript?: string | null }> | null;
+  fireflies?: RecordingLike[] | null;
 }): boolean {
   if ((input.transcript ?? "").trim()) return true;
-  if ((input.fireflies ?? []).some((f) => (f.transcript ?? "").trim())) return true;
+  if ((input.fireflies ?? []).some(recordingHasTranscript)) return true;
   if ((input.activity ?? []).some((a) => a.type === "interview" && a.body.trim())) return true;
   return false;
 }
@@ -25,7 +32,7 @@ export function hasInterviewEvidence(input: {
 export function detectPipelinePhase(input: {
   activity?: ActivityEntry[] | null;
   transcript?: string | null;
-  fireflies?: Array<{ transcript?: string | null }> | null;
+  fireflies?: RecordingLike[] | null;
   workableStage?: string | null;
   processStatus?: ProcessStatus | null;
 }): PipelinePhase {

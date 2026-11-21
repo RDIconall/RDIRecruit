@@ -1,14 +1,15 @@
 "use client";
 
-import { CSSProperties, useEffect, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { APP, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
 import {
   decisionLabelForPhase,
   detectPipelinePhase,
+  recordingHasTranscript,
   type PipelinePhase,
 } from "@/lib/triage/pipeline-phase";
-import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, Decision, FirefliesRecording, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -78,7 +79,7 @@ function reviewedList(c: Candidate, activityCount: number): string[] {
   if (c.answers?.length) out.push(`${c.answers.length} application ${c.answers.length === 1 ? "answer" : "answers"}`);
   if (c.salary && c.salary !== "—") out.push(`Stated salary — ${c.salary}`);
   out.push(`Logistics — ${c.logistics.location || "—"}`);
-  const interviews = (c.fireflies ?? []).filter((f) => f.transcript?.trim()).length;
+  const interviews = (c.fireflies ?? []).filter(recordingHasTranscript).length;
   if (interviews) out.push(`${interviews} interview ${interviews === 1 ? "transcript" : "transcripts"}`);
   if (activityCount) out.push(`Activity log — ${activityCount} ${activityCount === 1 ? "entry" : "entries"}`);
   return out;
@@ -210,9 +211,12 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   // behind a toggle whenever the actual file is on screen.
   const [showParsed, setShowParsed] = useState(false);
   const [coverOpen, setCoverOpen] = useState(false);
+  // Lets an in-flight transcript fetch tell whether the reviewer has moved on.
+  const openIdRef = useRef(id);
 
   /* eslint-disable react-hooks/set-state-in-effect -- These effects intentionally reset local drafts when the selected candidate changes. */
   useEffect(() => {
+    openIdRef.current = id;
     setChatDraft("");
     setActDraft("");
     setActType("note");
@@ -342,11 +346,24 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     setActDraft("");
   };
 
-  const pullFireflies = () => {
-    const t = (c.fireflies ?? []).find((f) => f.transcript?.trim());
-    if (t) {
+  const pullFireflies = async () => {
+    const t = (c.fireflies ?? []).find(recordingHasTranscript);
+    if (!t) return;
+    let text = t.transcript?.trim() ?? "";
+    if (!text && t.transcriptOmitted) {
+      try {
+        const res = await fetch(`/api/candidates/${encodeURIComponent(id)}/transcripts`);
+        if (!res.ok) return;
+        const { recordings } = (await res.json()) as { recordings?: FirefliesRecording[] };
+        text = (recordings ?? []).find((r) => r.id === t.id)?.transcript?.trim() ?? "";
+      } catch {
+        return;
+      }
+      if (openIdRef.current !== id) return;
+    }
+    if (text) {
       setActType("interview");
-      setActDraft(t.transcript.trim());
+      setActDraft(text);
     }
   };
 
@@ -1083,7 +1100,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
             </button>
           ))}
           <span style={{ flex: 1 }} />
-          {actType === "interview" && (c.fireflies ?? []).some((f) => f.transcript?.trim()) && (
+          {actType === "interview" && (c.fireflies ?? []).some(recordingHasTranscript) && (
             <button onClick={pullFireflies} style={mono({ cursor: "pointer", background: "transparent", color: APP.accent, border: `1px solid ${APP.accentBorder}`, borderRadius: 5, padding: "4px 11px", fontSize: 12 })}>
               Pull from Fireflies
             </button>

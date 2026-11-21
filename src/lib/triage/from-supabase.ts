@@ -276,7 +276,7 @@ function interviewBarFor(input: MapInput): InterviewBar {
     total: input.score?.total ?? null,
     answersLevel: summarizeAnswerGrades(input.evals.answerGrades).level,
     refusedToAnswer: refusedToAnswerFrom(input.application, input.evals.answerGrades),
-    hasLiveEvidence: input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
+    hasLiveEvidence: input.interviewEvidence.some(hasEvidenceTranscript),
     unsupportedExpertise: hasMaterialSyntheticExpertise(input.evals.answerGrades),
   });
 }
@@ -632,15 +632,22 @@ function logisticsFrom(input: MapInput, location: string): Logistics {
   };
 }
 
-function firefliesFrom(evidence: EvidenceRow[]): FirefliesRecording[] {
-  return evidence
-    .filter((e) => e.transcript && e.transcript.trim())
-    .map((e) => ({
+function hasEvidenceTranscript(e: EvidenceRow): boolean {
+  return Boolean(e.transcript?.trim()) || e.transcript_omitted === true;
+}
+
+export function firefliesFrom(evidence: EvidenceRow[]): FirefliesRecording[] {
+  return evidence.filter(hasEvidenceTranscript).map((e) => {
+    const text = e.transcript?.trim() ? e.transcript : "";
+    return {
+      id: e.id,
       title: e.label || e.source_type || "Interview recording",
       date: e.captured_at ? new Date(e.captured_at).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" }) : "—",
       dur: "—",
-      transcript: e.transcript as string,
-    }));
+      transcript: text,
+      ...(text ? {} : { transcriptOmitted: true }),
+    };
+  });
 }
 
 function redFlagsFrom(input: MapInput, tenure: TenureStability): RedFlag[] {

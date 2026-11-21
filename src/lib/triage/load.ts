@@ -175,6 +175,45 @@ async function fetchByCandidatePaged<T>(
   return out;
 }
 
+const EVIDENCE_LIST_COLUMNS = "id, candidate_id, source_type, author, label, captured_at, raw_ref, created_at";
+
+/**
+ * Interview evidence for the pool list, without the transcript body or the raw
+ * webhook payload. Only rows that have a transcript are returned (`neq ""` also
+ * drops NULL in Postgres), and each is flagged `transcript_omitted` so the mapper
+ * still counts it as live evidence. The text is loaded per candidate on open.
+ */
+async function fetchInterviewEvidenceForList(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  ids: string[],
+): Promise<EvidenceRow[]> {
+  const PAGE = 1000;
+  const out: EvidenceRow[] = [];
+  for (const batch of chunkIds(ids)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("evidence")
+        .select(EVIDENCE_LIST_COLUMNS)
+        .in("candidate_id", batch)
+        .in("source_type", [...INTERVIEW_EVIDENCE_TYPES])
+        .neq("transcript", "")
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error("Failed to load evidence batch", error);
+        break;
+      }
+      const rows = (data ?? []) as unknown as Array<Omit<EvidenceRow, "transcript" | "extracted">>;
+      for (const row of rows) {
+        out.push({ ...row, transcript: null, extracted: null, transcript_omitted: true });
+      }
+      if (rows.length < PAGE) break;
+    }
+  }
+  return out;
+}
+
 function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
   const byCandidate = new Map<string, EvalRow[]>();
   for (const row of rows) {
@@ -497,7 +536,7 @@ async function buildCrossRolePool(
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchInterviewEvidenceForList(supabase, ids),
     fetchByCandidatePaged<ActivityRow>(
       supabase,
       "activity",
@@ -534,7 +573,7 @@ async function buildCrossRolePool(
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
   const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
+  for (const e of evidenceRows) {
     const list = evidenceByCandidate.get(e.candidate_id) ?? [];
     list.push(e);
     evidenceByCandidate.set(e.candidate_id, list);
@@ -677,7 +716,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
+    fetchInterviewEvidenceForList(supabase, ids),
     fetchByCandidatePaged<ActivityRow>(
       supabase,
       "activity",
@@ -715,7 +754,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   }
 
   const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
+  for (const e of evidenceRows) {
     const list = evidenceByCandidate.get(e.candidate_id) ?? [];
     list.push(e);
     evidenceByCandidate.set(e.candidate_id, list);
