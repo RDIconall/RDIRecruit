@@ -1046,6 +1046,10 @@ function normalizeAnswerGrades(values: unknown[]): AnswerGradePayload[] {
           : verdict === "AI"
             ? "likely_synthetic"
             : "uncertain";
+      const syntheticAuthorship =
+        verdict === "AI" ||
+        authorshipConfidence === "likely_synthetic" ||
+        authorshipConfidence === "likely_ai_assisted";
       const candidateEvidenceCredit: NonNullable<AnswerGradePayload["candidateEvidenceCredit"]> =
         v.candidateEvidenceCredit === "high" ||
         v.candidateEvidenceCredit === "partial" ||
@@ -1053,9 +1057,13 @@ function normalizeAnswerGrades(values: unknown[]): AnswerGradePayload[] {
         v.candidateEvidenceCredit === "zero"
           ? v.candidateEvidenceCredit
           : answerProvenance === "experience_backed"
-            ? "high"
-            : answerProvenance === "adjacent_plausible"
+            ? syntheticAuthorship
               ? "partial"
+              : "high"
+            : answerProvenance === "adjacent_plausible"
+              ? syntheticAuthorship
+                ? "low"
+                : "partial"
               : "low";
       return {
         question: typeof v.question === "string" ? v.question : "",

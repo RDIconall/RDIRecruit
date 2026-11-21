@@ -568,18 +568,16 @@ function answersFrom(
         present: present?.length ? present : undefined,
         verdict,
         kind:
-          g.candidateEvidenceCredit === "high"
-            ? ("good" as const)
-            : g.candidateEvidenceCredit === "zero" ||
-                (g.answerProvenance === "unsupported" && g.authorshipConfidence === "likely_synthetic")
-              ? ("flag" as const)
-              : verdict === "AI"
-            ? ("ai" as const)
-            : verdict === "OWNED"
-              ? ("good" as const)
-              : verdict === "EVASIVE"
-                ? ("flag" as const)
-                : ("thin" as const),
+          g.candidateEvidenceCredit === "zero" ||
+          (g.answerProvenance === "unsupported" && g.authorshipConfidence === "likely_synthetic")
+            ? ("flag" as const)
+            : verdict === "AI"
+              ? ("ai" as const)
+              : g.candidateEvidenceCredit === "high" || verdict === "OWNED"
+                ? ("good" as const)
+                : verdict === "EVASIVE"
+                  ? ("flag" as const)
+                  : ("thin" as const),
       };
     });
   }
