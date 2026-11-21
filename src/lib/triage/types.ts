@@ -491,6 +491,8 @@ export interface Workspace {
   deep: Record<string, boolean>;
   chat: Record<string, ChatMessage[]>;
   activity: Record<string, ActivityEntry[]>;
+  /** Interview recordings / transcripts on file, loaded when the candidate opens. */
+  fireflies: Record<string, FirefliesRecording[]>;
   /** When the pinned assessment was last regenerated from the war room / activity. */
   regen: Record<string, string>;
   /** Post-decision process status per candidate (Sent to Lara, Interviewing, …). */

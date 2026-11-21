@@ -8,7 +8,7 @@ import {
   detectPipelinePhase,
   type PipelinePhase,
 } from "@/lib/triage/pipeline-phase";
-import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, Decision, FirefliesRecording, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -71,14 +71,14 @@ function periodStartKey(period: string | undefined | null): number {
   return year * 12 + (mi >= 0 ? mi : 0);
 }
 
-function reviewedList(c: Candidate, activityCount: number): string[] {
+function reviewedList(c: Candidate, activityCount: number, fireflies: FirefliesRecording[]): string[] {
   const out: string[] = [];
   if (c.resume?.hasResume) out.push(c.resume.roles.length ? `Résumé — ${c.resume.roles.length} roles` : "Résumé");
   if (c.cover?.hasLetter) out.push("Cover letter");
   if (c.answers?.length) out.push(`${c.answers.length} application ${c.answers.length === 1 ? "answer" : "answers"}`);
   if (c.salary && c.salary !== "—") out.push(`Stated salary — ${c.salary}`);
   out.push(`Logistics — ${c.logistics.location || "—"}`);
-  const interviews = (c.fireflies ?? []).filter((f) => f.transcript?.trim()).length;
+  const interviews = fireflies.filter((f) => f.transcript?.trim()).length;
   if (interviews) out.push(`${interviews} interview ${interviews === 1 ? "transcript" : "transcripts"}`);
   if (activityCount) out.push(`Activity log — ${activityCount} ${activityCount === 1 ? "entry" : "entries"}`);
   return out;
@@ -221,6 +221,11 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     window.scrollTo(0, 0);
   }, [id]);
 
+  const { loadDetail } = wsApi;
+  useEffect(() => {
+    loadDetail(id);
+  }, [id, loadDetail]);
+
   useEffect(() => {
     let cancelled = false;
     setResumeDoc(null);
@@ -246,10 +251,11 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   const c = candidate;
 
   const activity = ws.activity[id] ?? [];
+  const fireflies = ws.fireflies[id] ?? [];
   const phase: PipelinePhase = detectPipelinePhase({
     activity,
     transcript: ws.transcripts[id],
-    fireflies: c.fireflies,
+    fireflies,
     workableStage: c.workableStage,
     processStatus: c.processStatus,
   });
@@ -343,7 +349,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   };
 
   const pullFireflies = () => {
-    const t = (c.fireflies ?? []).find((f) => f.transcript?.trim());
+    const t = fireflies.find((f) => f.transcript?.trim());
     if (t) {
       setActType("interview");
       setActDraft(t.transcript.trim());
@@ -376,7 +382,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
   const blockedReadiness = c.decision === "blocked" && c.readiness && !c.readiness.ready ? c.readiness : null;
   const awaitingAnalysis = c.decision === "blocked" && !blockedReadiness;
 
-  const reviewed = reviewedList(c, activity.length);
+  const reviewed = reviewedList(c, activity.length, fireflies);
   const hasAssessment = !!(c.assessment && (c.assessment.bio || c.assessment.application || c.assessment.commute));
 
   // bio paragraphs — prefer Claude's full written biography; fall back to the
@@ -1060,6 +1066,8 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
               <ActivityEvent key={e.id} e={e} />
             ))}
           </div>
+        ) : !wsApi.detailLoaded[id] ? (
+          <p style={{ margin: "0 0 14px", fontSize: 14, color: APP.muted }}>Loading activity…</p>
         ) : (
           <p style={{ margin: "0 0 14px", fontSize: 14, color: APP.muted }}>No activity logged yet. Record interviews, notes, and comments here — Claude reads this on Update assessment.</p>
         )}
@@ -1083,7 +1091,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
             </button>
           ))}
           <span style={{ flex: 1 }} />
-          {actType === "interview" && (c.fireflies ?? []).some((f) => f.transcript?.trim()) && (
+          {actType === "interview" && fireflies.some((f) => f.transcript?.trim()) && (
             <button onClick={pullFireflies} style={mono({ cursor: "pointer", background: "transparent", color: APP.accent, border: `1px solid ${APP.accentBorder}`, borderRadius: 5, padding: "4px 11px", fontSize: 12 })}>
               Pull from Fireflies
             </button>

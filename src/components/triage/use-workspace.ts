@@ -7,6 +7,7 @@ import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
   clearCandidateChat,
+  loadCandidateWorkspace,
   compareToRubric,
   logActivity as logActivityAction,
   moveCandidateToStage,
@@ -28,6 +29,10 @@ import {
 export interface WorkspaceApi {
   ws: Workspace;
   hydrated: boolean;
+  /** Candidates whose long-form texts (activity, transcripts, chat) have loaded. */
+  detailLoaded: Record<string, boolean>;
+  /** Load one candidate's long-form texts; the pool list does not carry them. */
+  loadDetail: (id: string) => void;
   busy: Record<string, boolean>;
   chatBusy: Record<string, boolean>;
   notice: string | null;
@@ -89,9 +94,43 @@ export function useWorkspace(
   const [busy, setBusy] = useState<Record<string, boolean>>({});
   const [chatBusy, setChatBusy] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [detailLoaded, setDetailLoaded] = useState<Record<string, boolean>>({});
+  const detailRequested = useRef(new Set<string>());
   const wsRef = useRef(ws);
   wsRef.current = ws;
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  const loadDetail = useCallback((id: string) => {
+    if (!id || detailRequested.current.has(id)) return;
+    detailRequested.current.add(id);
+    void loadCandidateWorkspace({ candidateId: id })
+      .then((d) => {
+        // Edits made before the load landed are kept on top of the stored record.
+        setWs((w) => {
+          const localActs = w.activity[id] ?? [];
+          const storedIds = new Set(d.activity.map((e) => e.id));
+          const localCorr = w.corrections[id] ?? [];
+          const storedText = new Set(d.corrections.map((e) => e.text));
+          const ovr = w.ovr[id] ?? d.ovr;
+          const transcript = w.transcripts[id] ?? d.transcript;
+          return {
+            ...w,
+            ovr: ovr ? { ...w.ovr, [id]: ovr } : w.ovr,
+            replies: { ...w.replies, [id]: { ...d.replies, ...(w.replies[id] ?? {}) } },
+            corrections: { ...w.corrections, [id]: [...d.corrections, ...localCorr.filter((e) => !storedText.has(e.text))] },
+            transcripts: transcript ? { ...w.transcripts, [id]: transcript } : w.transcripts,
+            chat: { ...w.chat, [id]: w.chat[id] ?? d.chat },
+            activity: { ...w.activity, [id]: [...d.activity, ...localActs.filter((e) => !storedIds.has(e.id))] },
+            fireflies: { ...w.fireflies, [id]: d.fireflies },
+          };
+        });
+        setDetailLoaded((m) => ({ ...m, [id]: true }));
+      })
+      .catch(() => {
+        detailRequested.current.delete(id);
+        setNotice("Couldn't load this candidate's notes and transcripts — reopen to retry.");
+      });
+  }, []);
 
   const cuts = useMemo(() => candidates.filter((c) => c.decision === "reject"), [candidates]);
   const openCount = cuts.filter((c) => !ws.dq[c.id]).length;
@@ -434,7 +473,9 @@ export function useWorkspace(
             ...w,
             activity: {
               ...w.activity,
-              [id]: (w.activity[id] || []).map((e) => (e.id === optimistic.id ? res.entry! : e)),
+              [id]: (w.activity[id] || [])
+                .filter((e) => e.id !== res.entry!.id)
+                .map((e) => (e.id === optimistic.id ? res.entry! : e)),
             },
           }));
         } else if (res.message) {
@@ -462,6 +503,8 @@ export function useWorkspace(
   return {
     ws,
     hydrated: true,
+    detailLoaded,
+    loadDetail,
     busy,
     chatBusy,
     notice,

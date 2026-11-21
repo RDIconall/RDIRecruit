@@ -6,6 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { LABEL_MAX, TRANSCRIPT_MAX, fitsText, tooLongMessage } from "@/lib/triage/limits";
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -31,6 +32,15 @@ export async function addInterviewEvidence(input: {
   transcript: string;
 }) {
   await requireAuth();
+  if (input.kind !== "interview" && input.kind !== "phone_screen") {
+    return { ok: false as const, error: "Invalid interview kind" };
+  }
+  if (!fitsText(input.transcript, TRANSCRIPT_MAX)) {
+    return { ok: false as const, error: tooLongMessage("Transcript", TRANSCRIPT_MAX) };
+  }
+  if (!fitsText(input.label ?? "", LABEL_MAX) || !fitsText(input.author ?? "", LABEL_MAX)) {
+    return { ok: false as const, error: tooLongMessage("Label", LABEL_MAX) };
+  }
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const transcript = input.transcript.trim();
@@ -78,6 +88,12 @@ export async function addVideoAskAnswers(input: {
   answers: string;
 }) {
   await requireAuth();
+  if (!fitsText(input.answers, TRANSCRIPT_MAX)) {
+    return { ok: false as const, error: tooLongMessage("VideoAsk answers", TRANSCRIPT_MAX) };
+  }
+  if (!fitsText(input.label ?? "", LABEL_MAX)) {
+    return { ok: false as const, error: tooLongMessage("Label", LABEL_MAX) };
+  }
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const answers = input.answers.trim();
