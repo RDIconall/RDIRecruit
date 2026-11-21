@@ -398,16 +398,31 @@ export async function setDisqualified(input: {
   return { ok: true, workable };
 }
 
+/**
+ * Cut (or reinstate) up to MAX_BULK_WORKABLE_WRITES candidates per call. Ids past
+ * the cap are not touched and come back in `remaining` for a follow-up request.
+ */
 export async function bulkDisqualify(input: {
   candidateIds: string[];
   disqualified: boolean;
-}): Promise<{ ok: boolean; count: number; workableDisqualified: number; workableFailed: number }> {
+}): Promise<{
+  ok: boolean;
+  count: number;
+  remaining: string[];
+  workableDisqualified: number;
+  workableFailed: number;
+}> {
   await requireAuth();
-  if (!hasSupabase()) return { ok: false, count: 0, workableDisqualified: 0, workableFailed: 0 };
+  const ids = Array.isArray(input?.candidateIds) ? input.candidateIds : [];
+  if (!hasSupabase() || ids.some((id) => typeof id !== "string")) {
+    return { ok: false, count: 0, remaining: [], workableDisqualified: 0, workableFailed: 0 };
+  }
+  const { splitBulkBatch } = await import("@/lib/workable/write-queue");
+  const { batch, remaining } = splitBulkBatch(ids);
   const label = await reviewerLabel();
   let workableDisqualified = 0;
   let workableFailed = 0;
-  for (const id of input.candidateIds) {
+  for (const id of batch) {
     await upsertOverlay(
       id,
       input.disqualified
@@ -420,7 +435,7 @@ export async function bulkDisqualify(input: {
     else if (res === "failed") workableFailed += 1;
   }
   revalidatePath("/");
-  return { ok: true, count: input.candidateIds.length, workableDisqualified, workableFailed };
+  return { ok: true, count: batch.length, remaining, workableDisqualified, workableFailed };
 }
 
 /**

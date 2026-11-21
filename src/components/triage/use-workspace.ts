@@ -25,6 +25,22 @@ import {
   updateAssessment,
 } from "@/app/actions/triage";
 
+/** The server caps each bulk call, so keep sending what it hands back until it's all done. */
+async function bulkDisqualifyAll(candidateIds: string[], disqualified: boolean) {
+  let workableDisqualified = 0;
+  let workableFailed = 0;
+  let pending = candidateIds;
+  while (pending.length) {
+    const res = await bulkDisqualify({ candidateIds: pending, disqualified });
+    if (!res?.ok) break;
+    workableDisqualified += res.workableDisqualified;
+    workableFailed += res.workableFailed;
+    if (!res.count || res.remaining.length >= pending.length) break;
+    pending = res.remaining;
+  }
+  return { workableDisqualified, workableFailed };
+}
+
 export interface WorkspaceApi {
   ws: Workspace;
   hydrated: boolean;
@@ -137,7 +153,7 @@ export function useWorkspace(
     const dq = { ...wsRef.current.dq };
     cuts.forEach((c) => (dq[c.id] = anyOpen));
     setWs((w) => ({ ...w, dq }));
-    void bulkDisqualify({ candidateIds: cuts.map((c) => c.id), disqualified: anyOpen }).then((res) => {
+    void bulkDisqualifyAll(cuts.map((c) => c.id), anyOpen).then((res) => {
       if (res?.workableDisqualified) {
         setNotice(
           `Disqualified ${res.workableDisqualified} in Workable${res.workableFailed ? ` · ${res.workableFailed} failed` : ""}.`,
@@ -156,7 +172,7 @@ export function useWorkspace(
       targets.forEach((id) => (dq[id] = value));
       return { ...w, dq };
     });
-    void bulkDisqualify({ candidateIds: targets, disqualified: value }).then((res) => {
+    void bulkDisqualifyAll(targets, value).then((res) => {
       if (res?.workableDisqualified) {
         setNotice(
           `${value ? "Disqualified" : "Reinstated"} ${res.workableDisqualified} in Workable${res.workableFailed ? ` · ${res.workableFailed} failed` : ""}.`,

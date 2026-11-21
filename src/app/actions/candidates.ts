@@ -10,7 +10,7 @@ import {
   moveCandidateStage,
 } from "@/lib/workable/client";
 import { upsertOverlay } from "@/lib/data/overlay";
-import { enqueueWorkableWrite } from "@/lib/workable/write-queue";
+import { enqueueWorkableWrite, splitBulkBatch } from "@/lib/workable/write-queue";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 
 async function requireAuth() {
@@ -179,9 +179,13 @@ export async function bulkCandidateAction(input: {
   jobShortcode: string;
   candidateIds: string[];
   action: "advance" | "hold" | "deny";
-}) {
+}): Promise<{ ok: boolean; count: number; remaining: string[] }> {
   await requireAuth();
-  for (const candidateId of input.candidateIds) {
+  const ids = Array.isArray(input?.candidateIds) ? input.candidateIds : [];
+  if (ids.some((id) => typeof id !== "string")) return { ok: false, count: 0, remaining: [] };
+  // Ids past the cap are left untouched and returned for a follow-up request.
+  const { batch, remaining } = splitBulkBatch(ids);
+  for (const candidateId of batch) {
     if (input.action === "advance") {
       await advanceCandidate({ jobShortcode: input.jobShortcode, candidateId });
     } else if (input.action === "hold") {
@@ -191,7 +195,7 @@ export async function bulkCandidateAction(input: {
     }
   }
   revalidatePath("/board");
-  return { ok: true, count: input.candidateIds.length };
+  return { ok: true, count: batch.length, remaining };
 }
 
 /**
