@@ -9,6 +9,7 @@ import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
 import { saveJobRubric } from "@/app/actions/triage";
+import { MAX_TRANSCRIPT_CHARS } from "@/lib/triage/limits";
 import { PoolTable } from "./pool-table";
 import {
   Avatar,
@@ -349,6 +350,7 @@ function SpecField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         rows={7}
+        maxLength={MAX_TRANSCRIPT_CHARS}
         placeholder="Paste markdown here, or upload a .md file…"
         style={{
           width: "100%",

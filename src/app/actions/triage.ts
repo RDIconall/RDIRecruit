@@ -15,6 +15,16 @@ import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-ph
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import {
+  MAX_LABEL_CHARS,
+  MAX_NOTE_CHARS,
+  MAX_REPLY_KEYS,
+  MAX_TIMELINE_ROWS,
+  MAX_TRANSCRIPT_CHARS,
+  fitsLimit,
+  sanitizeTimeline,
+  tooLongMessage,
+} from "@/lib/triage/limits";
 import type {
   ActivityEntry,
   ActivityType,
@@ -31,6 +41,7 @@ import type {
 import { normalizeProcessStatus } from "@/lib/triage/types";
 
 const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
+const ACTIVITY_TYPES: ActivityType[] = ["interview", "note", "comment"];
 const VALID_PROCESS_STATUS: ProcessStatus[] = [
   "sentToLara",
   "interviewing",
@@ -222,6 +233,9 @@ export async function saveCorrection(input: {
   await requireAuth();
   const text = input.text.trim();
   if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
+  if (text.length > MAX_NOTE_CHARS) {
+    return { ok: false, recalculated: false, read: null, message: tooLongMessage("Correction", MAX_NOTE_CHARS) };
+  }
 
   // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
   const ident = await reviewerIdentity();
@@ -244,6 +258,9 @@ export async function saveCorrection(input: {
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (!fitsLimit(input.transcript, MAX_TRANSCRIPT_CHARS)) {
+    return { ok: false, recalculated: false, read: null, message: tooLongMessage("Transcript", MAX_TRANSCRIPT_CHARS) };
+  }
   const reviewer = await reviewerIdentity();
   return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
 }
@@ -255,14 +272,33 @@ export async function runDeepAnalysis(input: { candidateId: string }): Promise<R
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (!fitsLimit(input.key, MAX_LABEL_CHARS) || !input.key) {
+    return { ok: false, recalculated: false, read: null, message: "Invalid reply key" };
+  }
+  if (!fitsLimit(input.value, MAX_NOTE_CHARS)) {
+    return { ok: false, recalculated: false, read: null, message: tooLongMessage("Reply", MAX_NOTE_CHARS) };
+  }
   const existing = await getWorkingFile(input.candidateId);
-  const replies = { ...(existing?.workspace.replies ?? {}), [input.key]: input.value };
+  const prior = existing?.workspace.replies ?? {};
+  if (!Object.hasOwn(prior, input.key) && Object.keys(prior).length >= MAX_REPLY_KEYS) {
+    return { ok: false, recalculated: false, read: null, message: "Too many replies on this candidate" };
+  }
+  const replies = { ...prior, [input.key]: input.value };
   return persistAndMaybeRecalc(input.candidateId, { replies }, { recalc: false });
 }
 
 export async function saveTimeline(input: { candidateId: string; ovr: TimelineRow[] }): Promise<RecalcResult> {
   await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { ovr: input.ovr }, { recalc: false });
+  const ovr = sanitizeTimeline(input.ovr);
+  if (!ovr) {
+    return {
+      ok: false,
+      recalculated: false,
+      read: null,
+      message: `Timeline edit is too large — at most ${MAX_TIMELINE_ROWS} rows, each field under ${MAX_NOTE_CHARS.toLocaleString("en-US")} characters.`,
+    };
+  }
+  return persistAndMaybeRecalc(input.candidateId, { ovr }, { recalc: false });
 }
 
 /**
@@ -373,6 +409,7 @@ export async function setDisqualified(input: {
   reason?: string;
 }): Promise<{ ok: boolean; workable: WorkableSync }> {
   await requireAuth();
+  if (input.reason != null && !fitsLimit(input.reason, MAX_NOTE_CHARS)) return { ok: false, workable: "skipped" };
   if (!hasSupabase()) return { ok: false, workable: "skipped" };
   const reason = input.reason?.trim() || "Cut via triage";
   await upsertOverlay(
@@ -487,12 +524,21 @@ export async function logActivity(input: {
   body: string;
 }): Promise<{ ok: boolean; entry: ActivityEntry | null; message?: string }> {
   await requireAuth();
+  if (!ACTIVITY_TYPES.includes(input.type)) return { ok: false, entry: null, message: "Invalid entry type" };
   const body = input.body.trim();
   if (!body) return { ok: false, entry: null, message: "Empty entry" };
+  const bodyMax = input.type === "interview" ? MAX_TRANSCRIPT_CHARS : MAX_NOTE_CHARS;
+  if (body.length > bodyMax) {
+    return { ok: false, entry: null, message: tooLongMessage(input.type === "interview" ? "Transcript" : "Entry", bodyMax) };
+  }
+  const authorInput = input.author?.trim();
+  if (authorInput && authorInput.length > MAX_LABEL_CHARS) {
+    return { ok: false, entry: null, message: tooLongMessage("Author", MAX_LABEL_CHARS) };
+  }
   if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
-  const author = input.author?.trim() || ident.label || "You";
+  const author = (authorInput || ident.label || "You").slice(0, MAX_LABEL_CHARS);
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("activity")
@@ -606,6 +652,7 @@ export async function sendCandidateChat(input: {
   await requireAuth();
   const text = input.message.trim();
   if (!text) return { ok: false, messages: [], message: "Empty message" };
+  if (text.length > MAX_NOTE_CHARS) return { ok: false, messages: [], message: tooLongMessage("Message", MAX_NOTE_CHARS) };
   if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
@@ -746,6 +793,8 @@ export async function saveJobRubric(input: {
   specMd?: string;
 }): Promise<{ ok: boolean }> {
   await requireAuth();
+  if (input.rubricMd != null && !fitsLimit(input.rubricMd, MAX_TRANSCRIPT_CHARS)) return { ok: false };
+  if (input.specMd != null && !fitsLimit(input.specMd, MAX_TRANSCRIPT_CHARS)) return { ok: false };
   if (!hasSupabase()) return { ok: false };
   await upsertJobRubric(
     input.jobShortcode,
