@@ -5,6 +5,7 @@ import { auth } from "@clerk/nextjs/server";
 import { parseRubricMarkdown } from "@/lib/rubric/parser";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
+import { AUTHOR_MAX_CHARS, RUBRIC_MAX_CHARS, tooLong, tooLongMessage } from "@/lib/triage/limits";
 
 export async function saveRubric(input: {
   jobShortcode: string;
@@ -13,6 +14,11 @@ export async function saveRubric(input: {
 }) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
+  if (typeof input.markdown !== "string" || (input.name != null && typeof input.name !== "string")) {
+    return { ok: false, error: "Invalid rubric" };
+  }
+  if (tooLong(input.markdown, RUBRIC_MAX_CHARS)) return { ok: false, error: tooLongMessage("Rubric", RUBRIC_MAX_CHARS) };
+  if (tooLong(input.name, AUTHOR_MAX_CHARS)) return { ok: false, error: tooLongMessage("Rubric name", AUTHOR_MAX_CHARS) };
   if (!hasSupabase()) return { ok: false, error: "Supabase not configured" };
 
   const parsed = parseRubricMarkdown(input.markdown);
