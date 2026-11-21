@@ -7,7 +7,6 @@ import { chunkIds } from "../data/chunk";
 import { getPublishedJobs, getJobByShortcode } from "../jobs/service";
 import { wbJob } from "../workable/links";
 import { getJobRubric } from "../rubric/store";
-import type { WorkspaceSlice } from "./types";
 import { INTERVIEW_EVIDENCE_TYPES } from "../sync/candidate-hash";
 import type {
   AnswerGradePayload,
@@ -19,10 +18,28 @@ import type {
   RoleReadPayload,
   VerificationPayload,
 } from "../types";
-import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
+import type {
+  ActivityEntry,
+  Candidate,
+  ChatMessage,
+  CorrectionEntry,
+  DecisionRead,
+  FirefliesRecording,
+  JobOption,
+  PoolMeta,
+  TimelineRow,
+  Workspace,
+  WorkspaceSlice,
+} from "./types";
 import { parseFitRead } from "./fit-read";
-import { mapCandidate, type ApplicationLite, type CandidateEvaluations, type ParsedExperienceEntry } from "./from-supabase";
-import { getWorkingFiles } from "./store";
+import {
+  firefliesFrom,
+  mapCandidate,
+  type ApplicationLite,
+  type CandidateEvaluations,
+  type ParsedExperienceEntry,
+} from "./from-supabase";
+import { getPoolWorkingFiles, getWorkingFile, getWorkingFiles } from "./store";
 import { assignPoolStanding } from "./ranking";
 import { computeReadiness, type GradingInputs } from "./readiness";
 import { getMethodDoc } from "../evaluation/method";
@@ -50,7 +67,19 @@ export interface TriagePool {
 }
 
 function emptyWorkspace(): Workspace {
-  return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {}, chat: {}, activity: {}, regen: {}, process: {} };
+  return {
+    dq: {},
+    ovr: {},
+    replies: {},
+    corrections: {},
+    transcripts: {},
+    deep: {},
+    chat: {},
+    activity: {},
+    recordings: {},
+    regen: {},
+    process: {},
+  };
 }
 
 type ActivityRow = { id: string; candidate_id: string; type: string | null; author: string | null; body: string; created_at: string };
@@ -169,6 +198,39 @@ async function fetchByCandidatePaged<T>(
       }
       const rows = (data ?? []) as T[];
       out.push(...rows);
+      if (rows.length < PAGE) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Ids of candidates with at least one non-empty interview transcript. The filter
+ * runs in the database so building a pool never reads transcript text; the
+ * transcripts themselves load only when a reviewer opens the candidate.
+ */
+async function fetchLiveEvidenceIds(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  ids: string[],
+): Promise<Set<string>> {
+  const PAGE = 1000;
+  const out = new Set<string>();
+  for (const batch of chunkIds(ids)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("evidence")
+        .select("candidate_id")
+        .in("candidate_id", batch)
+        .in("source_type", [...INTERVIEW_EVIDENCE_TYPES])
+        .neq("transcript", "")
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error("Failed to load interview evidence batch", error);
+        break;
+      }
+      const rows = (data ?? []) as Array<{ candidate_id: string }>;
+      for (const row of rows) out.add(row.candidate_id);
       if (rows.length < PAGE) break;
     }
   }
@@ -317,6 +379,54 @@ export async function loadOneCandidate(candidateId: string): Promise<OneCandidat
   };
 }
 
+/**
+ * The reviewer-authored record for one candidate: activity log, interview
+ * recordings, and the workspace edits. Kept off the pool payload and loaded when
+ * a reviewer opens the candidate.
+ */
+export interface CandidateDetail {
+  activity: ActivityEntry[];
+  recordings: FirefliesRecording[];
+  ovr?: TimelineRow[];
+  replies?: Record<string, string>;
+  corrections?: CorrectionEntry[];
+  transcript?: string;
+  chat?: ChatMessage[];
+}
+
+export async function loadCandidateDetail(candidateId: string): Promise<CandidateDetail | null> {
+  if (!hasSupabase()) return null;
+  const supabase = getServiceSupabase();
+
+  const [activityRes, evidenceRes, wf] = await Promise.all([
+    supabase
+      .from("activity")
+      .select("id, candidate_id, type, author, body, created_at")
+      .eq("candidate_id", candidateId)
+      .order("created_at", { ascending: true }),
+    supabase
+      .from("evidence")
+      .select("id, candidate_id, source_type, author, label, captured_at, raw_ref, transcript, created_at")
+      .eq("candidate_id", candidateId)
+      .in("source_type", [...INTERVIEW_EVIDENCE_TYPES])
+      .order("created_at", { ascending: false }),
+    getWorkingFile(candidateId),
+  ]);
+  if (activityRes.error) console.error(`Failed to load activity for ${candidateId}`, activityRes.error);
+  if (evidenceRes.error) console.error(`Failed to load interview evidence for ${candidateId}`, evidenceRes.error);
+
+  const slice = wf?.workspace ?? {};
+  return {
+    activity: ((activityRes.data ?? []) as ActivityRow[]).map(toActivityEntry),
+    recordings: firefliesFrom((evidenceRes.data ?? []) as unknown as EvidenceRow[]),
+    ovr: slice.ovr,
+    replies: slice.replies,
+    corrections: slice.corrections,
+    transcript: slice.transcript,
+    chat: slice.chat,
+  };
+}
+
 /** A compact, decision-vocabulary-safe summary of one pool candidate. */
 export interface RosterEntry {
   id: string;
@@ -352,7 +462,7 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
     // answer text now lives here rather than being echoed back by the evaluator.
     supabase.from("applications").select("candidate_id, answers, parsed_experience").in("candidate_id", ids),
     fetchEvaluationsPaged(supabase, ids),
-    getWorkingFiles(ids),
+    getPoolWorkingFiles(ids),
   ]);
 
   const appsByCandidate = new Map<string, ApplicationLite>();
@@ -376,7 +486,6 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
     const id = item.candidate.workable_id;
     if (excludeId && id === excludeId) continue;
     const wf = workingFiles.get(id);
-    const read = (wf?.read as DecisionRead | null) ?? null;
 
     const candidate = mapCandidate({
       candidate: item.candidate,
@@ -387,10 +496,10 @@ export async function loadPoolRoster(jobShortcode: string, excludeId?: string): 
       narrative: [],
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
       interviewEvidence: [],
-      read,
-      corrections: wf?.workspace?.corrections ?? [],
-      decisionOverride: wf?.workspace?.decisionOverride ?? null,
-      processStatus: wf?.workspace?.processStatus ?? null,
+      read: wf?.read ?? null,
+      corrections: wf?.corrections ?? [],
+      decisionOverride: wf?.decisionOverride ?? null,
+      processStatus: wf?.processStatus ?? null,
       rank: 0,
       jobLocation: "Van Nuys, CA",
       jobShortcode,
@@ -481,7 +590,7 @@ async function buildCrossRolePool(
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRows, evalRows, narrRows, evidenceRows, activityRows, workingFiles] = await Promise.all([
+  const [appsRows, evalRows, narrRows, liveEvidenceIds, workingFiles] = await Promise.all([
     fetchByCandidatePaged<{ candidate_id: string } & ApplicationLite>(
       supabase,
       "applications",
@@ -497,23 +606,9 @@ async function buildCrossRolePool(
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
-    fetchByCandidatePaged<ActivityRow>(
-      supabase,
-      "activity",
-      "id, candidate_id, type, author, body, created_at",
-      ids,
-      "created_at",
-    ),
-    getWorkingFiles(ids),
+    fetchLiveEvidenceIds(supabase, ids),
+    getPoolWorkingFiles(ids),
   ]);
-
-  const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of [...activityRows].reverse()) {
-    const list = activityByCandidate.get(r.candidate_id) ?? [];
-    list.push(toActivityEntry(r));
-    activityByCandidate.set(r.candidate_id, list);
-  }
 
   const appsByCandidate = new Map<string, ApplicationLite>();
   for (const a of appsRows) {
@@ -533,19 +628,12 @@ async function buildCrossRolePool(
   for (const n of narrRows) {
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
-  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
-    const list = evidenceByCandidate.get(e.candidate_id) ?? [];
-    list.push(e);
-    evidenceByCandidate.set(e.candidate_id, list);
-  }
 
   const workspace = emptyWorkspace();
   const candidates: Candidate[] = board.map((item, index) => {
     const id = item.candidate.workable_id;
     const jobShortcode = item.candidate.job_shortcode || "";
     const wf = workingFiles.get(id);
-    const read = (wf?.read as DecisionRead | null) ?? null;
 
     const candidate = mapCandidate({
       candidate: item.candidate,
@@ -555,11 +643,12 @@ async function buildCrossRolePool(
       application: appsByCandidate.get(id) ?? null,
       narrative: narrByCandidate.get(id) ?? [],
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
-      interviewEvidence: evidenceByCandidate.get(id) ?? [],
-      read,
-      corrections: wf?.workspace?.corrections ?? [],
-      decisionOverride: wf?.workspace?.decisionOverride ?? null,
-      processStatus: wf?.workspace?.processStatus ?? null,
+      interviewEvidence: [],
+      liveEvidence: liveEvidenceIds.has(id),
+      read: wf?.read ?? null,
+      corrections: wf?.corrections ?? [],
+      decisionOverride: wf?.decisionOverride ?? null,
+      processStatus: wf?.processStatus ?? null,
       rank: index + 1,
       jobLocation: "Van Nuys, CA",
       jobShortcode,
@@ -568,16 +657,7 @@ async function buildCrossRolePool(
 
     const dq = item.overlay?.status === "disqualified" || Boolean(item.candidate.disqualified);
     if (dq) workspace.dq[id] = true;
-    const slice = wf?.workspace ?? {};
-    if (slice.ovr) workspace.ovr[id] = slice.ovr;
-    if (slice.replies) workspace.replies[id] = slice.replies;
-    if (slice.corrections) workspace.corrections[id] = slice.corrections;
-    if (slice.transcript) workspace.transcripts[id] = slice.transcript;
-    if (slice.deep) workspace.deep[id] = true;
-    if (slice.processStatus) workspace.process[id] = slice.processStatus;
-    if (slice.chat?.length) workspace.chat[id] = slice.chat;
-    const acts = activityByCandidate.get(id);
-    if (acts?.length) workspace.activity[id] = acts;
+    if (wf?.processStatus) workspace.process[id] = wf.processStatus;
 
     return candidate;
   });
@@ -661,7 +741,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRows, evalRows, narrRows, evidenceRows, activityRows, workingFiles] = await Promise.all([
+  const [appsRows, evalRows, narrRows, liveEvidenceIds, workingFiles] = await Promise.all([
     fetchByCandidatePaged<{ candidate_id: string } & ApplicationLite>(
       supabase,
       "applications",
@@ -677,23 +757,9 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
-    fetchByCandidatePaged<ActivityRow>(
-      supabase,
-      "activity",
-      "id, candidate_id, type, author, body, created_at",
-      ids,
-      "created_at",
-    ),
-    getWorkingFiles(ids),
+    fetchLiveEvidenceIds(supabase, ids),
+    getPoolWorkingFiles(ids),
   ]);
-
-  const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of [...activityRows].reverse()) {
-    const list = activityByCandidate.get(r.candidate_id) ?? [];
-    list.push(toActivityEntry(r));
-    activityByCandidate.set(r.candidate_id, list);
-  }
 
   const appsByCandidate = new Map<string, ApplicationLite>();
   for (const a of appsRows) {
@@ -714,18 +780,11 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
 
-  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
-    const list = evidenceByCandidate.get(e.candidate_id) ?? [];
-    list.push(e);
-    evidenceByCandidate.set(e.candidate_id, list);
-  }
 
   const workspace = emptyWorkspace();
   const candidates: Candidate[] = board.map((item, index) => {
     const id = item.candidate.workable_id;
     const wf = workingFiles.get(id);
-    const read = (wf?.read as DecisionRead | null) ?? null;
 
     const candidate = mapCandidate({
       candidate: item.candidate,
@@ -735,11 +794,12 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       application: appsByCandidate.get(id) ?? null,
       narrative: narrByCandidate.get(id) ?? [],
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
-      interviewEvidence: evidenceByCandidate.get(id) ?? [],
-      read,
-      corrections: wf?.workspace?.corrections ?? [],
-      decisionOverride: wf?.workspace?.decisionOverride ?? null,
-      processStatus: wf?.workspace?.processStatus ?? null,
+      interviewEvidence: [],
+      liveEvidence: liveEvidenceIds.has(id),
+      read: wf?.read ?? null,
+      corrections: wf?.corrections ?? [],
+      decisionOverride: wf?.decisionOverride ?? null,
+      processStatus: wf?.processStatus ?? null,
       rank: index + 1,
       jobLocation: "Van Nuys, CA",
       jobShortcode,
@@ -749,16 +809,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     // Hydrate the client workspace from persisted state.
     const dq = item.overlay?.status === "disqualified" || Boolean(item.candidate.disqualified);
     if (dq) workspace.dq[id] = true;
-    const slice = wf?.workspace ?? {};
-    if (slice.ovr) workspace.ovr[id] = slice.ovr;
-    if (slice.replies) workspace.replies[id] = slice.replies;
-    if (slice.corrections) workspace.corrections[id] = slice.corrections;
-    if (slice.transcript) workspace.transcripts[id] = slice.transcript;
-    if (slice.deep) workspace.deep[id] = true;
-    if (slice.processStatus) workspace.process[id] = slice.processStatus;
-    if (slice.chat?.length) workspace.chat[id] = slice.chat;
-    const acts = activityByCandidate.get(id);
-    if (acts?.length) workspace.activity[id] = acts;
+    if (wf?.processStatus) workspace.process[id] = wf.processStatus;
 
     return candidate;
   });

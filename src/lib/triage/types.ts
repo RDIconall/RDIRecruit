@@ -482,6 +482,9 @@ export interface ActivityEntry {
   at: string; // ISO timestamp
 }
 
+// The pool payload fills only `dq` and `process`. The per-candidate records
+// (timeline, replies, corrections, transcript, chat, activity, recordings) can be
+// large, so they load when a reviewer opens that candidate.
 export interface Workspace {
   dq: Record<string, boolean>;
   ovr: Record<string, TimelineRow[]>;
@@ -491,6 +494,8 @@ export interface Workspace {
   deep: Record<string, boolean>;
   chat: Record<string, ChatMessage[]>;
   activity: Record<string, ActivityEntry[]>;
+  /** Interview recordings with transcripts, loaded when a candidate is opened. */
+  recordings: Record<string, FirefliesRecording[]>;
   /** When the pinned assessment was last regenerated from the war room / activity. */
   regen: Record<string, string>;
   /** Post-decision process status per candidate (Sent to Lara, Interviewing, …). */

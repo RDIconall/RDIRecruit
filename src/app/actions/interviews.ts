@@ -6,6 +6,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { MAX_LABEL_CHARS, MAX_TRANSCRIPT_CHARS, tooLongMessage } from "@/lib/triage/limits";
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -31,13 +32,23 @@ export async function addInterviewEvidence(input: {
   transcript: string;
 }) {
   await requireAuth();
-  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
+  if (input.kind !== "interview" && input.kind !== "phone_screen") {
+    return { ok: false as const, error: "Unknown interview kind." };
+  }
 
   const transcript = input.transcript.trim();
   if (!transcript) return { ok: false as const, error: "Paste the interview transcript first." };
+  if (transcript.length > MAX_TRANSCRIPT_CHARS) {
+    return { ok: false as const, error: tooLongMessage("Transcript", MAX_TRANSCRIPT_CHARS) };
+  }
 
   const label = input.label.trim() || (input.kind === "phone_screen" ? "Phone screen" : "Interview");
   const author = input.author?.trim() || null;
+  if (label.length > MAX_LABEL_CHARS) return { ok: false as const, error: tooLongMessage("Label", MAX_LABEL_CHARS) };
+  if (author && author.length > MAX_LABEL_CHARS) {
+    return { ok: false as const, error: tooLongMessage("Interviewer", MAX_LABEL_CHARS) };
+  }
+  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
   const capturedAt = parseDate(input.date);
 
   const supabase = getServiceSupabase();
@@ -78,12 +89,16 @@ export async function addVideoAskAnswers(input: {
   answers: string;
 }) {
   await requireAuth();
-  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const answers = input.answers.trim();
   if (!answers) return { ok: false as const, error: "Enter the candidate's VideoAsk answers first." };
+  if (answers.length > MAX_TRANSCRIPT_CHARS) {
+    return { ok: false as const, error: tooLongMessage("VideoAsk answers", MAX_TRANSCRIPT_CHARS) };
+  }
 
   const label = input.label?.trim() || "VideoAsk answers";
+  if (label.length > MAX_LABEL_CHARS) return { ok: false as const, error: tooLongMessage("Label", MAX_LABEL_CHARS) };
+  if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
   const capturedAt = parseDate(input.date);
 
   const supabase = getServiceSupabase();

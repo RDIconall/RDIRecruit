@@ -12,6 +12,7 @@ import {
 import { upsertOverlay } from "@/lib/data/overlay";
 import { enqueueWorkableWrite } from "@/lib/workable/write-queue";
 import { hasSupabase, hasWorkable } from "@/lib/env";
+import { MAX_NOTE_CHARS, fitsLimit, tooLongMessage } from "@/lib/triage/limits";
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -106,6 +107,9 @@ export async function denyCandidate(input: {
   reason?: string;
 }) {
   await requireAuth();
+  if (input.reason != null && !fitsLimit(input.reason, MAX_NOTE_CHARS)) {
+    return { ok: false, error: tooLongMessage("Reason", MAX_NOTE_CHARS) };
+  }
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
 
   // Best-effort Workable propagation; the local overlay below is the source of
@@ -146,6 +150,9 @@ export async function withdrawCandidate(input: {
   reason?: string;
 }) {
   await requireAuth();
+  if (input.reason != null && !fitsLimit(input.reason, MAX_NOTE_CHARS)) {
+    return { ok: false, error: tooLongMessage("Reason", MAX_NOTE_CHARS) };
+  }
   if (hasSupabase()) {
     await upsertOverlay(
       input.candidateId,
