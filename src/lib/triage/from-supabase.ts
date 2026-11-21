@@ -102,6 +102,11 @@ export interface MapInput {
   narrative: NarrativeSegment[];
   evals: CandidateEvaluations;
   interviewEvidence: EvidenceRow[];
+  /**
+   * Whether any interview evidence has a transcript. The pool board passes this
+   * instead of the evidence rows so it never loads the transcripts themselves.
+   */
+  hasLiveEvidence?: boolean;
   read: DecisionRead | null;
   /** Persisted human corrections (with optional reviewer identity) — drives rev/revNote (#7). */
   corrections?: CorrectionEntry[];
@@ -276,7 +281,8 @@ function interviewBarFor(input: MapInput): InterviewBar {
     total: input.score?.total ?? null,
     answersLevel: summarizeAnswerGrades(input.evals.answerGrades).level,
     refusedToAnswer: refusedToAnswerFrom(input.application, input.evals.answerGrades),
-    hasLiveEvidence: input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
+    hasLiveEvidence:
+      input.hasLiveEvidence ?? input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
     unsupportedExpertise: hasMaterialSyntheticExpertise(input.evals.answerGrades),
   });
 }
@@ -632,7 +638,7 @@ function logisticsFrom(input: MapInput, location: string): Logistics {
   };
 }
 
-function firefliesFrom(evidence: EvidenceRow[]): FirefliesRecording[] {
+export function firefliesFrom(evidence: EvidenceRow[]): FirefliesRecording[] {
   return evidence
     .filter((e) => e.transcript && e.transcript.trim())
     .map((e) => ({

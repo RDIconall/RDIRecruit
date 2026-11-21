@@ -2,12 +2,13 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, CandidateDetail, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
   clearCandidateChat,
   compareToRubric,
+  getCandidateDetail,
   logActivity as logActivityAction,
   moveCandidateToStage,
   sendCandidateToScreen,
@@ -64,6 +65,10 @@ export interface WorkspaceApi {
   logActivity: (id: string, type: ActivityType, body: string) => void;
   /** Re-run the evaluator over the activity-log delta and re-persist the pinned assessment. */
   updateAssessment: (id: string) => void;
+  /** Load a candidate's notes, transcripts, edits, and chat (the pool carries none of them). */
+  loadDetail: (id: string) => void;
+  /** True once loadDetail has finished for that candidate. */
+  detailLoaded: Record<string, boolean>;
 }
 
 function nowStamp(): string {
@@ -82,11 +87,15 @@ export function useWorkspace(
   opts?: {
     jobShortcode?: string;
     onStageChange?: (id: string, stage: string) => void;
+    onDetail?: (id: string, detail: CandidateDetail) => void;
   },
 ): WorkspaceApi {
   const router = useRouter();
   const [ws, setWs] = useState<Workspace>(initial);
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [detailLoaded, setDetailLoaded] = useState<Record<string, boolean>>({});
+  const detailRequested = useRef<Set<string>>(new Set());
+  const onDetail = opts?.onDetail;
   const [chatBusy, setChatBusy] = useState<Record<string, boolean>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const wsRef = useRef(ws);
@@ -437,8 +446,12 @@ export function useWorkspace(
               [id]: (w.activity[id] || []).map((e) => (e.id === optimistic.id ? res.entry! : e)),
             },
           }));
-        } else if (res.message) {
-          setNotice(res.message);
+        } else {
+          setWs((w) => ({
+            ...w,
+            activity: { ...w.activity, [id]: (w.activity[id] || []).filter((e) => e.id !== optimistic.id) },
+          }));
+          if (res.message) setNotice(res.message);
         }
       })
       .catch(() => setNotice("Couldn't save to the activity log — please retry."));
@@ -455,6 +468,38 @@ export function useWorkspace(
       });
     },
     [handleRecalc],
+  );
+
+  const loadDetail = useCallback(
+    (id: string) => {
+      if (!id || detailRequested.current.has(id)) return;
+      detailRequested.current.add(id);
+      void getCandidateDetail({ candidateId: id })
+        .then((d) => {
+          if (!d) return;
+          // Anything edited locally while this was in flight wins over the stored copy.
+          setWs((w) => {
+            const local = w.activity[id] ?? [];
+            const stored = new Set(d.activity.map((e) => e.id));
+            return {
+              ...w,
+              activity: { ...w.activity, [id]: [...d.activity, ...local.filter((e) => !stored.has(e.id))] },
+              ovr: w.ovr[id] || !d.ovr ? w.ovr : { ...w.ovr, [id]: d.ovr },
+              replies: d.replies ? { ...w.replies, [id]: { ...d.replies, ...(w.replies[id] ?? {}) } } : w.replies,
+              corrections: w.corrections[id] || !d.corrections ? w.corrections : { ...w.corrections, [id]: d.corrections },
+              transcripts: w.transcripts[id] !== undefined || !d.transcript ? w.transcripts : { ...w.transcripts, [id]: d.transcript },
+              chat: w.chat[id] || !d.chat?.length ? w.chat : { ...w.chat, [id]: d.chat },
+            };
+          });
+          onDetail?.(id, d);
+        })
+        .catch(() => {
+          detailRequested.current.delete(id);
+          setNotice("Couldn't load this candidate's notes — reopen to retry.");
+        })
+        .finally(() => setDetailLoaded((m) => ({ ...m, [id]: true })));
+    },
+    [onDetail],
   );
 
   const clearNotice = useCallback(() => setNotice(null), []);
@@ -489,5 +534,7 @@ export function useWorkspace(
     addCorrection,
     logActivity,
     updateAssessment: updateAssessmentCb,
+    loadDetail,
+    detailLoaded,
   };
 }
