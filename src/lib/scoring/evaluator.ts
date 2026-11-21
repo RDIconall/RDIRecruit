@@ -417,14 +417,74 @@ const LIMITS = {
   publicProfile: 4000,
   interviewEvidence: 24000,
   recruiterComments: 4000,
+  roles: 12000,
+  roleLabel: 200,
+  roleDate: 40,
+  roleText: 2000,
+  minRoleText: 80,
 } as const;
+
+/** Approximate JSON keys + indentation + short title/company/dates for one role. */
+const ROLE_JSON_OVERHEAD = 220;
+
+function clip(value: unknown, max: number): string | undefined {
+  if (typeof value !== "string") return undefined;
+  return value.length > max ? `${value.slice(0, max)}…` : value;
+}
+
+/**
+ * The parsed career history is applicant-controlled (Workable experience
+ * summaries, résumé bullets) and unbounded in both entry length and entry
+ * count, so it gets the same treatment as résumé text: every field is clipped,
+ * the per-role text budget shrinks as the role count grows, and whatever still
+ * does not fit is counted rather than sent.
+ */
+function rolesForPrompt(roles: EvaluatorInput["roles"]): string {
+  const list = Array.isArray(roles) ? roles : [];
+  if (!list.length) return "[]";
+
+  const textBudget = Math.max(
+    LIMITS.minRoleText,
+    Math.min(LIMITS.roleText, Math.floor(LIMITS.roles / list.length) - ROLE_JSON_OVERHEAD),
+  );
+  const omittedNote = (n: number) => `\n[${n} more role(s) omitted to fit the prompt limit]`;
+  const reserve = omittedNote(list.length).length;
+
+  const parts: string[] = [];
+  let used = 4; // "[\n" + "\n]"
+  for (let i = 0; i < list.length; i++) {
+    const r = list[i] ?? ({} as EvaluatorInput["roles"][number]);
+    const summary = typeof r.summary === "string" ? r.summary : "";
+    const resumeLine =
+      typeof r.resumeLine === "string" && r.resumeLine !== summary ? r.resumeLine : "";
+    const each = summary && resumeLine ? Math.floor(textBudget / 2) : textBudget;
+    const role = {
+      title: clip(r.title, LIMITS.roleLabel) ?? "",
+      company: clip(r.company, LIMITS.roleLabel) ?? "",
+      start: r.start === null ? null : clip(r.start, LIMITS.roleDate),
+      end: r.end === null ? null : clip(r.end, LIMITS.roleDate),
+      current: typeof r.current === "boolean" ? r.current : undefined,
+      summary: summary ? clip(summary, each) : undefined,
+      resumeLine: resumeLine ? clip(resumeLine, each) : undefined,
+    };
+    const part = JSON.stringify(role, null, 2).replace(/^/gm, "  ");
+    const cost = part.length + (parts.length ? 2 : 0);
+    const remaining = list.length - i - 1;
+    if (used + cost + (remaining ? reserve : 0) > LIMITS.roles) {
+      return `[\n${parts.join(",\n")}\n]${omittedNote(list.length - i)}`;
+    }
+    parts.push(part);
+    used += cost;
+  }
+  return `[\n${parts.join(",\n")}\n]`;
+}
 
 /** Only the candidate. Everything seat-level lives in the cached prefix above. */
 function buildUserPrompt(input: EvaluatorInput): string {
-  return `CANDIDATE: ${input.name}
+  return `CANDIDATE: ${clip(input.name, LIMITS.roleLabel) ?? "Candidate"}
 ${careerSpanBlock(input)}
 PARSED ROLES (oldest→newest where dated):
-${JSON.stringify(input.roles, null, 2)}
+${rolesForPrompt(input.roles)}
 
 RÉSUMÉ TEXT:
 """
