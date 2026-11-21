@@ -2,7 +2,8 @@ import "server-only";
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { chunkIds } from "../data/chunk";
-import type { DecisionRead, WorkspaceSlice } from "./types";
+import { TEXT_MAX } from "./limits";
+import type { CorrectionEntry, Decision, DecisionRead, ProcessStatus, WorkspaceSlice } from "./types";
 
 export interface WorkingFileRow {
   candidate_id: string;
@@ -24,21 +25,66 @@ function normalize(row: Partial<WorkingFileRow> & { candidate_id: string }): Wor
   };
 }
 
-export async function getWorkingFiles(
+/** What list views (pool, roster, cron worklists) need from a working file. */
+export interface WorkingFileSummary {
+  candidate_id: string;
+  read: DecisionRead | null;
+  /** Flags plus at most the latest correction; never transcripts, chat, replies, or timeline edits. */
+  workspace: Pick<WorkspaceSlice, "deep" | "processStatus" | "decisionOverride" | "corrections">;
+}
+
+// Only the latest correction is read: the reviewer-signal lens looks at the
+// newest one, and the full log can be long.
+const SUMMARY_COLUMNS = [
+  "candidate_id",
+  "read",
+  "deep:workspace->deep",
+  "processStatus:workspace->processStatus",
+  "decisionOverride:workspace->decisionOverride",
+  "lastCorrection:workspace->corrections->-1",
+].join(", ");
+
+type SummaryRow = {
+  candidate_id: string;
+  read?: DecisionRead | null;
+  deep?: unknown;
+  processStatus?: unknown;
+  decisionOverride?: unknown;
+  lastCorrection?: unknown;
+};
+
+function lastCorrectionFrom(value: unknown): CorrectionEntry[] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+  const entry = value as CorrectionEntry;
+  if (typeof entry.text !== "string") return [];
+  return [{ ...entry, text: entry.text.slice(0, TEXT_MAX) }];
+}
+
+/** Batch-load list-view summaries of working files, without the long-form workspace texts. */
+export async function getWorkingFileSummaries(
   candidateIds: string[],
-): Promise<Map<string, WorkingFileRow>> {
-  const map = new Map<string, WorkingFileRow>();
+): Promise<Map<string, WorkingFileSummary>> {
+  const map = new Map<string, WorkingFileSummary>();
   if (!hasSupabase() || !candidateIds.length) return map;
 
   const supabase = getServiceSupabase();
   for (const batch of chunkIds(candidateIds)) {
     const { data, error } = await supabase
       .from("candidate_working_files")
-      .select("*")
+      .select(SUMMARY_COLUMNS)
       .in("candidate_id", batch);
     if (error) console.error("Failed to load working files batch", error);
-    for (const row of (data ?? []) as WorkingFileRow[]) {
-      map.set(row.candidate_id, normalize(row));
+    for (const row of (data ?? []) as unknown as SummaryRow[]) {
+      map.set(row.candidate_id, {
+        candidate_id: row.candidate_id,
+        read: row.read ?? null,
+        workspace: {
+          deep: row.deep === true ? true : undefined,
+          processStatus: typeof row.processStatus === "string" ? (row.processStatus as ProcessStatus) : null,
+          decisionOverride: typeof row.decisionOverride === "string" ? (row.decisionOverride as Decision) : null,
+          corrections: lastCorrectionFrom(row.lastCorrection),
+        },
+      });
     }
   }
   return map;

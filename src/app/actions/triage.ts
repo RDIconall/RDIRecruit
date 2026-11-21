@@ -13,8 +13,23 @@ import { prepareGradingInputs, describeMissing } from "@/lib/triage/readiness";
 import { chatWithClaude } from "@/lib/triage/chat";
 import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-phase";
 import { DM } from "@/lib/triage/theme";
-import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
+import { REVIEWER_OPTIONS, reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import { INTERVIEW_EVIDENCE_TYPES } from "@/lib/sync/candidate-hash";
+import { firefliesFrom } from "@/lib/triage/from-supabase";
+import {
+  LABEL_MAX,
+  REASON_MAX,
+  REPLIES_MAX,
+  RUBRIC_MAX,
+  TEXT_MAX,
+  TIMELINE_ROWS_MAX,
+  TRANSCRIPT_MAX,
+  fitsText,
+  sanitizeTimeline,
+  tooLongMessage,
+} from "@/lib/triage/limits";
+import type { EvidenceRow } from "@/lib/types";
 import type {
   ActivityEntry,
   ActivityType,
@@ -23,6 +38,7 @@ import type {
   CorrectionEntry,
   Decision,
   DecisionRead,
+  FirefliesRecording,
   ProcessStatus,
   ReviewerKind,
   TimelineRow,
@@ -31,6 +47,8 @@ import type {
 import { normalizeProcessStatus } from "@/lib/triage/types";
 
 const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
+const VALID_ACTIVITY_TYPES: ActivityType[] = ["interview", "note", "comment"];
+const VALID_REVIEWER_KINDS: ReviewerKind[] = REVIEWER_OPTIONS.map((o) => o.kind);
 const VALID_PROCESS_STATUS: ProcessStatus[] = [
   "sentToLara",
   "interviewing",
@@ -99,6 +117,10 @@ interface RecalcResult {
   recalculated: boolean;
   read: DecisionRead | null;
   message?: string;
+}
+
+function refused(message: string): RecalcResult {
+  return { ok: false, recalculated: false, read: null, message };
 }
 
 /**
@@ -220,8 +242,13 @@ export async function saveCorrection(input: {
   reviewerKind?: ReviewerKind;
 }): Promise<RecalcResult> {
   await requireAuth();
+  if (typeof input.text !== "string") return refused("Invalid correction");
   const text = input.text.trim();
   if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
+  if (text.length > TEXT_MAX) return refused(tooLongMessage("Correction", TEXT_MAX));
+  if (input.reviewerKind !== undefined && !VALID_REVIEWER_KINDS.includes(input.reviewerKind)) {
+    return refused("Invalid reviewer");
+  }
 
   // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
   const ident = await reviewerIdentity();
@@ -244,6 +271,8 @@ export async function saveCorrection(input: {
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (typeof input.transcript !== "string") return refused("Invalid transcript");
+  if (input.transcript.length > TRANSCRIPT_MAX) return refused(tooLongMessage("Transcript", TRANSCRIPT_MAX));
   const reviewer = await reviewerIdentity();
   return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
 }
@@ -255,14 +284,27 @@ export async function runDeepAnalysis(input: { candidateId: string }): Promise<R
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (!fitsText(input.key, LABEL_MAX) || !input.key) return refused("Invalid reply key");
+  if (typeof input.value !== "string") return refused("Invalid reply");
+  if (input.value.length > TEXT_MAX) return refused(tooLongMessage("Reply", TEXT_MAX));
   const existing = await getWorkingFile(input.candidateId);
-  const replies = { ...(existing?.workspace.replies ?? {}), [input.key]: input.value };
+  const prior = existing?.workspace.replies ?? {};
+  if (!Object.hasOwn(prior, input.key) && Object.keys(prior).length >= REPLIES_MAX) {
+    return refused("Too many replies on this candidate");
+  }
+  const replies = { ...prior, [input.key]: input.value };
   return persistAndMaybeRecalc(input.candidateId, { replies }, { recalc: false });
 }
 
 export async function saveTimeline(input: { candidateId: string; ovr: TimelineRow[] }): Promise<RecalcResult> {
   await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { ovr: input.ovr }, { recalc: false });
+  const ovr = sanitizeTimeline(input.ovr);
+  if (!ovr) {
+    return refused(
+      `Timeline is too large (max ${TIMELINE_ROWS_MAX} rows, ${TEXT_MAX.toLocaleString("en-US")} characters per field).`,
+    );
+  }
+  return persistAndMaybeRecalc(input.candidateId, { ovr }, { recalc: false });
 }
 
 /**
@@ -373,6 +415,7 @@ export async function setDisqualified(input: {
   reason?: string;
 }): Promise<{ ok: boolean; workable: WorkableSync }> {
   await requireAuth();
+  if (input.reason !== undefined && !fitsText(input.reason, REASON_MAX)) return { ok: false, workable: "skipped" };
   if (!hasSupabase()) return { ok: false, workable: "skipped" };
   const reason = input.reason?.trim() || "Cut via triage";
   await upsertOverlay(
@@ -487,12 +530,19 @@ export async function logActivity(input: {
   body: string;
 }): Promise<{ ok: boolean; entry: ActivityEntry | null; message?: string }> {
   await requireAuth();
+  if (!VALID_ACTIVITY_TYPES.includes(input.type)) return { ok: false, entry: null, message: "Invalid entry type" };
+  if (typeof input.body !== "string") return { ok: false, entry: null, message: "Invalid entry" };
   const body = input.body.trim();
   if (!body) return { ok: false, entry: null, message: "Empty entry" };
+  const bodyMax = input.type === "interview" ? TRANSCRIPT_MAX : TEXT_MAX;
+  if (body.length > bodyMax) return { ok: false, entry: null, message: tooLongMessage("Entry", bodyMax) };
+  if (input.author !== undefined && input.author !== null && !fitsText(input.author, LABEL_MAX)) {
+    return { ok: false, entry: null, message: tooLongMessage("Author", LABEL_MAX) };
+  }
   if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
-  const author = input.author?.trim() || ident.label || "You";
+  const author = (input.author?.trim() || ident.label || "You").slice(0, LABEL_MAX);
   const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("activity")
@@ -604,8 +654,10 @@ export async function sendCandidateChat(input: {
   message: string;
 }): Promise<ChatResult> {
   await requireAuth();
+  if (typeof input.message !== "string") return { ok: false, messages: [], message: "Invalid message" };
   const text = input.message.trim();
   if (!text) return { ok: false, messages: [], message: "Empty message" };
+  if (text.length > TEXT_MAX) return { ok: false, messages: [], message: tooLongMessage("Message", TEXT_MAX) };
   if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
@@ -723,6 +775,47 @@ export async function sendCandidateChat(input: {
   };
 }
 
+export interface CandidateWorkspaceDetail {
+  ovr?: TimelineRow[];
+  replies: Record<string, string>;
+  corrections: CorrectionEntry[];
+  transcript: string;
+  chat: ChatMessage[];
+  activity: ActivityEntry[];
+  fireflies: FirefliesRecording[];
+}
+
+/**
+ * The long-form texts for one candidate (activity log, transcripts, chat,
+ * timeline edits, interview recordings). The pool list never carries these;
+ * the dossier loads them when a reviewer opens the candidate.
+ */
+export async function loadCandidateWorkspace(input: { candidateId: string }): Promise<CandidateWorkspaceDetail> {
+  await requireAuth();
+  const empty: CandidateWorkspaceDetail = { replies: {}, corrections: [], transcript: "", chat: [], activity: [], fireflies: [] };
+  if (!hasSupabase()) return empty;
+  const supabase = getServiceSupabase();
+  const [wf, activity, evidenceRes] = await Promise.all([
+    getWorkingFile(input.candidateId),
+    fetchActivity(input.candidateId),
+    supabase
+      .from("evidence")
+      .select("*")
+      .eq("candidate_id", input.candidateId)
+      .in("source_type", [...INTERVIEW_EVIDENCE_TYPES]),
+  ]);
+  const slice = wf?.workspace ?? {};
+  return {
+    ovr: slice.ovr,
+    replies: slice.replies ?? {},
+    corrections: slice.corrections ?? [],
+    transcript: slice.transcript ?? "",
+    chat: slice.chat ?? [],
+    activity,
+    fireflies: firefliesFrom((evidenceRes.data ?? []) as EvidenceRow[]),
+  };
+}
+
 /** Clear a candidate's war-room conversation. */
 export async function clearCandidateChat(input: { candidateId: string }): Promise<{ ok: boolean }> {
   await requireAuth();
@@ -746,6 +839,8 @@ export async function saveJobRubric(input: {
   specMd?: string;
 }): Promise<{ ok: boolean }> {
   await requireAuth();
+  if (input.rubricMd !== undefined && !fitsText(input.rubricMd, RUBRIC_MAX)) return { ok: false };
+  if (input.specMd !== undefined && !fitsText(input.specMd, RUBRIC_MAX)) return { ok: false };
   if (!hasSupabase()) return { ok: false };
   await upsertJobRubric(
     input.jobShortcode,
