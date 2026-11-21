@@ -3,7 +3,7 @@ import type { ParsedResumeReview } from "./types";
 
 function formatSpan(start: string | null, end: string | null, current?: boolean): string {
   if (!start) return "unknown";
-  const endLabel = current || !end ? "present" : end.slice(0, 7);
+  const endLabel = current ? "present" : end ? end.slice(0, 7) : "no end date";
   return `${start.slice(0, 7)} – ${endLabel}`;
 }
 

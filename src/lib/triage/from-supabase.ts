@@ -37,6 +37,7 @@ import {
   analyzeTenureStability,
   applyTenureDecisionGate,
   coalesceTenureRoles,
+  endSaysCurrent,
   type TenureStability,
 } from "./tenure-stability";
 import { decisionFromSentiment, type FitRead } from "./fit-read";
@@ -736,9 +737,9 @@ function yearLabel(date: string | null | undefined): string | null {
 
 function resumePeriod(entry: ParsedExperienceEntry): string {
   const start = yearLabel(entry.start);
-  const end = entry.current ? "Present" : yearLabel(entry.end);
+  const end = entry.current || endSaysCurrent(entry.end) ? "Present" : yearLabel(entry.end);
   if (start && end) return `${start} – ${end}`;
-  if (start) return `${start} – Present`;
+  if (start) return `${start} – no end date`;
   if (end) return end;
   return "—";
 }
