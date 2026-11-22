@@ -1,0 +1,86 @@
+diff --git a/node_modules/next/dist/esm/server/lib/router-utils/block-cross-site-dev.js b/node_modules/next/dist/esm/server/lib/router-utils/block-cross-site-dev.js
+index 4412381..d299a6f 100644
+--- a/node_modules/next/dist/esm/server/lib/router-utils/block-cross-site-dev.js
++++ b/node_modules/next/dist/esm/server/lib/router-utils/block-cross-site-dev.js
+@@ -39,8 +39,12 @@ function blockRequest(req, res, source) {
+     warnOnce(formatBlockedCrossSiteMessage(source, getBlockedResourcePath(req)));
+     if ('statusCode' in res) {
+         res.statusCode = 403;
++        res.end('Unauthorized');
++    } else {
++        // `res` is the raw socket of an upgrade request, so write a complete
++        // HTTP response; a bare body is not a valid reply to the handshake.
++        res.end('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 12\r\nConnection: close\r\n\r\nUnauthorized');
+     }
+-    res.end('Unauthorized');
+     return true;
+ }
+ function parseHostnameFromHeader(header) {
+@@ -59,9 +63,23 @@ function isInternalEndpoint(req) {
+     const isInternalAsset = pathname.includes('/_next');
+     // Static media requests are excluded, as they might be loaded via CSS and would fail
+     // CORS checks.
+-    const isIgnoredRequest = pathname.includes('/_next/image') || pathname.includes('/_next/static/media') || pathname.includes('/_next/static/immutable/media');
++    const isIgnoredRequest = isStaticMediaPath(pathname);
+     return !isIgnoredRequest && (isInternalAsset || isMiddlewareRequest);
+ }
++// Only the media routes themselves are exempt. A substring match would let
++// `/_next/hmr/_next/image` or `/__nextjs_disable_dev_indicator;/_next/image`
++// skip the origin check, and dot segments would let a path that looks like
++// media here be routed to another handler after URL normalization.
++function isStaticMediaPath(pathname) {
++    let normalized;
++    try {
++        normalized = new URL(`http://n${pathname}`).pathname;
++    } catch  {
++        return false;
++    }
++    if (normalized !== pathname) return false;
++    return pathname === '/_next/image' || pathname.startsWith('/_next/static/media/') || pathname.startsWith('/_next/static/immutable/media/');
++}
+ export const blockCrossSiteDEV = (req, res, allowedDevOrigins, hostname)=>{
+     const allowedOrigins = [
+         '**.localhost',
+diff --git a/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js b/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js
+index 86eccc5..e70b64b 100644
+--- a/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js
++++ b/node_modules/next/dist/server/lib/router-utils/block-cross-site-dev.js
+@@ -49,8 +49,12 @@ function blockRequest(req, res, source) {
+     (0, _log.warnOnce)(formatBlockedCrossSiteMessage(source, getBlockedResourcePath(req)));
+     if ('statusCode' in res) {
+         res.statusCode = 403;
++        res.end('Unauthorized');
++    } else {
++        // `res` is the raw socket of an upgrade request, so write a complete
++        // HTTP response; a bare body is not a valid reply to the handshake.
++        res.end('HTTP/1.1 403 Forbidden\r\nContent-Type: text/plain\r\nContent-Length: 12\r\nConnection: close\r\n\r\nUnauthorized');
+     }
+-    res.end('Unauthorized');
+     return true;
+ }
+ function parseHostnameFromHeader(header) {
+@@ -69,9 +73,23 @@ function isInternalEndpoint(req) {
+     const isInternalAsset = pathname.includes('/_next');
+     // Static media requests are excluded, as they might be loaded via CSS and would fail
+     // CORS checks.
+-    const isIgnoredRequest = pathname.includes('/_next/image') || pathname.includes('/_next/static/media') || pathname.includes('/_next/static/immutable/media');
++    const isIgnoredRequest = isStaticMediaPath(pathname);
+     return !isIgnoredRequest && (isInternalAsset || isMiddlewareRequest);
+ }
++// Only the media routes themselves are exempt. A substring match would let
++// `/_next/hmr/_next/image` or `/__nextjs_disable_dev_indicator;/_next/image`
++// skip the origin check, and dot segments would let a path that looks like
++// media here be routed to another handler after URL normalization.
++function isStaticMediaPath(pathname) {
++    let normalized;
++    try {
++        normalized = new URL(`http://n${pathname}`).pathname;
++    } catch  {
++        return false;
++    }
++    if (normalized !== pathname) return false;
++    return pathname === '/_next/image' || pathname.startsWith('/_next/static/media/') || pathname.startsWith('/_next/static/immutable/media/');
++}
+ const blockCrossSiteDEV = (req, res, allowedDevOrigins, hostname)=>{
+     const allowedOrigins = [
+         '**.localhost',
