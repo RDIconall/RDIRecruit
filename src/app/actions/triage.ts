@@ -30,6 +30,7 @@ import type {
   CorrectionEntry,
   Decision,
   DecisionRead,
+  FirefliesRecording,
   ProcessStatus,
   ReviewerKind,
   TimelineRow,
@@ -742,6 +743,37 @@ export async function sendCandidateChat(input: {
     ok: Boolean(reply),
     messages: next,
     message: reply ? undefined : "Claude is unavailable right now (no API key or transient error) — your message was saved.",
+  };
+}
+
+export interface CandidateRecord {
+  fireflies: FirefliesRecording[];
+  activity: ActivityEntry[];
+  transcript: string;
+  chat: ChatMessage[];
+  corrections: CorrectionEntry[];
+  replies: Record<string, string>;
+  ovr: TimelineRow[] | null;
+}
+
+/**
+ * The free-text record of one applicant (interview transcripts, activity log,
+ * war-room chat, edits). The pool payload leaves these out so the hiring home
+ * page stays small; the dossier loads them for the applicant it opens.
+ */
+export async function getCandidateRecord(input: { candidateId: string }): Promise<CandidateRecord | null> {
+  await requireAuth();
+  if (!hasSupabase()) return null;
+  const [one, activity] = await Promise.all([loadOneCandidate(input.candidateId), fetchActivity(input.candidateId)]);
+  if (!one) return null;
+  return {
+    fireflies: one.candidate.fireflies ?? [],
+    activity,
+    transcript: one.slice.transcript ?? "",
+    chat: one.slice.chat ?? [],
+    corrections: one.slice.corrections ?? [],
+    replies: one.slice.replies ?? {},
+    ovr: one.slice.ovr ?? null,
   };
 }
 

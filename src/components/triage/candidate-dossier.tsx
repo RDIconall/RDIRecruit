@@ -221,6 +221,11 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     window.scrollTo(0, 0);
   }, [id]);
 
+  const { loadRecord } = wsApi;
+  useEffect(() => {
+    loadRecord(id);
+  }, [id, loadRecord]);
+
   useEffect(() => {
     let cancelled = false;
     setResumeDoc(null);

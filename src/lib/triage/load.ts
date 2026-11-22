@@ -19,7 +19,7 @@ import type {
   RoleReadPayload,
   VerificationPayload,
 } from "../types";
-import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
+import type { Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
 import { parseFitRead } from "./fit-read";
 import { mapCandidate, type ApplicationLite, type CandidateEvaluations, type ParsedExperienceEntry } from "./from-supabase";
 import { getWorkingFiles } from "./store";
@@ -51,13 +51,6 @@ export interface TriagePool {
 
 function emptyWorkspace(): Workspace {
   return { dq: {}, ovr: {}, replies: {}, corrections: {}, transcripts: {}, deep: {}, chat: {}, activity: {}, regen: {}, process: {} };
-}
-
-type ActivityRow = { id: string; candidate_id: string; type: string | null; author: string | null; body: string; created_at: string };
-
-function toActivityEntry(r: ActivityRow): ActivityEntry {
-  const type = r.type === "interview" || r.type === "comment" ? r.type : "note";
-  return { id: r.id, type, author: r.author || "—", body: r.body, at: r.created_at };
 }
 
 async function loadJobStages(jobShortcode: string): Promise<StageColumn[]> {
@@ -173,6 +166,49 @@ async function fetchByCandidatePaged<T>(
     }
   }
   return out;
+}
+
+/**
+ * Ids of candidates holding at least one non-empty interview transcript. The pool
+ * needs only this flag (it feeds the interview bar); the bodies stay on the
+ * single-applicant read so the hiring page does not carry every transcript.
+ */
+async function fetchInterviewTranscriptHolders(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  ids: string[],
+): Promise<Set<string>> {
+  const PAGE = 1000;
+  const holders = new Set<string>();
+  for (const batch of chunkIds(ids)) {
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from("evidence")
+        .select("id, candidate_id")
+        .in("candidate_id", batch)
+        .in("source_type", [...INTERVIEW_EVIDENCE_TYPES])
+        .neq("transcript", "")
+        .order("id", { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) {
+        console.error("Failed to load interview evidence batch", error);
+        break;
+      }
+      const rows = (data ?? []) as Array<{ candidate_id: string }>;
+      for (const row of rows) holders.add(row.candidate_id);
+      if (rows.length < PAGE) break;
+    }
+  }
+  return holders;
+}
+
+/**
+ * Pool views read only these workspace fields. Transcripts, the activity log,
+ * war-room chat, and edits are loaded per applicant by the dossier.
+ */
+function hydratePoolWorkspace(workspace: Workspace, id: string, slice: WorkspaceSlice, dq: boolean) {
+  if (dq) workspace.dq[id] = true;
+  if (slice.deep) workspace.deep[id] = true;
+  if (slice.processStatus) workspace.process[id] = slice.processStatus;
 }
 
 function groupEvaluations(rows: EvalRow[]): Map<string, CandidateEvaluations> {
@@ -481,7 +517,7 @@ async function buildCrossRolePool(
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRows, evalRows, narrRows, evidenceRows, activityRows, workingFiles] = await Promise.all([
+  const [appsRows, evalRows, narrRows, transcriptHolders, workingFiles] = await Promise.all([
     fetchByCandidatePaged<{ candidate_id: string } & ApplicationLite>(
       supabase,
       "applications",
@@ -497,23 +533,9 @@ async function buildCrossRolePool(
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
-    fetchByCandidatePaged<ActivityRow>(
-      supabase,
-      "activity",
-      "id, candidate_id, type, author, body, created_at",
-      ids,
-      "created_at",
-    ),
+    fetchInterviewTranscriptHolders(supabase, ids),
     getWorkingFiles(ids),
   ]);
-
-  const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of [...activityRows].reverse()) {
-    const list = activityByCandidate.get(r.candidate_id) ?? [];
-    list.push(toActivityEntry(r));
-    activityByCandidate.set(r.candidate_id, list);
-  }
 
   const appsByCandidate = new Map<string, ApplicationLite>();
   for (const a of appsRows) {
@@ -533,13 +555,6 @@ async function buildCrossRolePool(
   for (const n of narrRows) {
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
-  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
-    const list = evidenceByCandidate.get(e.candidate_id) ?? [];
-    list.push(e);
-    evidenceByCandidate.set(e.candidate_id, list);
-  }
-
   const workspace = emptyWorkspace();
   const candidates: Candidate[] = board.map((item, index) => {
     const id = item.candidate.workable_id;
@@ -555,7 +570,8 @@ async function buildCrossRolePool(
       application: appsByCandidate.get(id) ?? null,
       narrative: narrByCandidate.get(id) ?? [],
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
-      interviewEvidence: evidenceByCandidate.get(id) ?? [],
+      interviewEvidence: [],
+      interviewTranscriptOnFile: transcriptHolders.has(id),
       read,
       corrections: wf?.workspace?.corrections ?? [],
       decisionOverride: wf?.workspace?.decisionOverride ?? null,
@@ -567,17 +583,7 @@ async function buildCrossRolePool(
     });
 
     const dq = item.overlay?.status === "disqualified" || Boolean(item.candidate.disqualified);
-    if (dq) workspace.dq[id] = true;
-    const slice = wf?.workspace ?? {};
-    if (slice.ovr) workspace.ovr[id] = slice.ovr;
-    if (slice.replies) workspace.replies[id] = slice.replies;
-    if (slice.corrections) workspace.corrections[id] = slice.corrections;
-    if (slice.transcript) workspace.transcripts[id] = slice.transcript;
-    if (slice.deep) workspace.deep[id] = true;
-    if (slice.processStatus) workspace.process[id] = slice.processStatus;
-    if (slice.chat?.length) workspace.chat[id] = slice.chat;
-    const acts = activityByCandidate.get(id);
-    if (acts?.length) workspace.activity[id] = acts;
+    hydratePoolWorkspace(workspace, id, wf?.workspace ?? {}, dq);
 
     return candidate;
   });
@@ -661,7 +667,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
   const ids = board.map((b) => b.candidate.workable_id);
   const supabase = getServiceSupabase();
 
-  const [appsRows, evalRows, narrRows, evidenceRows, activityRows, workingFiles] = await Promise.all([
+  const [appsRows, evalRows, narrRows, transcriptHolders, workingFiles] = await Promise.all([
     fetchByCandidatePaged<{ candidate_id: string } & ApplicationLite>(
       supabase,
       "applications",
@@ -677,23 +683,9 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       ids,
       "generated_at",
     ),
-    fetchByCandidatePaged<EvidenceRow>(supabase, "evidence", "*", ids, "created_at"),
-    fetchByCandidatePaged<ActivityRow>(
-      supabase,
-      "activity",
-      "id, candidate_id, type, author, body, created_at",
-      ids,
-      "created_at",
-    ),
+    fetchInterviewTranscriptHolders(supabase, ids),
     getWorkingFiles(ids),
   ]);
-
-  const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of [...activityRows].reverse()) {
-    const list = activityByCandidate.get(r.candidate_id) ?? [];
-    list.push(toActivityEntry(r));
-    activityByCandidate.set(r.candidate_id, list);
-  }
 
   const appsByCandidate = new Map<string, ApplicationLite>();
   for (const a of appsRows) {
@@ -714,13 +706,6 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     if (!narrByCandidate.has(n.candidate_id)) narrByCandidate.set(n.candidate_id, (n.segments ?? []) as NarrativeSegment[]);
   }
 
-  const evidenceByCandidate = new Map<string, EvidenceRow[]>();
-  for (const e of evidenceRows.filter((r) => INTERVIEW_EVIDENCE_TYPES.has(r.source_type as string))) {
-    const list = evidenceByCandidate.get(e.candidate_id) ?? [];
-    list.push(e);
-    evidenceByCandidate.set(e.candidate_id, list);
-  }
-
   const workspace = emptyWorkspace();
   const candidates: Candidate[] = board.map((item, index) => {
     const id = item.candidate.workable_id;
@@ -735,7 +720,8 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
       application: appsByCandidate.get(id) ?? null,
       narrative: narrByCandidate.get(id) ?? [],
       evals: evalsByCandidate.get(id) ?? { invest: null, dig: null, verification: null, roleReads: [], answerGrades: [], fitRead: null },
-      interviewEvidence: evidenceByCandidate.get(id) ?? [],
+      interviewEvidence: [],
+      interviewTranscriptOnFile: transcriptHolders.has(id),
       read,
       corrections: wf?.workspace?.corrections ?? [],
       decisionOverride: wf?.workspace?.decisionOverride ?? null,
@@ -748,17 +734,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
 
     // Hydrate the client workspace from persisted state.
     const dq = item.overlay?.status === "disqualified" || Boolean(item.candidate.disqualified);
-    if (dq) workspace.dq[id] = true;
-    const slice = wf?.workspace ?? {};
-    if (slice.ovr) workspace.ovr[id] = slice.ovr;
-    if (slice.replies) workspace.replies[id] = slice.replies;
-    if (slice.corrections) workspace.corrections[id] = slice.corrections;
-    if (slice.transcript) workspace.transcripts[id] = slice.transcript;
-    if (slice.deep) workspace.deep[id] = true;
-    if (slice.processStatus) workspace.process[id] = slice.processStatus;
-    if (slice.chat?.length) workspace.chat[id] = slice.chat;
-    const acts = activityByCandidate.get(id);
-    if (acts?.length) workspace.activity[id] = acts;
+    hydratePoolWorkspace(workspace, id, wf?.workspace ?? {}, dq);
 
     return candidate;
   });

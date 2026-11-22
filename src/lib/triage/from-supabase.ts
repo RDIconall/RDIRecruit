@@ -102,6 +102,11 @@ export interface MapInput {
   narrative: NarrativeSegment[];
   evals: CandidateEvaluations;
   interviewEvidence: EvidenceRow[];
+  /**
+   * Set by loaders that leave transcript bodies out of interviewEvidence: whether
+   * the applicant has at least one non-empty interview transcript on file.
+   */
+  interviewTranscriptOnFile?: boolean;
   read: DecisionRead | null;
   /** Persisted human corrections (with optional reviewer identity) — drives rev/revNote (#7). */
   corrections?: CorrectionEntry[];
@@ -276,7 +281,9 @@ function interviewBarFor(input: MapInput): InterviewBar {
     total: input.score?.total ?? null,
     answersLevel: summarizeAnswerGrades(input.evals.answerGrades).level,
     refusedToAnswer: refusedToAnswerFrom(input.application, input.evals.answerGrades),
-    hasLiveEvidence: input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
+    hasLiveEvidence:
+      input.interviewTranscriptOnFile ??
+      input.interviewEvidence.some((e) => (e.transcript ?? "").trim().length > 0),
     unsupportedExpertise: hasMaterialSyntheticExpertise(input.evals.answerGrades),
   });
 }
@@ -838,7 +845,7 @@ function reviewerFrom(
     const who = c.reviewerLabel || c.reviewerKind;
     return {
       rev: reviewerSignalFor(c.reviewerKind, decision),
-      revNote: `${who}: ${c.text}`,
+      revNote: `${who}: ${c.text}`.slice(0, 200),
     };
   }
   return null;
