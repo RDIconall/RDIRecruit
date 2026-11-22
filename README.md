@@ -81,7 +81,8 @@ Copy `.env.example` to `.env.local` and fill in (auto-provisioned on Vercel):
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` | Clerk auth (auto-set via Marketplace) |
 | `WORKABLE_SUBDOMAIN` | Your Workable subdomain (e.g. `rditrials`) |
 | `WORKABLE_TOKEN` | Workable API token |
-| `WORKABLE_WEBHOOK_SECRET` | HMAC secret for webhook verification |
+| `WORKABLE_WEBHOOK_SECRET` | HMAC secret for webhook verification (required — the webhook rejects every request while it is unset) |
+| `VIDEOASK_WEBHOOK_SECRET` | VideoAsk webhook secret (required — the webhook rejects every request while it is unset) |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_KEY` | Database + storage |
 | `ANTHROPIC_API_KEY` | LLM extraction / drafting |
 | `CRON_SECRET` | Protects the cron routes |

@@ -4,6 +4,7 @@ import { env } from "@/lib/env";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { readBodyWithLimit } from "@/lib/http/read-body";
 
 export const runtime = "nodejs";
 
@@ -15,15 +16,10 @@ function safeEqual(a: string, b: string): boolean {
 }
 
 /**
- * Accepts the webhook when VIDEOASK_WEBHOOK_SECRET is unset (back-compat), or when
- * the request proves the secret: either a raw shared-secret header, or an HMAC-SHA256
- * signature of the body. Keeps the previously-working webhook flowing while letting
- * production lock it down by setting the env var + configuring the secret in VideoAsk.
+ * Accepts the webhook only when the request proves VIDEOASK_WEBHOOK_SECRET: either a
+ * raw shared-secret header, or an HMAC-SHA256 signature of the body.
  */
-function isAuthorized(rawBody: string, request: NextRequest): boolean {
-  const secret = env.VIDEOASK_WEBHOOK_SECRET;
-  if (!secret) return true;
-
+function isAuthorized(rawBody: string, request: NextRequest, secret: string): boolean {
   const shared =
     request.headers.get("x-videoask-secret") ?? request.headers.get("videoask-secret");
   if (shared && safeEqual(shared, secret)) return true;
@@ -39,9 +35,19 @@ function isAuthorized(rawBody: string, request: NextRequest): boolean {
 }
 
 export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
+  const secret = env.VIDEOASK_WEBHOOK_SECRET;
+  if (!secret?.trim()) {
+    console.error("VideoAsk webhook rejected: VIDEOASK_WEBHOOK_SECRET is not set");
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
 
-  if (!isAuthorized(rawBody, request)) {
+  const body = await readBodyWithLimit(request);
+  if (!body.ok) {
+    return NextResponse.json({ error: body.error }, { status: body.status });
+  }
+  const rawBody = body.text;
+
+  if (!isAuthorized(rawBody, request, secret)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
@@ -49,6 +55,9 @@ export async function POST(request: NextRequest) {
   try {
     payload = JSON.parse(rawBody) as Record<string, unknown>;
   } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  if (!payload || typeof payload !== "object") {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
