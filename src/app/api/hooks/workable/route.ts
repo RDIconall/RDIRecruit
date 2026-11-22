@@ -4,6 +4,7 @@ import { markEventFailure, markEventProcessed, recordEvent } from "@/lib/sync/wo
 import { syncCandidateFromWebhook } from "@/lib/sync/incremental-sync";
 import { eventFailureStatus } from "@/lib/sync/event-queue";
 import { verifyWorkableSignature } from "@/lib/workable/client";
+import { readBodyWithLimit } from "@/lib/http/read-body";
 
 // Workable SPI v3 only exposes two subscribable candidate events:
 // `candidate_created` and `candidate_moved`. Disqualification, requalification,
@@ -15,31 +16,44 @@ import { verifyWorkableSignature } from "@/lib/workable/client";
 // https://workable.readme.io/reference/webhook-subscriptions
 const HANDLED_EVENTS = new Set(["candidate_created", "candidate_moved"]);
 
-export async function POST(request: NextRequest) {
-  const rawBody = await request.text();
-  const signature = request.headers.get("X-Workable-Signature");
+type WorkableWebhookPayload = {
+  id?: string;
+  event_type?: string;
+  type?: string;
+  data?: {
+    id?: string;
+    candidate?: { id?: string };
+    job?: { shortcode?: string };
+  };
+};
 
-  if (env.WORKABLE_WEBHOOK_SECRET) {
-    const valid = verifyWorkableSignature(
-      rawBody,
-      signature,
-      env.WORKABLE_WEBHOOK_SECRET,
-    );
-    if (!valid) {
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-    }
+export async function POST(request: NextRequest) {
+  const secret = env.WORKABLE_WEBHOOK_SECRET;
+  if (!secret?.trim()) {
+    console.error("Workable webhook rejected: WORKABLE_WEBHOOK_SECRET is not set");
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
-  const payload = JSON.parse(rawBody) as {
-    id?: string;
-    event_type?: string;
-    type?: string;
-    data?: {
-      id?: string;
-      candidate?: { id?: string };
-      job?: { shortcode?: string };
-    };
-  };
+  const body = await readBodyWithLimit(request);
+  if (!body.ok) {
+    return NextResponse.json({ error: body.error }, { status: body.status });
+  }
+  const rawBody = body.text;
+
+  const signature = request.headers.get("X-Workable-Signature");
+  if (!verifyWorkableSignature(rawBody, signature, secret)) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
+  }
+
+  let payload: WorkableWebhookPayload;
+  try {
+    payload = JSON.parse(rawBody) as WorkableWebhookPayload;
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  if (!payload || typeof payload !== "object") {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
 
   const eventType = payload.event_type ?? payload.type ?? "unknown";
   let eventId: string | null;

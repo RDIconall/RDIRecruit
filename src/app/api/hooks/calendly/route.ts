@@ -1,9 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import { readBodyWithLimit } from "@/lib/http/read-body";
 
 export async function POST(request: NextRequest) {
-  const payload = await request.json();
+  const body = await readBodyWithLimit(request);
+  if (!body.ok) {
+    return NextResponse.json({ error: body.error }, { status: body.status });
+  }
+  let payload;
+  try {
+    payload = JSON.parse(body.text);
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  if (!payload || typeof payload !== "object") {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
   await recordEvent("calendly", "booking", payload);
 
   const email = payload.payload?.email ?? payload.invitee?.email;

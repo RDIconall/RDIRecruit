@@ -4,6 +4,7 @@ const envSchema = z.object({
   WORKABLE_TOKEN: z.string().optional(),
   WORKABLE_API_KEY: z.string().optional(),
   WORKABLE_SUBDOMAIN: z.string().default("rditrials"),
+  // Required by /api/hooks/workable, which rejects every request while unset.
   WORKABLE_WEBHOOK_SECRET: z.string().optional(),
   // Member id credited with candidate write actions (move/disqualify/revert/
   // comment). Required by the SPI v3 action endpoints; when unset those writes
@@ -33,6 +34,7 @@ const envSchema = z.object({
   // Comma-separated recipient list for the daily summary (you + Lara).
   SUMMARY_EMAIL_TO: z.string().optional(),
   VIDEOASK_API_KEY: z.string().optional(),
+  // Required by /api/hooks/videoask, which rejects every request while unset.
   VIDEOASK_WEBHOOK_SECRET: z.string().optional(),
   CALENDLY_TOKEN: z.string().optional(),
   FIREFLIES_API_KEY: z.string().optional(),
