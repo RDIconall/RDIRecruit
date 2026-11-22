@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@clerk/nextjs/server";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
+import { MAX_CUT_REASON_CHARS, normalizeCutReason } from "@/lib/data/cut-reason";
 import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
 import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
@@ -371,10 +372,13 @@ export async function setDisqualified(input: {
   candidateId: string;
   disqualified: boolean;
   reason?: string;
-}): Promise<{ ok: boolean; workable: WorkableSync }> {
+}): Promise<{ ok: boolean; workable: WorkableSync; error?: string }> {
   await requireAuth();
+  const reason = input.disqualified ? normalizeCutReason(input.reason, "Cut via triage") : "Cut via triage";
+  if (reason === null) {
+    return { ok: false, workable: "skipped", error: `Reason must be at most ${MAX_CUT_REASON_CHARS} characters` };
+  }
   if (!hasSupabase()) return { ok: false, workable: "skipped" };
-  const reason = input.reason?.trim() || "Cut via triage";
   await upsertOverlay(
     input.candidateId,
     input.disqualified
