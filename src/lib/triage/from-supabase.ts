@@ -888,6 +888,26 @@ function answersReadFrom(grades: AnswerGradePayload[]): VerdictRead {
 }
 
 /**
+ * The grader is asked for exactly one of these labels, but stores whatever the
+ * model returns, and the model summarizes applicant-supplied text. Only an exact
+ * label may set the level; any other sentence ("not a strong fit", "no direct
+ * experience") is mixed, so it can never outrank a real Partial fit.
+ */
+const RUBRIC_VERDICT_LEVELS: Readonly<Record<string, VerdictRead["level"]>> = {
+  "strong fit": "strong",
+  "partial fit": "mixed",
+  "weak fit": "weak",
+  misaligned: "mixed",
+};
+
+function rubricVerdictLevel(verdict: string): VerdictRead["level"] {
+  const key = verdict.trim().replace(/\s+/g, " ").toLowerCase();
+  return Object.prototype.hasOwnProperty.call(RUBRIC_VERDICT_LEVELS, key)
+    ? RUBRIC_VERDICT_LEVELS[key]
+    : "mixed";
+}
+
+/**
  * The cached "Vs. spec" read for the pool board — fit against the job rubric/spec.
  * Prefers a Claude-persisted rubricFit verdict; otherwise falls back to the
  * evaluator's own rubric read so the column is never blank for a scored candidate.
@@ -901,15 +921,7 @@ function answersReadFrom(grades: AnswerGradePayload[]): VerdictRead {
  */
 function specReadFrom(input: MapInput, decision: Decision): VerdictRead {
   const verdict = input.read?.rubricFit?.verdict?.trim();
-  if (verdict) {
-    const v = verdict.toLowerCase();
-    const level = /strong|excellent|direct/.test(v)
-      ? "strong"
-      : /weak|poor|thin|miss/.test(v)
-        ? "weak"
-        : "mixed";
-    return { label: verdict, level };
-  }
+  if (verdict) return { label: verdict, level: rubricVerdictLevel(verdict) };
   if (decision === "blocked") return { label: "—", level: "none" };
   if (decision === "reject") return { label: "Below bar", level: "weak" };
 
