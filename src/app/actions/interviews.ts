@@ -6,6 +6,15 @@ import { auth } from "@clerk/nextjs/server";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import {
+  CAPTURE_TOO_LONG_MESSAGE,
+  EVIDENCE_QUOTA_WINDOW_MS,
+  accountQuotaReached,
+  captureTooLong,
+  isCaptureQuotaError,
+} from "@/lib/capture-limits";
+
+const QUOTA_MESSAGE = "You've added the most interview captures allowed for today. Try again tomorrow.";
 
 async function requireAuth() {
   const { userId } = await auth();
@@ -30,17 +39,21 @@ export async function addInterviewEvidence(input: {
   date?: string | null;
   transcript: string;
 }) {
-  await requireAuth();
+  const userId = await requireAuth();
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const transcript = input.transcript.trim();
   if (!transcript) return { ok: false as const, error: "Paste the interview transcript first." };
+  if (captureTooLong(transcript)) return { ok: false as const, error: CAPTURE_TOO_LONG_MESSAGE };
 
   const label = input.label.trim() || (input.kind === "phone_screen" ? "Phone screen" : "Interview");
   const author = input.author?.trim() || null;
   const capturedAt = parseDate(input.date);
 
   const supabase = getServiceSupabase();
+  if (await accountQuotaReached(supabase, "evidence", userId, EVIDENCE_QUOTA_WINDOW_MS)) {
+    return { ok: false as const, error: QUOTA_MESSAGE };
+  }
   const { error } = await supabase.from("evidence").insert({
     candidate_id: input.candidateId,
     source_type: input.kind,
@@ -50,8 +63,9 @@ export async function addInterviewEvidence(input: {
     raw_ref: `manual:${input.kind}:${randomUUID()}`,
     transcript,
     extracted: { manual: true, label, kind: input.kind, interviewer: author },
+    created_by: userId,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: isCaptureQuotaError(error) ? QUOTA_MESSAGE : error.message };
 
   const rescore = await rescoreCandidateOnNewEvidence(
     input.candidateId,
@@ -77,16 +91,20 @@ export async function addVideoAskAnswers(input: {
   date?: string | null;
   answers: string;
 }) {
-  await requireAuth();
+  const userId = await requireAuth();
   if (!hasSupabase()) return { ok: false as const, error: "Supabase not configured" };
 
   const answers = input.answers.trim();
   if (!answers) return { ok: false as const, error: "Enter the candidate's VideoAsk answers first." };
+  if (captureTooLong(answers)) return { ok: false as const, error: CAPTURE_TOO_LONG_MESSAGE };
 
   const label = input.label?.trim() || "VideoAsk answers";
   const capturedAt = parseDate(input.date);
 
   const supabase = getServiceSupabase();
+  if (await accountQuotaReached(supabase, "evidence", userId, EVIDENCE_QUOTA_WINDOW_MS)) {
+    return { ok: false as const, error: QUOTA_MESSAGE };
+  }
   const { error } = await supabase.from("evidence").insert({
     candidate_id: input.candidateId,
     source_type: "async_video",
@@ -96,8 +114,9 @@ export async function addVideoAskAnswers(input: {
     raw_ref: `manual:async_video:${randomUUID()}`,
     transcript: answers,
     extracted: { manual: true, label },
+    created_by: userId,
   });
-  if (error) return { ok: false as const, error: error.message };
+  if (error) return { ok: false as const, error: isCaptureQuotaError(error) ? QUOTA_MESSAGE : error.message };
 
   const rescore = await rescoreCandidateOnNewEvidence(
     input.candidateId,

@@ -2,6 +2,7 @@ import "server-only";
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { chunkIds } from "../data/chunk";
+import { MAX_WORKSPACE_CHARS } from "../capture-limits";
 import type { DecisionRead, WorkspaceSlice } from "./types";
 
 export interface WorkingFileRow {
@@ -71,14 +72,22 @@ export async function upsertWorkingFile(
   const supabase = getServiceSupabase();
 
   const existing = await getWorkingFile(candidateId);
+  const workspace =
+    patch.workspace !== undefined
+      ? { ...(existing?.workspace ?? {}), ...patch.workspace }
+      : existing?.workspace ?? {};
+  if (patch.workspace !== undefined) {
+    const size = JSON.stringify(workspace).length;
+    // Shrinking writes (clearing chat, trimming edits) stay allowed on a file already over the cap.
+    if (size > MAX_WORKSPACE_CHARS && size > JSON.stringify(existing?.workspace ?? {}).length) {
+      throw new Error("This applicant's working file is full. Clear the war-room chat, then retry.");
+    }
+  }
   const next: Record<string, unknown> = {
     candidate_id: candidateId,
     content: patch.content !== undefined ? patch.content : existing?.content ?? null,
     read: patch.read !== undefined ? patch.read : existing?.read ?? null,
-    workspace:
-      patch.workspace !== undefined
-        ? { ...(existing?.workspace ?? {}), ...patch.workspace }
-        : existing?.workspace ?? {},
+    workspace,
     updated_at: new Date().toISOString(),
     updated_by: updatedBy ?? existing?.updated_by ?? null,
   };

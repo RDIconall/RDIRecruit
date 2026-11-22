@@ -15,6 +15,13 @@ import { detectPipelinePhase, phaseContextBlock } from "@/lib/triage/pipeline-ph
 import { DM } from "@/lib/triage/theme";
 import { reviewerKindFrom, reviewerKindLabel, reviewerSignalFor } from "@/lib/triage/reviewer";
 import { getServiceSupabase } from "@/lib/supabase/server";
+import {
+  ACTIVITY_QUOTA_WINDOW_MS,
+  CAPTURE_TOO_LONG_MESSAGE,
+  accountQuotaReached,
+  captureTooLong,
+  isCaptureQuotaError,
+} from "@/lib/capture-limits";
 import type {
   ActivityEntry,
   ActivityType,
@@ -222,6 +229,7 @@ export async function saveCorrection(input: {
   await requireAuth();
   const text = input.text.trim();
   if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
+  if (captureTooLong(text)) return { ok: false, recalculated: false, read: null, message: CAPTURE_TOO_LONG_MESSAGE };
 
   // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
   const ident = await reviewerIdentity();
@@ -244,6 +252,9 @@ export async function saveCorrection(input: {
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (captureTooLong(input.transcript)) {
+    return { ok: false, recalculated: false, read: null, message: CAPTURE_TOO_LONG_MESSAGE };
+  }
   const reviewer = await reviewerIdentity();
   return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
 }
@@ -479,6 +490,8 @@ function activityDigest(acts: ActivityEntry[]): { transcript: string; notes: Cor
   return { transcript, notes };
 }
 
+const ACTIVITY_QUOTA_MESSAGE = "You've added the most activity entries allowed this hour. Try again later.";
+
 /** Append a human entry to the candidate's activity log. Claude never writes here. */
 export async function logActivity(input: {
   candidateId: string;
@@ -486,22 +499,30 @@ export async function logActivity(input: {
   author?: string;
   body: string;
 }): Promise<{ ok: boolean; entry: ActivityEntry | null; message?: string }> {
-  await requireAuth();
+  const userId = await requireAuth();
   const body = input.body.trim();
   if (!body) return { ok: false, entry: null, message: "Empty entry" };
+  if (captureTooLong(body)) return { ok: false, entry: null, message: CAPTURE_TOO_LONG_MESSAGE };
   if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
 
+  const supabase = getServiceSupabase();
+  if (await accountQuotaReached(supabase, "activity", userId, ACTIVITY_QUOTA_WINDOW_MS)) {
+    return { ok: false, entry: null, message: ACTIVITY_QUOTA_MESSAGE };
+  }
   const ident = await reviewerIdentity();
   const author = input.author?.trim() || ident.label || "You";
-  const supabase = getServiceSupabase();
   const { data, error } = await supabase
     .from("activity")
-    .insert({ candidate_id: input.candidateId, type: input.type, author, body })
+    .insert({ candidate_id: input.candidateId, type: input.type, author, body, created_by: userId })
     .select("id, created_at")
     .single();
   if (error || !data) {
     console.error("logActivity failed", error);
-    return { ok: false, entry: null, message: "Save failed — please retry." };
+    return {
+      ok: false,
+      entry: null,
+      message: isCaptureQuotaError(error) ? ACTIVITY_QUOTA_MESSAGE : "Save failed — please retry.",
+    };
   }
   revalidatePath("/");
   return { ok: true, entry: { id: data.id as string, type: input.type, author, body, at: data.created_at as string } };
@@ -606,6 +627,7 @@ export async function sendCandidateChat(input: {
   await requireAuth();
   const text = input.message.trim();
   if (!text) return { ok: false, messages: [], message: "Empty message" };
+  if (captureTooLong(text)) return { ok: false, messages: [], message: CAPTURE_TOO_LONG_MESSAGE };
   if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();

@@ -4,6 +4,13 @@ import { env } from "@/lib/env";
 import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import {
+  CAPTURE_QUOTA_ERROR,
+  MAX_WEBHOOK_BODY_CHARS,
+  candidateQuotaReached,
+  captureTooLong,
+  isCaptureQuotaError,
+} from "@/lib/capture-limits";
 
 export const runtime = "nodejs";
 
@@ -40,6 +47,9 @@ function isAuthorized(rawBody: string, request: NextRequest): boolean {
 
 export async function POST(request: NextRequest) {
   const rawBody = await request.text();
+  if (rawBody.length > MAX_WEBHOOK_BODY_CHARS) {
+    return NextResponse.json({ error: "Payload too large" }, { status: 413 });
+  }
 
   if (!isAuthorized(rawBody, request)) {
     return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
@@ -52,8 +62,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  await recordEvent("videoask", "response", payload);
-
   const p = payload as {
     contact?: { email?: string };
     respondent?: { email?: string };
@@ -62,6 +70,12 @@ export async function POST(request: NextRequest) {
     transcript?: string;
     id?: string;
   };
+  const answers: unknown = p.transcript ?? p.form_response?.transcription;
+  if (answers != null && captureTooLong(typeof answers === "string" ? answers : JSON.stringify(answers))) {
+    return NextResponse.json({ ok: false, error: "transcript_too_long" }, { status: 413 });
+  }
+
+  await recordEvent("videoask", "response", payload);
 
   const email = p.contact?.email ?? p.respondent?.email ?? p.metadata?.candidate_id;
   if (!email) {
@@ -80,6 +94,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, skipped: "candidate_not_resolved" });
   }
 
+  if (await candidateQuotaReached(supabase, workableId, "async_video")) {
+    return NextResponse.json({ ok: false, error: CAPTURE_QUOTA_ERROR }, { status: 429 });
+  }
+
   const { error: insertError } = await supabase.from("evidence").insert({
     candidate_id: workableId,
     source_type: "async_video",
@@ -87,13 +105,16 @@ export async function POST(request: NextRequest) {
     label: "VideoAsk",
     captured_at: new Date().toISOString(),
     raw_ref: p.form_response?.response_id ?? p.id,
-    transcript: p.transcript ?? p.form_response?.transcription,
+    transcript: answers,
     extracted: payload,
   });
 
   if (insertError) {
     if (insertError.code === "23505") {
       return NextResponse.json({ ok: true, deduped: true, candidateId: workableId });
+    }
+    if (isCaptureQuotaError(insertError)) {
+      return NextResponse.json({ ok: false, error: CAPTURE_QUOTA_ERROR }, { status: 429 });
     }
     console.error("VideoAsk evidence insert failed", insertError);
     return NextResponse.json({ ok: false, error: insertError.message }, { status: 500 });

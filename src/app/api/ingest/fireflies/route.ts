@@ -4,6 +4,13 @@ import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
 import {
+  CAPTURE_QUOTA_ERROR,
+  MAX_WEBHOOK_BODY_CHARS,
+  candidateQuotaReached,
+  captureTooLong,
+  isCaptureQuotaError,
+} from "@/lib/capture-limits";
+import {
   extractInlineTranscript,
   extractTranscriptId,
   fetchFirefliesTranscript,
@@ -21,7 +28,15 @@ export const runtime = "nodejs";
  * the payload metadata, or by matching meeting participant emails to a candidate.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const rawBody = await request.text();
+  if (rawBody.length > MAX_WEBHOOK_BODY_CHARS) {
+    return NextResponse.json({ ok: false, error: "payload_too_large" }, { status: 413 });
+  }
+  const payload = parsePayload(rawBody);
+  const inline = extractInlineTranscript(payload);
+  if (inline && captureTooLong(inline.text)) {
+    return NextResponse.json({ ok: false, error: "transcript_too_long" }, { status: 413 });
+  }
   await recordEvent("fireflies", "transcript_ready", payload);
 
   if (!hasSupabase()) {
@@ -29,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   // 1) Get the transcript text — inline first, then via the API by id.
-  let transcript: FirefliesTranscript | null = extractInlineTranscript(payload);
+  let transcript: FirefliesTranscript | null = inline;
   let source: "inline" | "api" = "inline";
 
   if (!transcript) {
@@ -98,6 +113,10 @@ export async function POST(request: NextRequest) {
     });
   }
 
+  if (await candidateQuotaReached(supabase, workableId, "fireflies")) {
+    return NextResponse.json({ ok: false, error: CAPTURE_QUOTA_ERROR }, { status: 429 });
+  }
+
   // 3) Store the transcript as evidence (raw_ref dedupes repeated webhook fires).
   const { error: insertError } = await supabase.from("evidence").insert({
     candidate_id: workableId,
@@ -115,6 +134,9 @@ export async function POST(request: NextRequest) {
     if (insertError.code === "23505") {
       return NextResponse.json({ ok: true, deduped: true, candidateId: workableId });
     }
+    if (isCaptureQuotaError(insertError)) {
+      return NextResponse.json({ ok: false, error: CAPTURE_QUOTA_ERROR }, { status: 429 });
+    }
     console.error("Fireflies evidence insert failed", insertError);
     return NextResponse.json({ ok: false, error: insertError.message }, { status: 500 });
   }
@@ -123,4 +145,13 @@ export async function POST(request: NextRequest) {
   const rescore = await rescoreCandidateOnNewEvidence(workableId, "fireflies");
 
   return NextResponse.json({ ok: true, candidateId: workableId, scored: rescore.scored, source });
+}
+
+function parsePayload(rawBody: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(rawBody);
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
