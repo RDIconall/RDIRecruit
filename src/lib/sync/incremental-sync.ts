@@ -277,7 +277,10 @@ export async function processPendingWorkableEvents(options?: {
   return { processed, failed, permanent, remaining };
 }
 
-/** Webhook: new applicant → ingest + initial score; everything else → metadata + comments only. */
+/**
+ * Webhook: new applicant → ingest + initial score; everything else → metadata +
+ * comments, plus a résumé refresh and re-score when the application changed.
+ */
 export async function syncCandidateFromWebhook(input: {
   eventType: string;
   jobShortcode: string;

@@ -2,7 +2,11 @@ import { hasAnthropic, hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import type { WorkableCandidate, WorkableJob } from "../workable/client";
 import { getCandidate, getJob, listAllCandidates, listJobs } from "../workable/client";
-import { computeApplicationFingerprint } from "./candidate-hash";
+import {
+  applicationMatchesFingerprint,
+  carriesApplication,
+  computeApplicationFingerprint,
+} from "./candidate-hash";
 import { syncWorkableComments } from "./sync-comments";
 import {
   isPermanentWorkableNotFound,
@@ -64,10 +68,14 @@ function answersToRecord(candidate: WorkableCandidate): Record<string, string> {
 export interface UpsertCandidateResult {
   candidateId: string;
   isNew: boolean;
-  /** True when first-time résumé ingest runs — does not imply rescore on later Workable updates. */
+  /** True when a résumé ingest ran without throwing (first ingest, changed application, or refresh). */
   applicationIngested: boolean;
-  /** True when a résumé ingest was attempted (file present + first-ingest conditions met). */
+  /** True when a résumé ingest was attempted. */
   resumeIngestAttempted: boolean;
+  /** True when the stored application fingerprint no longer matches the Workable application. */
+  applicationChanged: boolean;
+  /** True when a replacing re-score of the current materials was queued. */
+  rescoreQueued: boolean;
   /** Populated when an attempted résumé ingest threw — surfaced instead of silently swallowed. */
   resumeError: string | null;
   metadataUpdated: boolean;
@@ -184,6 +192,18 @@ export async function syncJobsFromWorkable() {
   return jobs.length + archivedJobs.length;
 }
 
+/** Queue a re-score that replaces the standing decision; false when scoring cannot run yet. */
+async function queueReplacingRescore(candidateId: string): Promise<boolean> {
+  if (!hasAnthropic()) return false;
+  const { scoreCandidate } = await import("../scoring/run-score");
+  const queued = await scoreCandidate(candidateId, {
+    replace: true,
+    transport: "enqueue",
+    trigger: "application_changed",
+  });
+  return !("skipped" in queued && queued.skipped);
+}
+
 export async function upsertCandidateFromWorkable(
   candidate: WorkableCandidate,
   jobShortcode?: string,
@@ -191,20 +211,25 @@ export async function upsertCandidateFromWorkable(
     analyze?: boolean;
     forceAnalyze?: boolean;
     syncComments?: boolean;
-    /** Force the candidate + application write even if metadata is unchanged, without résumé ingest. */
+    /** Force the candidate + application write even if metadata is unchanged, without first-time résumé ingest. */
     hydrate?: boolean;
+    /** Re-download an already-stored résumé when its source link or timestamp changed (manual re-sync). */
+    refreshResume?: boolean;
   },
 ): Promise<UpsertCandidateResult> {
   const shortcode = jobShortcode ?? candidate.job?.shortcode;
   if (!shortcode) {
     throw new Error(`Candidate ${candidate.id} has no job shortcode`);
   }
-  const applicationFingerprint = computeApplicationFingerprint(candidate);
+  const fullApplication = carriesApplication(candidate);
+  const applicationFingerprint = fullApplication ? computeApplicationFingerprint(candidate) : null;
   const result: UpsertCandidateResult = {
     candidateId: candidate.id,
     isNew: false,
     applicationIngested: false,
     resumeIngestAttempted: false,
+    applicationChanged: false,
+    rescoreQueued: false,
     resumeError: null,
     metadataUpdated: false,
     commentsSynced: 0,
@@ -230,11 +255,22 @@ export async function upsertCandidateFromWorkable(
 
   const metadataUnchanged = existing?.workable_updated_at === candidate.updated_at;
 
+  // Only a full single-candidate payload can say whether the application changed.
+  // A changed application makes the stored résumé and the decision read from it
+  // stale, whatever event delivered the payload.
+  const storedFingerprint = (existing?.analysis_hash as string | null | undefined) ?? null;
+  const applicationChanged = Boolean(
+    fullApplication && storedFingerprint && !applicationMatchesFingerprint(candidate, storedFingerprint),
+  );
+  result.applicationChanged = applicationChanged;
+
   if (
     metadataUnchanged &&
+    !applicationChanged &&
     !options?.forceAnalyze &&
     !options?.syncComments &&
-    !options?.hydrate
+    !options?.hydrate &&
+    !options?.refreshResume
   ) {
     result.skipped = true;
     return result;
@@ -256,8 +292,15 @@ export async function upsertCandidateFromWorkable(
       raw: { ...(candidate as unknown as Record<string, unknown>), image_url: photoUrl },
       photo_url: photoUrl,
       created_at: candidate.created_at,
-      workable_updated_at: candidate.updated_at,
-      analysis_hash: applicationFingerprint,
+      // While a changed application is still being refreshed, keep the previous
+      // timestamp and fingerprint so a failed refresh is retried by the next sync
+      // instead of being recorded as current.
+      workable_updated_at: applicationChanged
+        ? (existing?.workable_updated_at as string | null | undefined) ?? null
+        : candidate.updated_at,
+      analysis_hash: applicationChanged
+        ? storedFingerprint
+        : applicationFingerprint ?? storedFingerprint,
       synced_at: new Date().toISOString(),
     },
     { onConflict: "workable_id" },
@@ -284,55 +327,105 @@ export async function upsertCandidateFromWorkable(
   // (stage move, etc.) — the bug class already fixed for resume_url and
   // photo_url. Never overwrite stored answers / cover letter / résumé URL with
   // an empty value: only update when the authoritative fetch actually carries one.
+  // A changed application is the exception: its full payload is authoritative,
+  // including materials the applicant removed.
   const prior = existingApp as {
     resume_url?: string | null;
     answers?: Record<string, string> | null;
     cover_letter?: string | null;
   } | null;
   const incomingAnswers = answersToRecord(candidate);
-  const applicationPayload = {
-    candidate_id: candidate.id,
-    answers: Object.keys(incomingAnswers).length ? incomingAnswers : prior?.answers ?? {},
-    cover_letter: candidate.cover_letter ?? prior?.cover_letter ?? null,
-    resume_url: candidate.resume_url ?? prior?.resume_url ?? null,
-    parsed_experience: parseExperience(candidate),
-    parsed_education: parseEducation(candidate),
-  };
+  const applicationPayload = applicationChanged
+    ? {
+        candidate_id: candidate.id,
+        answers: incomingAnswers,
+        cover_letter: candidate.cover_letter ?? null,
+        resume_url: candidate.resume_url ?? null,
+        parsed_experience: parseExperience(candidate),
+        parsed_education: parseEducation(candidate),
+      }
+    : {
+        candidate_id: candidate.id,
+        answers: Object.keys(incomingAnswers).length ? incomingAnswers : prior?.answers ?? {},
+        cover_letter: candidate.cover_letter ?? prior?.cover_letter ?? null,
+        resume_url: candidate.resume_url ?? prior?.resume_url ?? null,
+        parsed_experience: parseExperience(candidate),
+        parsed_education: parseEducation(candidate),
+      };
 
   const { error: applicationError } = await supabase
     .from("applications")
     .upsert(applicationPayload, { onConflict: "candidate_id" });
   if (applicationError) {
+    if (applicationChanged) {
+      throw new Error(`application upsert failed (${candidate.id}): ${applicationError.message}`);
+    }
     console.error(`application upsert failed (${candidate.id})`, applicationError.message);
   }
 
   const needsFirstIngest =
     options?.forceAnalyze ||
     result.isNew ||
-    !existing?.analysis_hash;
+    !storedFingerprint;
 
-  const shouldIngestResume =
-    options?.analyze !== false && needsFirstIngest;
+  const firstIngest = options?.analyze !== false && needsFirstIngest;
+  // The manual re-sync path: re-download a stored résumé only when its source
+  // link or timestamp differs from what was ingested (ingest checks the source hash).
+  const sourceRefresh = Boolean(options?.refreshResume) && !firstIngest && !applicationChanged;
 
-  if (shouldIngestResume && candidate.resume_url) {
+  let resumeReplaced = false;
+  if ((firstIngest || applicationChanged || sourceRefresh) && candidate.resume_url) {
     result.resumeIngestAttempted = true;
     try {
       const { ingestResumeForCandidate } = await import("../resume/ingest");
-      await ingestResumeForCandidate({
+      const ingested = await ingestResumeForCandidate({
         candidateId: candidate.id,
         candidateName: candidate.name,
         resumeUrl: candidate.resume_url,
         workableUpdatedAt: candidate.updated_at,
         parsedExperience: applicationPayload.parsed_experience,
         parsedEducation: applicationPayload.parsed_education,
-        force: options?.forceAnalyze,
+        force: options?.forceAnalyze || applicationChanged,
       });
       result.applicationIngested = true;
+      resumeReplaced = ingested != null;
     } catch (error) {
       // Do NOT silently swallow: record the reason so callers (resync, backfill,
       // readiness repair) can surface a real failure instead of a false success.
       result.resumeError = error instanceof Error ? error.message : String(error);
       console.error(`Resume ingest failed for ${candidate.id}`, error);
+    }
+  } else if (applicationChanged) {
+    try {
+      const { clearStoredResume } = await import("../resume/ingest");
+      await clearStoredResume(candidate.id);
+    } catch (error) {
+      result.resumeError = error instanceof Error ? error.message : String(error);
+      console.error(`Stale résumé clear failed for ${candidate.id}`, error);
+    }
+  }
+
+  const materialsRefreshed = applicationChanged || (sourceRefresh && resumeReplaced);
+  if (materialsRefreshed && !result.resumeError) {
+    try {
+      result.rescoreQueued = await queueReplacingRescore(candidate.id);
+      // Until a re-score of the new materials is queued, the old decision is
+      // still standing, so the change stays pending for the next sync to retry.
+      if (applicationChanged && result.rescoreQueued) {
+        const { error: finalizeError } = await supabase
+          .from("candidates")
+          .update({
+            analysis_hash: applicationFingerprint,
+            workable_updated_at: candidate.updated_at,
+          })
+          .eq("workable_id", candidate.id);
+        if (finalizeError) {
+          throw new Error(`fingerprint update failed (${candidate.id}): ${finalizeError.message}`);
+        }
+      }
+    } catch (error) {
+      result.resumeError = error instanceof Error ? error.message : String(error);
+      console.error(`Re-score after application change failed for ${candidate.id}`, error);
     }
   }
 
@@ -343,7 +436,7 @@ export async function upsertCandidateFromWorkable(
   return result;
 }
 
-/** Initial fit read only — rewriting happens via rescoreCandidateOnNewEvidence. */
+/** Initial fit read only — rewriting happens on new evidence or a changed application. */
 export async function scoreCandidateIfNew(candidateId: string) {
   if (!hasSupabase() || !hasAnthropic()) return { scored: false };
 
@@ -424,9 +517,31 @@ export async function syncCandidateById(
   return { candidate, upsert };
 }
 
+const STORED_TIMESTAMP_CHUNK = 200;
+
+async function storedWorkableTimestamps(ids: string[]): Promise<Map<string, string | null>> {
+  const stored = new Map<string, string | null>();
+  if (!hasSupabase() || !ids.length) return stored;
+  const supabase = getServiceSupabase();
+  for (let i = 0; i < ids.length; i += STORED_TIMESTAMP_CHUNK) {
+    const chunk = ids.slice(i, i + STORED_TIMESTAMP_CHUNK);
+    const { data, error } = await supabase
+      .from("candidates")
+      .select("workable_id, workable_updated_at")
+      .in("workable_id", chunk);
+    if (error) throw new Error(`stored candidate lookup failed: ${error.message}`);
+    for (const row of data ?? []) {
+      stored.set(row.workable_id as string, (row.workable_updated_at as string | null) ?? null);
+    }
+  }
+  return stored;
+}
+
 /**
- * Fast mirror of every candidate for a job into Supabase — no Claude, no résumé
- * download, no comment fetch. Pure DB upserts so the board fills instantly.
+ * Fast mirror of every candidate for a job into Supabase — no Claude, no comment
+ * fetch. New applicants are written from the list summary so the board fills
+ * instantly; a known candidate whose Workable timestamp moved is re-read in full,
+ * because only the full application shows whether the résumé or answers changed.
  * Pass `updatedAfter` to only pull candidates changed since the last mirror.
  * One bad candidate never aborts the batch.
  */
@@ -435,14 +550,21 @@ export async function syncChangedCandidatesForJob(
   updatedAfter?: string | null,
 ) {
   const candidates = await listAllCandidates(jobShortcode, { updatedAfter });
+  const storedAt = await storedWorkableTimestamps(candidates.map((c) => c.id));
   let changed = 0;
   let skipped = 0;
   let failed = 0;
   const toScore: string[] = [];
   const errors: string[] = [];
 
-  for (const candidate of candidates) {
+  for (const summary of candidates) {
     try {
+      const known = storedAt.has(summary.id);
+      if (known && storedAt.get(summary.id) === summary.updated_at) {
+        skipped += 1;
+        continue;
+      }
+      const candidate = known ? await getCandidate(jobShortcode, summary.id) : summary;
       const upsert = await upsertCandidateFromWorkable(candidate, jobShortcode, {
         analyze: false,
         syncComments: false,
@@ -456,8 +578,8 @@ export async function syncChangedCandidatesForJob(
     } catch (error) {
       failed += 1;
       const message = error instanceof Error ? error.message : String(error);
-      if (errors.length < 3) errors.push(`${candidate.id}: ${message}`);
-      console.error(`Mirror failed for candidate ${candidate.id}`, error);
+      if (errors.length < 3) errors.push(`${summary.id}: ${message}`);
+      console.error(`Mirror failed for candidate ${summary.id}`, error);
     }
   }
 

@@ -134,6 +134,29 @@ export async function ingestResumeForCandidate(input: {
   return { storagePath, mime, text, parsed };
 }
 
+/** Drop a stored résumé that the current Workable application no longer carries. */
+export async function clearStoredResume(candidateId: string): Promise<void> {
+  if (!hasSupabase()) return;
+  const supabase = getServiceSupabase();
+  const { error } = await supabase
+    .from("applications")
+    .update({
+      resume_url: null,
+      resume_storage_path: null,
+      resume_mime: null,
+      resume_text: null,
+      resume_parsed: null,
+      resume_ingested_at: null,
+      resume_source_hash: null,
+    })
+    .eq("candidate_id", candidateId);
+  if (error) {
+    throw new Error(`Application résumé clear failed: ${error.message}`);
+  }
+  await supabase.from("evidence").delete().eq("candidate_id", candidateId).eq("source_type", "resume");
+  await supabase.from("evaluations").delete().eq("candidate_id", candidateId).eq("ref", "resume-chronology");
+}
+
 export async function getSignedResumeUrl(
   candidateId: string,
   actor = "system",
