@@ -1,6 +1,7 @@
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { chunkIds } from "./chunk";
+import { MAX_CUT_REASON_CHARS } from "./cut-reason";
 import type { BoardCandidate } from "../types";
 
 export type OverlayStatus = "active" | "disqualified" | "withdrawn";
@@ -27,21 +28,28 @@ export interface EvaluationRow {
   created_at: string;
 }
 
+// Board loads hydrate every applicant in a pool, so they never pull the free-text
+// status_reason; only single-candidate reads ask for it.
+const BOARD_OVERLAY_COLUMNS =
+  "candidate_id, status, complement, complement_removes, salary_vector, updated_by, updated_at";
+
 export async function fetchOverlays(
   candidateIds: string[],
+  options?: { withReason?: boolean },
 ): Promise<Map<string, CandidateOverlayRow>> {
   const map = new Map<string, CandidateOverlayRow>();
   if (!hasSupabase() || !candidateIds.length) return map;
 
+  const withReason = options?.withReason === true;
   const supabase = getServiceSupabase();
   for (const batch of chunkIds(candidateIds)) {
     const { data, error } = await supabase
       .from("candidate_overlay")
-      .select("*")
+      .select(withReason ? "*" : BOARD_OVERLAY_COLUMNS)
       .in("candidate_id", batch);
     if (error) console.error("Failed to load overlay batch", error);
-    for (const row of (data ?? []) as CandidateOverlayRow[]) {
-      map.set(row.candidate_id, row);
+    for (const row of (data ?? []) as unknown as CandidateOverlayRow[]) {
+      map.set(row.candidate_id, withReason ? row : { ...row, status_reason: null });
     }
   }
   return map;
@@ -80,6 +88,9 @@ export async function upsertOverlay(
   updatedBy?: string,
 ) {
   if (!hasSupabase()) return;
+  if (typeof patch.status_reason === "string" && patch.status_reason.length > MAX_CUT_REASON_CHARS) {
+    throw new Error(`status_reason exceeds ${MAX_CUT_REASON_CHARS} characters`);
+  }
   const supabase = getServiceSupabase();
   await supabase.from("candidate_overlay").upsert({
     candidate_id: candidateId,

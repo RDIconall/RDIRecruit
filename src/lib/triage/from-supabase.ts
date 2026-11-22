@@ -40,6 +40,7 @@ import {
   type TenureStability,
 } from "./tenure-stability";
 import { decisionFromSentiment, type FitRead } from "./fit-read";
+import { MAX_CUT_REASON_CHARS } from "../data/cut-reason";
 import type {
   AnswerRow,
   Candidate,
@@ -692,8 +693,9 @@ function cutFieldsFor(input: MapInput): Pick<Candidate, "cutGroup" | "cutReason"
   else if (!hasCover && answerCount === 0) cutGroup = "care";
   else cutGroup = "mismatch";
 
+  // Rows written before the reason cap may still hold oversized text.
   const cutReason =
-    input.overlay?.status_reason ||
+    input.overlay?.status_reason?.slice(0, MAX_CUT_REASON_CHARS) ||
     dig?.careerRead ||
     dig?.resolve?.[0] ||
     firstSentence(input.evals.invest?.summary) ||

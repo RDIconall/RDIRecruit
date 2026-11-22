@@ -289,7 +289,7 @@ export async function getCandidateDetail(candidateId: string, jobShortcode?: str
 
   const [overlayMap, evaluations, narrativeResult, application, poolStats, evidenceResult] =
     await Promise.all([
-      fetchOverlays([candidateId]),
+      fetchOverlays([candidateId], { withReason: true }),
       fetchEvaluations(candidateId),
       supabase
         .from("narratives")

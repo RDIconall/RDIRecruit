@@ -10,6 +10,7 @@ import {
   moveCandidateStage,
 } from "@/lib/workable/client";
 import { upsertOverlay } from "@/lib/data/overlay";
+import { MAX_CUT_REASON_CHARS, normalizeCutReason } from "@/lib/data/cut-reason";
 import { enqueueWorkableWrite } from "@/lib/workable/write-queue";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 
@@ -106,13 +107,17 @@ export async function denyCandidate(input: {
   reason?: string;
 }) {
   await requireAuth();
+  const reason = normalizeCutReason(input.reason, "Not a fit at this time");
+  if (reason === null) {
+    return { ok: false, error: `Reason must be at most ${MAX_CUT_REASON_CHARS} characters` };
+  }
   if (!hasWorkable()) return { ok: false, error: "Workable not configured" };
 
   // Best-effort Workable propagation; the local overlay below is the source of
   // truth and is written regardless of whether the Workable write succeeds/skips.
   try {
     await enqueueWorkableWrite(async () => {
-      await disqualifyCandidate(input.candidateId, input.reason ?? "Not a fit at this time");
+      await disqualifyCandidate(input.candidateId, reason);
       if (hasSupabase()) {
         try {
           const { getCandidate } = await import("@/lib/workable/client");
@@ -131,7 +136,7 @@ export async function denyCandidate(input: {
   if (hasSupabase()) {
     await upsertOverlay(
       input.candidateId,
-      { status: "disqualified", status_reason: input.reason ?? "Not a fit at this time" },
+      { status: "disqualified", status_reason: reason },
       await reviewerLabel(),
     );
   }
@@ -146,10 +151,14 @@ export async function withdrawCandidate(input: {
   reason?: string;
 }) {
   await requireAuth();
+  const reason = normalizeCutReason(input.reason, "Candidate withdrew");
+  if (reason === null) {
+    return { ok: false, error: `Reason must be at most ${MAX_CUT_REASON_CHARS} characters` };
+  }
   if (hasSupabase()) {
     await upsertOverlay(
       input.candidateId,
-      { status: "withdrawn", status_reason: input.reason ?? "Candidate withdrew" },
+      { status: "withdrawn", status_reason: reason },
       await reviewerLabel(),
     );
   }
