@@ -16,6 +16,7 @@ import { getWorkingFileContent } from "@/app/actions/triage";
 import { Avatar, WorkableStageChip } from "./pool-shared";
 import { nextStageSlug, type StageColumn } from "@/lib/triage/stages";
 import { CM } from "@/lib/triage/theme";
+import { MAX_TEXT_CHARS } from "@/lib/triage/limits";
 
 const mono = (extra: CSSProperties = {}): CSSProperties => ({ fontFamily: APP.mono, ...extra });
 
@@ -220,6 +221,11 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     setCoverOpen(false);
     window.scrollTo(0, 0);
   }, [id]);
+
+  const { loadChat } = wsApi;
+  useEffect(() => {
+    loadChat(id);
+  }, [id, loadChat]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1094,6 +1100,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
           onChange={(e) => setActDraft(e.target.value)}
           placeholder={actType === "interview" ? "Paste the interview transcript or notes…" : actType === "comment" ? "A comment for the record…" : "A note for the record…"}
           rows={actType === "interview" ? 5 : 3}
+          maxLength={MAX_TEXT_CHARS}
           style={textareaStyle}
         />
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
@@ -1185,6 +1192,7 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
                 : "Ask about interviewing this candidate…  (⌘↵ to send)"
             }
             rows={2}
+            maxLength={MAX_TEXT_CHARS}
             style={{ ...textareaStyle, flex: 1 }}
           />
           <button onClick={sendChat} disabled={!chatDraft.trim() || chatThinking} style={{ ...primaryBtn(!chatDraft.trim() || chatThinking), alignSelf: "flex-end" }}>

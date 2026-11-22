@@ -4,10 +4,12 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
+import { keepRecent } from "@/lib/triage/limits";
 import {
   bulkDisqualify,
   clearCandidateChat,
   compareToRubric,
+  getCandidateChat,
   logActivity as logActivityAction,
   moveCandidateToStage,
   sendCandidateToScreen,
@@ -32,6 +34,8 @@ export interface WorkspaceApi {
   chatBusy: Record<string, boolean>;
   notice: string | null;
   clearNotice: () => void;
+  /** Fetch the candidate's recent war-room turns once; the pool load does not include them. */
+  loadChat: (id: string) => void;
   sendChat: (id: string, text: string) => void;
   clearChat: (id: string) => void;
   /** Flip disqualified; the optional reason is stored on the overlay + pushed to Workable. */
@@ -389,6 +393,15 @@ export function useWorkspace(
     [handleRecalc],
   );
 
+  const loadChat = useCallback((id: string) => {
+    if (wsRef.current.chat[id]) return;
+    void getCandidateChat({ candidateId: id })
+      .then((res) => {
+        setWs((w) => (w.chat[id] ? w : { ...w, chat: { ...w.chat, [id]: res.messages } }));
+      })
+      .catch(() => setNotice("Couldn't load the war-room thread — please reload."));
+  }, []);
+
   const sendChat = useCallback((id: string, text: string) => {
     const v = text.trim();
     if (!v) return;
@@ -400,9 +413,13 @@ export function useWorkspace(
     setChatBusy((b) => ({ ...b, [id]: true }));
     void sendCandidateChat({ candidateId: id, message: v })
       .then((res) => {
-        if (res.messages?.length) {
-          setWs((w) => ({ ...w, chat: { ...w.chat, [id]: res.messages } }));
-        }
+        setWs((w) => ({
+          ...w,
+          chat: {
+            ...w.chat,
+            [id]: res.messages?.length ? res.messages : (w.chat[id] || []).filter((m) => m !== optimistic),
+          },
+        }));
         if (res.message) setNotice(res.message);
       })
       .catch(() => setNotice("Chat failed — please retry."))
@@ -426,22 +443,37 @@ export function useWorkspace(
     };
     const log = [...(wsRef.current.activity[id] || []), optimistic];
     setWs((w) => ({ ...w, activity: { ...w.activity, [id]: log } }));
+    const dropOptimistic = () =>
+      setWs((w) => ({
+        ...w,
+        activity: { ...w.activity, [id]: (w.activity[id] || []).filter((e) => e.id !== optimistic.id) },
+      }));
     void logActivityAction({ candidateId: id, type, body: v })
       .then((res) => {
         if (res.ok && res.entry) {
           // Swap the optimistic row for the persisted one (real id + author + ts).
+          // A full log reuses its oldest row, so drop any stale copy of that id.
+          const entry = res.entry;
           setWs((w) => ({
             ...w,
             activity: {
               ...w.activity,
-              [id]: (w.activity[id] || []).map((e) => (e.id === optimistic.id ? res.entry! : e)),
+              [id]: keepRecent(
+                (w.activity[id] || [])
+                  .filter((e) => e.id !== entry.id)
+                  .map((e) => (e.id === optimistic.id ? entry : e)),
+              ),
             },
           }));
-        } else if (res.message) {
-          setNotice(res.message);
+          return;
         }
+        dropOptimistic();
+        if (res.message) setNotice(res.message);
       })
-      .catch(() => setNotice("Couldn't save to the activity log — please retry."));
+      .catch(() => {
+        dropOptimistic();
+        setNotice("Couldn't save to the activity log — please retry.");
+      });
   }, []);
 
   const updateAssessmentCb = useCallback(
@@ -466,6 +498,7 @@ export function useWorkspace(
     chatBusy,
     notice,
     clearNotice,
+    loadChat,
     sendChat,
     clearChat,
     toggleDq,

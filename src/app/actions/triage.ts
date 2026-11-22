@@ -5,7 +5,16 @@ import { auth } from "@clerk/nextjs/server";
 import { hasSupabase, hasWorkable } from "@/lib/env";
 import { upsertOverlay } from "@/lib/data/overlay";
 import { loadOneCandidate, loadPoolRoster } from "@/lib/triage/load";
-import { getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
+import { getChatThread, getWorkingFile, upsertWorkingFile } from "@/lib/triage/store";
+import {
+  MAX_REPLY_KEY_CHARS,
+  MAX_SHORT_TEXT_CHARS,
+  MAX_STORED_ENTRIES,
+  MAX_TEXT_CHARS,
+  TOO_LONG_MESSAGE,
+  exceeds,
+  keepRecent,
+} from "@/lib/triage/limits";
 import { getJobRubric, upsertJobRubric } from "@/lib/rubric/store";
 import { renderWorkingFile, renderCandidateMaterials } from "@/lib/triage/working-file";
 import { gradeCandidate } from "@/lib/triage/grade";
@@ -31,6 +40,7 @@ import type {
 import { normalizeProcessStatus } from "@/lib/triage/types";
 
 const VALID_DECISIONS: Decision[] = ["interview", "backup", "reject", "blocked"];
+const VALID_ACTIVITY_TYPES: ActivityType[] = ["interview", "note", "comment"];
 const VALID_PROCESS_STATUS: ProcessStatus[] = [
   "sentToLara",
   "interviewing",
@@ -220,8 +230,9 @@ export async function saveCorrection(input: {
   reviewerKind?: ReviewerKind;
 }): Promise<RecalcResult> {
   await requireAuth();
-  const text = input.text.trim();
+  const text = typeof input.text === "string" ? input.text.trim() : "";
   if (!text) return { ok: false, recalculated: false, read: null, message: "Empty correction" };
+  if (exceeds(text, MAX_TEXT_CHARS)) return { ok: false, recalculated: false, read: null, message: TOO_LONG_MESSAGE };
 
   // Reviewer identity: default to the Clerk user, but honour an explicit picker choice.
   const ident = await reviewerIdentity();
@@ -238,12 +249,15 @@ export async function saveCorrection(input: {
     reviewerKind: kind,
   };
   const existing = await getWorkingFile(input.candidateId);
-  const corrections = [...(existing?.workspace.corrections ?? []), entry];
+  const corrections = keepRecent([...(existing?.workspace.corrections ?? []), entry]);
   return persistAndMaybeRecalc(input.candidateId, { corrections }, { recalc: true, trigger: "Human correction", reviewer });
 }
 
 export async function saveTranscript(input: { candidateId: string; transcript: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (exceeds(input.transcript, MAX_TEXT_CHARS)) {
+    return { ok: false, recalculated: false, read: null, message: TOO_LONG_MESSAGE };
+  }
   const reviewer = await reviewerIdentity();
   return persistAndMaybeRecalc(input.candidateId, { transcript: input.transcript }, { recalc: true, trigger: "Interview transcript", reviewer });
 }
@@ -255,14 +269,49 @@ export async function runDeepAnalysis(input: { candidateId: string }): Promise<R
 
 export async function saveReply(input: { candidateId: string; key: string; value: string }): Promise<RecalcResult> {
   await requireAuth();
+  if (exceeds(input.key, MAX_REPLY_KEY_CHARS) || !input.key || exceeds(input.value, MAX_TEXT_CHARS)) {
+    return { ok: false, recalculated: false, read: null, message: TOO_LONG_MESSAGE };
+  }
   const existing = await getWorkingFile(input.candidateId);
-  const replies = { ...(existing?.workspace.replies ?? {}), [input.key]: input.value };
+  const current = existing?.workspace.replies ?? {};
+  if (!Object.hasOwn(current, input.key) && Object.keys(current).length >= MAX_STORED_ENTRIES) {
+    return { ok: false, recalculated: false, read: null, message: "Too many replies on this candidate" };
+  }
+  const replies = { ...current, [input.key]: input.value };
   return persistAndMaybeRecalc(input.candidateId, { replies }, { recalc: false });
+}
+
+const TIMELINE_TYPES: ReadonlySet<string> = new Set(["edu", "role", "cert", "gap"]);
+const TIMELINE_SHORT_FIELDS = ["period", "org", "role", "tenure", "lang", "signal"] as const;
+
+/** Keep only known timeline fields; null when any row is malformed or oversized. */
+function sanitizeTimeline(rows: unknown): TimelineRow[] | null {
+  if (!Array.isArray(rows)) return null;
+  const out: TimelineRow[] = [];
+  for (const raw of rows.slice(0, MAX_STORED_ENTRIES)) {
+    const row = (raw ?? {}) as Record<string, unknown>;
+    if (typeof row.type !== "string" || !TIMELINE_TYPES.has(row.type)) return null;
+    if (exceeds(row.scope, MAX_TEXT_CHARS)) return null;
+    if (TIMELINE_SHORT_FIELDS.some((field) => exceeds(row[field], MAX_SHORT_TEXT_CHARS))) return null;
+    out.push({
+      type: row.type as TimelineRow["type"],
+      period: row.period as string,
+      org: row.org as string,
+      role: row.role as string,
+      tenure: row.tenure as string,
+      scope: row.scope as string,
+      lang: row.lang as string,
+      signal: row.signal as TimelineRow["signal"],
+    });
+  }
+  return out;
 }
 
 export async function saveTimeline(input: { candidateId: string; ovr: TimelineRow[] }): Promise<RecalcResult> {
   await requireAuth();
-  return persistAndMaybeRecalc(input.candidateId, { ovr: input.ovr }, { recalc: false });
+  const ovr = sanitizeTimeline(input.ovr);
+  if (!ovr) return { ok: false, recalculated: false, read: null, message: TOO_LONG_MESSAGE };
+  return persistAndMaybeRecalc(input.candidateId, { ovr }, { recalc: false });
 }
 
 /**
@@ -374,7 +423,8 @@ export async function setDisqualified(input: {
 }): Promise<{ ok: boolean; workable: WorkableSync }> {
   await requireAuth();
   if (!hasSupabase()) return { ok: false, workable: "skipped" };
-  const reason = input.reason?.trim() || "Cut via triage";
+  const reason =
+    (typeof input.reason === "string" ? input.reason.trim().slice(0, MAX_SHORT_TEXT_CHARS) : "") || "Cut via triage";
   await upsertOverlay(
     input.candidateId,
     input.disqualified
@@ -487,18 +537,51 @@ export async function logActivity(input: {
   body: string;
 }): Promise<{ ok: boolean; entry: ActivityEntry | null; message?: string }> {
   await requireAuth();
-  const body = input.body.trim();
+  const body = typeof input.body === "string" ? input.body.trim() : "";
   if (!body) return { ok: false, entry: null, message: "Empty entry" };
+  if (exceeds(body, MAX_TEXT_CHARS)) return { ok: false, entry: null, message: TOO_LONG_MESSAGE };
+  if (!VALID_ACTIVITY_TYPES.includes(input.type)) return { ok: false, entry: null, message: "Invalid entry type" };
+  if (input.author !== undefined && exceeds(input.author, MAX_SHORT_TEXT_CHARS)) {
+    return { ok: false, entry: null, message: TOO_LONG_MESSAGE };
+  }
   if (!hasSupabase()) return { ok: false, entry: null, message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
   const author = input.author?.trim() || ident.label || "You";
   const supabase = getServiceSupabase();
-  const { data, error } = await supabase
+
+  // Bounded log: once a candidate has MAX_STORED_ENTRIES entries, the newest
+  // entry takes over the oldest row instead of adding another.
+  const { data: existingRows, error: listError } = await supabase
     .from("activity")
-    .insert({ candidate_id: input.candidateId, type: input.type, author, body })
     .select("id, created_at")
-    .single();
+    .eq("candidate_id", input.candidateId)
+    .order("created_at", { ascending: true });
+  if (listError) {
+    console.error("logActivity failed", listError);
+    return { ok: false, entry: null, message: "Save failed — please retry." };
+  }
+  const rows = (existingRows ?? []) as Array<{ id: string; created_at: string | null }>;
+
+  let result;
+  if (rows.length >= MAX_STORED_ENTRIES) {
+    const latest = Date.parse(rows[rows.length - 1].created_at ?? "");
+    const at = new Date(Number.isFinite(latest) ? Math.max(Date.now(), latest + 1) : Date.now()).toISOString();
+    result = await supabase
+      .from("activity")
+      .update({ type: input.type, author, body, created_at: at })
+      .eq("id", rows[0].id)
+      .eq("candidate_id", input.candidateId)
+      .select("id, created_at")
+      .single();
+  } else {
+    result = await supabase
+      .from("activity")
+      .insert({ candidate_id: input.candidateId, type: input.type, author, body })
+      .select("id, created_at")
+      .single();
+  }
+  const { data, error } = result;
   if (error || !data) {
     console.error("logActivity failed", error);
     return { ok: false, entry: null, message: "Save failed — please retry." };
@@ -595,8 +678,8 @@ interface ChatResult {
 /**
  * Continue the per-candidate "war room" conversation with Claude. Appends the
  * human's turn, calls Claude grounded in the candidate's working file + rubric +
- * spec, appends the reply, and persists the whole thread to the workspace so the
- * conversation survives reloads. Resilient: on any AI failure the human turn is
+ * spec, appends the reply, and persists the most recent turns to the workspace so
+ * the conversation survives reloads. Resilient: on any AI failure the human turn is
  * still saved and a friendly notice is returned.
  */
 export async function sendCandidateChat(input: {
@@ -604,8 +687,9 @@ export async function sendCandidateChat(input: {
   message: string;
 }): Promise<ChatResult> {
   await requireAuth();
-  const text = input.message.trim();
+  const text = typeof input.message === "string" ? input.message.trim() : "";
   if (!text) return { ok: false, messages: [], message: "Empty message" };
+  if (exceeds(text, MAX_TEXT_CHARS)) return { ok: false, messages: [], message: TOO_LONG_MESSAGE };
   if (!hasSupabase()) return { ok: false, messages: [], message: "Supabase not configured" };
 
   const ident = await reviewerIdentity();
@@ -705,13 +789,12 @@ export async function sendCandidateChat(input: {
     phase,
     phaseBlock,
     fetchOtherCandidate: roster.length ? fetchOtherCandidate : undefined,
-    // Cap the turns we replay so a long thread can't blow the context window.
-    history: withUser.slice(-24),
+    history: keepRecent(withUser),
   });
 
-  const next: ChatMessage[] = reply
-    ? [...withUser, { role: "assistant", content: reply, ts: new Date().toISOString() }]
-    : withUser;
+  const next: ChatMessage[] = keepRecent(
+    reply ? [...withUser, { role: "assistant", content: reply, ts: new Date().toISOString() }] : withUser,
+  );
 
   // Persist the human turn (and Claude's reply when we got one) either way.
   await upsertWorkingFile(input.candidateId, { workspace: { chat: next } }, ident.label);
@@ -721,6 +804,12 @@ export async function sendCandidateChat(input: {
     messages: next,
     message: reply ? undefined : "Claude is unavailable right now (no API key or transient error) — your message was saved.",
   };
+}
+
+/** The candidate's recent war-room turns; the pool load does not carry them. */
+export async function getCandidateChat(input: { candidateId: string }): Promise<{ messages: ChatMessage[] }> {
+  await requireAuth();
+  return { messages: await getChatThread(input.candidateId) };
 }
 
 /** Clear a candidate's war-room conversation. */
