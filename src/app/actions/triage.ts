@@ -758,7 +758,7 @@ export async function saveJobRubric(input: {
 
 /**
  * Pull the latest candidate record from Workable into Supabase, and ingest the résumé
- * if it has not been captured yet. Best-effort and resilient: returns a human-readable
+ * if it has not been captured yet or has changed since. Best-effort and resilient: returns a human-readable
  * message for the UI notice instead of throwing.
  */
 export async function resyncCandidate(input: {
@@ -787,9 +787,27 @@ export async function resyncCandidate(input: {
       analyze: true,
       // Force a fresh résumé ingest only when we don't already have the file.
       forceAnalyze: needResume,
+      // A stored file is re-downloaded when its source link or timestamp changed.
+      refreshResume: !needResume,
       syncComments: true,
     });
     revalidatePath("/");
+
+    if (!needResume && result.resumeError) {
+      return {
+        ok: false,
+        message: `Synced from Workable, but the updated application could not be refreshed: ${result.resumeError}`,
+      };
+    }
+    if (!needResume && result.rescoreQueued) {
+      return { ok: true, message: "Synced from Workable · application refreshed, re-analysis queued." };
+    }
+    if (!needResume && result.applicationChanged) {
+      return {
+        ok: true,
+        message: "Synced from Workable · application refreshed; re-analysis will run once the role is ready to grade.",
+      };
+    }
 
     if (needResume) {
       if (result.applicationIngested) {

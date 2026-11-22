@@ -187,6 +187,12 @@ export interface WorkableCandidate {
   created_at: string;
   updated_at: string;
   resume_url?: string;
+  resume_metadata?: {
+    filename?: string;
+    filetype?: string;
+    created_at?: string;
+    updated_at?: string;
+  } | null;
   cover_letter?: string;
   cover_letter_url?: string;
   tags?: string[];
