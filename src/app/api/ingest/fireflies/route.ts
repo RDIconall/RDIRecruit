@@ -3,6 +3,7 @@ import { recordEvent } from "@/lib/sync/workable-sync";
 import { getServiceSupabase } from "@/lib/supabase/server";
 import { hasSupabase } from "@/lib/env";
 import { rescoreCandidateOnNewEvidence } from "@/lib/sync/rescore";
+import { readBodyWithLimit } from "@/lib/http/read-body";
 import {
   extractInlineTranscript,
   extractTranscriptId,
@@ -13,6 +14,9 @@ import {
 
 export const runtime = "nodejs";
 
+// Larger than the default webhook cap: callers may post a whole transcript inline.
+const MAX_FIREFLIES_BODY_BYTES = 1024 * 1024;
+
 /**
  * Fireflies transcript ingest. Flows a meeting transcript into an `evidence` row
  * (source_type "fireflies") and triggers a re-score. The transcript is taken from
@@ -21,7 +25,15 @@ export const runtime = "nodejs";
  * the payload metadata, or by matching meeting participant emails to a candidate.
  */
 export async function POST(request: NextRequest) {
-  const payload = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+  const body = await readBodyWithLimit(request, MAX_FIREFLIES_BODY_BYTES);
+  if (!body.ok) {
+    return NextResponse.json({ error: body.error }, { status: body.status });
+  }
+  let payload: Record<string, unknown> = {};
+  try {
+    const parsed: unknown = JSON.parse(body.text);
+    if (parsed && typeof parsed === "object") payload = parsed as Record<string, unknown>;
+  } catch {}
   await recordEvent("fireflies", "transcript_ready", payload);
 
   if (!hasSupabase()) {
