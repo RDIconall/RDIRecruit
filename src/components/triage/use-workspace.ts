@@ -2,12 +2,25 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ActivityEntry, ActivityType, Candidate, ChatMessage, Decision, DecisionRead, ProcessStatus, ReviewerKind, TimelineRow, Workspace } from "@/lib/triage/types";
+import type {
+  ActivityEntry,
+  ActivityType,
+  Candidate,
+  ChatMessage,
+  Decision,
+  DecisionRead,
+  FirefliesRecording,
+  ProcessStatus,
+  ReviewerKind,
+  TimelineRow,
+  Workspace,
+} from "@/lib/triage/types";
 import { reviewerKindLabel } from "@/lib/triage/reviewer";
 import {
   bulkDisqualify,
   clearCandidateChat,
   compareToRubric,
+  getCandidateRecord,
   logActivity as logActivityAction,
   moveCandidateToStage,
   sendCandidateToScreen,
@@ -24,6 +37,7 @@ import {
   setProcessStatus as setProcessStatusAction,
   updateAssessment,
 } from "@/app/actions/triage";
+import type { CandidateRecord } from "@/app/actions/triage";
 
 export interface WorkspaceApi {
   ws: Workspace;
@@ -64,6 +78,25 @@ export interface WorkspaceApi {
   logActivity: (id: string, type: ActivityType, body: string) => void;
   /** Re-run the evaluator over the activity-log delta and re-persist the pinned assessment. */
   updateAssessment: (id: string) => void;
+  /** Fetch one applicant's transcripts, activity log, chat, and edits (left out of the pool payload). */
+  loadRecord: (id: string) => void;
+}
+
+/** Fold a fetched record into the workspace without overwriting anything edited locally since load. */
+function mergeRecord(w: Workspace, id: string, rec: CandidateRecord): Workspace {
+  const fetchedIds = new Set(rec.activity.map((e) => e.id));
+  const localOnly = (w.activity[id] ?? []).filter((e) => !fetchedIds.has(e.id));
+  const keep = <T>(map: Record<string, T>, value: T, present: boolean): Record<string, T> =>
+    id in map || !present ? map : { ...map, [id]: value };
+  return {
+    ...w,
+    activity: rec.activity.length || localOnly.length ? { ...w.activity, [id]: [...rec.activity, ...localOnly] } : w.activity,
+    transcripts: keep(w.transcripts, rec.transcript, Boolean(rec.transcript)),
+    chat: keep(w.chat, rec.chat, rec.chat.length > 0),
+    corrections: keep(w.corrections, rec.corrections, rec.corrections.length > 0),
+    replies: keep(w.replies, rec.replies, Object.keys(rec.replies).length > 0),
+    ovr: keep(w.ovr, rec.ovr ?? [], Boolean(rec.ovr)),
+  };
 }
 
 function nowStamp(): string {
@@ -82,6 +115,8 @@ export function useWorkspace(
   opts?: {
     jobShortcode?: string;
     onStageChange?: (id: string, stage: string) => void;
+    /** Receives the applicant's interview recordings once their record loads. */
+    onRecord?: (id: string, fireflies: FirefliesRecording[]) => void;
   },
 ): WorkspaceApi {
   const router = useRouter();
@@ -92,6 +127,9 @@ export function useWorkspace(
   const wsRef = useRef(ws);
   wsRef.current = ws;
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const recordRequested = useRef<Record<string, boolean>>({});
+  const onRecordRef = useRef(opts?.onRecord);
+  onRecordRef.current = opts?.onRecord;
 
   const cuts = useMemo(() => candidates.filter((c) => c.decision === "reject"), [candidates]);
   const openCount = cuts.filter((c) => !ws.dq[c.id]).length;
@@ -457,6 +495,23 @@ export function useWorkspace(
     [handleRecalc],
   );
 
+  const loadRecord = useCallback((id: string) => {
+    if (!id || recordRequested.current[id]) return;
+    recordRequested.current[id] = true;
+    void getCandidateRecord({ candidateId: id })
+      .then((rec) => {
+        if (!rec) {
+          recordRequested.current[id] = false;
+          return;
+        }
+        setWs((w) => mergeRecord(w, id, rec));
+        onRecordRef.current?.(id, rec.fireflies);
+      })
+      .catch(() => {
+        recordRequested.current[id] = false;
+      });
+  }, []);
+
   const clearNotice = useCallback(() => setNotice(null), []);
 
   return {
@@ -489,5 +544,6 @@ export function useWorkspace(
     addCorrection,
     logActivity,
     updateAssessment: updateAssessmentCb,
+    loadRecord,
   };
 }

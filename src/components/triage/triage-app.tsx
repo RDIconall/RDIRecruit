@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { APP, DECISION_NEXT } from "@/lib/triage/app-theme";
 import { applyInterviewGate } from "@/lib/triage/interview-bar";
-import type { Candidate, DecisionRead } from "@/lib/triage/types";
+import type { Candidate, DecisionRead, FirefliesRecording } from "@/lib/triage/types";
 import type { Viewer } from "@/lib/triage/reviewer";
 import type { TriagePool } from "@/lib/triage/load";
 import { TriageDataProvider } from "./context";
@@ -69,9 +69,14 @@ export function TriageApp({ pool, viewer }: { pool: TriagePool; viewer: Viewer }
     );
   }, []);
 
+  const applyRecord = useCallback((id: string, fireflies: FirefliesRecording[]) => {
+    setCandidates((prev) => prev.map((c) => (c.id === id ? { ...c, fireflies } : c)));
+  }, []);
+
   const wsApi = useWorkspace(pool.workspace, candidates, applyRead, {
     jobShortcode: pool.meta.jobShortcode,
     onStageChange: applyStage,
+    onRecord: applyRecord,
   });
 
   const contextValue = useMemo(
