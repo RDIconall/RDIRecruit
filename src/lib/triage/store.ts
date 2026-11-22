@@ -2,7 +2,8 @@ import "server-only";
 import { hasSupabase } from "../env";
 import { getServiceSupabase } from "../supabase/server";
 import { chunkIds } from "../data/chunk";
-import type { DecisionRead, WorkspaceSlice } from "./types";
+import { keepRecent } from "./limits";
+import type { ChatMessage, DecisionRead, WorkspaceSlice } from "./types";
 
 export interface WorkingFileRow {
   candidate_id: string;
@@ -24,6 +25,29 @@ function normalize(row: Partial<WorkingFileRow> & { candidate_id: string }): Wor
   };
 }
 
+const BATCH_WORKSPACE_KEYS = [
+  "ovr",
+  "replies",
+  "corrections",
+  "transcript",
+  "deep",
+  "decisionOverride",
+  "processStatus",
+] as const satisfies ReadonlyArray<keyof WorkspaceSlice>;
+
+const BATCH_COLUMNS = [
+  "candidate_id",
+  "read",
+  "updated_at",
+  "updated_by",
+  ...BATCH_WORKSPACE_KEYS.map((key) => `${key}:workspace->${key}`),
+].join(", ");
+
+/**
+ * Batch load for pool-wide views. Leaves out the rendered .md and the war-room
+ * chat thread so pool size, not conversation length, bounds the payload; load
+ * those per candidate with getWorkingFile / getChatThread.
+ */
 export async function getWorkingFiles(
   candidateIds: string[],
 ): Promise<Map<string, WorkingFileRow>> {
@@ -34,14 +58,41 @@ export async function getWorkingFiles(
   for (const batch of chunkIds(candidateIds)) {
     const { data, error } = await supabase
       .from("candidate_working_files")
-      .select("*")
+      .select(BATCH_COLUMNS)
       .in("candidate_id", batch);
     if (error) console.error("Failed to load working files batch", error);
-    for (const row of (data ?? []) as WorkingFileRow[]) {
-      map.set(row.candidate_id, normalize(row));
+    for (const row of (data ?? []) as unknown as Array<Record<string, unknown>>) {
+      const workspace: Record<string, unknown> = {};
+      for (const key of BATCH_WORKSPACE_KEYS) {
+        if (row[key] !== undefined && row[key] !== null) workspace[key] = row[key];
+      }
+      const candidateId = row.candidate_id as string;
+      map.set(
+        candidateId,
+        normalize({
+          candidate_id: candidateId,
+          read: row.read as DecisionRead | null,
+          workspace: workspace as WorkspaceSlice,
+          updated_at: row.updated_at as string | null,
+          updated_by: row.updated_by as string | null,
+        }),
+      );
     }
   }
   return map;
+}
+
+/** The most recent war-room turns for one candidate (loaded when the dossier opens). */
+export async function getChatThread(candidateId: string): Promise<ChatMessage[]> {
+  if (!hasSupabase()) return [];
+  const supabase = getServiceSupabase();
+  const { data } = await supabase
+    .from("candidate_working_files")
+    .select("chat:workspace->chat")
+    .eq("candidate_id", candidateId)
+    .maybeSingle();
+  const chat = (data as { chat?: unknown } | null)?.chat;
+  return Array.isArray(chat) ? keepRecent(chat as ChatMessage[]) : [];
 }
 
 export async function getWorkingFile(candidateId: string): Promise<WorkingFileRow | null> {

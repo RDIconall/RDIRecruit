@@ -21,6 +21,7 @@ import type {
 } from "../types";
 import type { ActivityEntry, Candidate, DecisionRead, JobOption, PoolMeta, Workspace } from "./types";
 import { parseFitRead } from "./fit-read";
+import { MAX_STORED_ENTRIES } from "./limits";
 import { mapCandidate, type ApplicationLite, type CandidateEvaluations, type ParsedExperienceEntry } from "./from-supabase";
 import { getWorkingFiles } from "./store";
 import { assignPoolStanding } from "./ranking";
@@ -58,6 +59,18 @@ type ActivityRow = { id: string; candidate_id: string; type: string | null; auth
 function toActivityEntry(r: ActivityRow): ActivityEntry {
   const type = r.type === "interview" || r.type === "comment" ? r.type : "note";
   return { id: r.id, type, author: r.author || "—", body: r.body, at: r.created_at };
+}
+
+/** Newest-first activity rows → each candidate's most recent entries, oldest first. */
+function groupRecentActivity(rows: ActivityRow[]): Map<string, ActivityEntry[]> {
+  const byCandidate = new Map<string, ActivityEntry[]>();
+  for (const r of rows) {
+    const list = byCandidate.get(r.candidate_id) ?? [];
+    if (list.length < MAX_STORED_ENTRIES) list.push(toActivityEntry(r));
+    byCandidate.set(r.candidate_id, list);
+  }
+  for (const list of byCandidate.values()) list.reverse();
+  return byCandidate;
 }
 
 async function loadJobStages(jobShortcode: string): Promise<StageColumn[]> {
@@ -508,12 +521,7 @@ async function buildCrossRolePool(
     getWorkingFiles(ids),
   ]);
 
-  const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of [...activityRows].reverse()) {
-    const list = activityByCandidate.get(r.candidate_id) ?? [];
-    list.push(toActivityEntry(r));
-    activityByCandidate.set(r.candidate_id, list);
-  }
+  const activityByCandidate = groupRecentActivity(activityRows);
 
   const appsByCandidate = new Map<string, ApplicationLite>();
   for (const a of appsRows) {
@@ -575,7 +583,6 @@ async function buildCrossRolePool(
     if (slice.transcript) workspace.transcripts[id] = slice.transcript;
     if (slice.deep) workspace.deep[id] = true;
     if (slice.processStatus) workspace.process[id] = slice.processStatus;
-    if (slice.chat?.length) workspace.chat[id] = slice.chat;
     const acts = activityByCandidate.get(id);
     if (acts?.length) workspace.activity[id] = acts;
 
@@ -688,12 +695,7 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     getWorkingFiles(ids),
   ]);
 
-  const activityByCandidate = new Map<string, ActivityEntry[]>();
-  for (const r of [...activityRows].reverse()) {
-    const list = activityByCandidate.get(r.candidate_id) ?? [];
-    list.push(toActivityEntry(r));
-    activityByCandidate.set(r.candidate_id, list);
-  }
+  const activityByCandidate = groupRecentActivity(activityRows);
 
   const appsByCandidate = new Map<string, ApplicationLite>();
   for (const a of appsRows) {
@@ -756,7 +758,6 @@ export async function loadTriagePool(jobShortcode: string): Promise<TriagePool> 
     if (slice.transcript) workspace.transcripts[id] = slice.transcript;
     if (slice.deep) workspace.deep[id] = true;
     if (slice.processStatus) workspace.process[id] = slice.processStatus;
-    if (slice.chat?.length) workspace.chat[id] = slice.chat;
     const acts = activityByCandidate.get(id);
     if (acts?.length) workspace.activity[id] = acts;
 
