@@ -81,7 +81,6 @@ export type EvidenceConfidence = "high" | "medium" | "low" | "unsupported";
 export interface RoDiagnostic {
   currentCapability: string;
   trajectory: string;
-  maturationPlacement?: string;
   note: string;
 }
 

@@ -53,19 +53,17 @@ function isUndergrad(degree: string | null | undefined): boolean {
 }
 
 /**
- * Career-span signal for the maturation/trajectory read — a LEVEL inference from
- * graduation + first-role dates, never age asked of the candidate and never a gate.
+ * Career-span signal for the trajectory read — a LEVEL inference from graduation +
+ * first-role dates, used only as the progression-rate denominator and never a gate.
  *
- * We anchor on undergraduate graduation (entry to the workforce) and measure years
- * of career. We also pass a maturation-placement estimate: assuming the standard
- * straight-through path (~22 at undergrad graduation), an approximate current age.
- * The evaluator applies it ONLY when the chronology looks straight-through, and only
- * to place the candidate on the RO maturation band — never as a stated attribute or cutoff.
+ * Only the span in years leaves this function. Credential years and any age
+ * estimate are never returned: the result is sent to the model and persisted on
+ * the analysis snapshot, and age must not reach either.
  */
 function deriveCareerContext(
   roles: ExperienceEntry[],
   education: Array<{ degree?: string; start?: string; end?: string }>,
-) {
+): { yearsOfCareer: number } | null {
   const undergradYears = education
     .filter((e) => isUndergrad(e.degree))
     .map((e) => yearOf(e.end) ?? yearOf(e.start))
@@ -75,7 +73,7 @@ function deriveCareerContext(
     .filter((y): y is number => y != null);
   const roleYears = roles.map((r) => yearOf(r.start)).filter((y): y is number => y != null);
 
-  // Prefer the undergrad year for the age anchor; else the earliest credential.
+  // Prefer the undergrad year as the workforce-entry anchor; else the earliest credential.
   const graduationYear = undergradYears.length
     ? Math.min(...undergradYears)
     : anyGradYears.length
@@ -88,13 +86,7 @@ function deriveCareerContext(
   if (!anchor) return null;
 
   const now = new Date().getFullYear();
-  const yearsOfCareer = Math.max(0, now - anchor);
-
-  // Maturation-placement estimate: ~22 at undergrad graduation, straight-through.
-  const assumedGradAge = 22;
-  const approxCurrentAge = graduationYear ? assumedGradAge + (now - graduationYear) : null;
-
-  return { graduationYear, firstRoleYear, yearsOfCareer, assumedGradAge, approxCurrentAge };
+  return { yearsOfCareer: Math.max(0, now - anchor) };
 }
 
 export async function scoreCandidate(
