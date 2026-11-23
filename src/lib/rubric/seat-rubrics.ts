@@ -41,7 +41,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Head of Clinical Operations & Study Delivery",
     mission:
       "Take a difficult clinical study, diagnose the real constraint, recover delivery, and build the clinical operations system so routine CEO/COO intervention is no longer required.",
-    aliases: [/head of clinical/i, /head of clinical operations/i, /study delivery/i],
+    aliases: [/\bhead of clinical operations\b/i, /\bhead of study delivery\b/i],
     dimensions: [
       dim("study_diagnosis_rescue", "Study diagnosis & rescue", 20, "Personally entered troubled studies, found the root constraint, changed the plan, and recovered enrollment/timeline/data/site/sample execution.", ["failing study inherited", "root constraint named", "personal decision/change", "measurable recovery"]),
       dim("end_to_end_delivery", "End-to-end clinical delivery ownership", 20, "Owned meaningful portions of protocol, startup, sites, enrollment, monitoring, samples, data, and closeout.", ["timelines", "budgets", "recruitment/sites/vendors", "samples/data/regulatory or quality interfaces"], 8),
@@ -68,7 +68,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Proposal Manager - Study Design",
     mission:
       "Turn incomplete client information into a clinical study RDI can sell and deliver: scope, operating model, assumptions, economics, proposal, and follow-through to signature.",
-    aliases: [/proposal/i, /study design/i, /commercial scoping/i],
+    aliases: [/\bproposal manager\b/i],
     dimensions: [
       dim("proposal_commercial_scoping", "Demonstrated proposal / commercial scoping ownership", 20, "Personally owned RFP/RFQ responses, SOWs, client proposals, budgets, bid defense, revisions, negotiation, or comparable project scoping.", ["RFP/RFQ/proposal ownership", "SOW/scope ownership", "bid defense/revisions/negotiation"]),
       dim("study_design_modeling", "Study design & operational modeling", 20, "Converts requirements into assumptions, sites, enrollment, recruitment, sample flow, testing workflow, timeline, staffing, and deliverables.", ["operational model", "site/enrollment/recruitment assumptions", "sample/testing/timeline/staffing model"]),
@@ -91,7 +91,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Founding Product Engineer - Clinical Systems",
     mission:
       "Own the technical/product system RDI runs on: understand workflow, decide what to build, code it, ship it, operate it, and remain accountable when it fails.",
-    aliases: [/founding product engineer/i, /product engineer/i, /clinical systems engineer/i],
+    aliases: [/\bfounding product engineer\b/i, /\bclinical systems engineer\b/i],
     dimensions: [
       dim("production_system_ownership", "Production system ownership", 25, "Owned consequential production systems with real users and reliability/data/financial/regulatory consequences after launch.", ["production ownership", "real users", "post-launch accountability", "consequential data/financial/regulatory/safety impact"], 1),
       dim("architecture_reliability", "Architecture + reliability", 20, "Evidence of architecture, testing, CI/CD, observability, incidents, migrations, distributed systems, error handling, and production debugging.", ["architecture", "testing/CI/CD", "observability/incidents", "migrations/root cause"]),
@@ -116,7 +116,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Clinical Data Manager - Data Integrity & Investigation",
     mission:
       "Own the dataset that tells the true story of what happened in the study and investigate every material inconsistency to root cause.",
-    aliases: [/clinical data manager/i, /data integrity/i, /data management/i],
+    aliases: [/\bclinical data manager\b/i],
     dimensions: [
       dim("data_investigation_root_cause", "Data investigation / root cause", 25, "Personally chased anomalies, discordant results, outliers, drift, transcription/lineage errors, and determined why, not merely what.", ["anomaly/root-cause investigation", "discordance/outlier/drift", "personal diagnosis"]),
       dim("source_verification_reconciliation", "Source verification + reconciliation", 20, "Reconciles source, EDC, lab results, samples, demographics, visit dates, and external data.", ["source/EDC/lab/sample reconciliation", "query resolution", "traceability"]),
@@ -140,7 +140,7 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Clinical Monitoring Standards Lead",
     mission:
       "Be the master of RDI's monitoring craft: personally capable of the work, able to teach it, inspect it, and build systems that keep every study audit-ready.",
-    aliases: [/monitoring standards/i, /principal cra/i, /clinical research associate/i, /clinical monitoring/i],
+    aliases: [/\bmonitoring standards\b/i, /\bprincipal cra\b/i, /\bclinical research associate\b/i],
     dimensions: [
       dim("hands_on_monitoring", "Hands-on monitoring mastery", 25, "Actually monitored studies and can inspect consent, source, CRF, compliance, deviations, queries, reports, and site files.", ["monitoring performed personally", "source/consent/CRF/protocol/deviation inspection", "site file/report quality"]),
       dim("audit_readiness_systems", "Audit readiness / inspection systems", 20, "Maintained or built systems keeping multiple studies inspection-ready.", ["audit prep/inspection response", "TMF/site files/CAPA", "documentation completeness"]),
@@ -163,7 +163,10 @@ export const BUILTIN_SEAT_RUBRICS: BuiltinSeatRubric[] = [
     title: "Laboratory Director / Director of Laboratory Operations",
     mission:
       "Own RDI's clinical laboratory as an operating and technical system: quality, instruments, people, assay implementation, capacity, compliance, troubleshooting, and reliability.",
-    aliases: [/laboratory director/i, /lab operations/i, /clinical laboratory/i, /dabcc/i, /lc-ms/i],
+    aliases: [
+      /\blab(?:oratory)? director\b/i,
+      /\bdirector(?:,|\s+of)?\s+(?:the\s+)?(?:clinical\s+)?lab(?:oratory)?(?:\s+operations)?\b/i,
+    ],
     dimensions: [
       dim("lab_leadership", "Clinical laboratory leadership", 20, "Operated consequential clinical laboratory functions.", ["clinical lab operation", "lab leadership", "throughput responsibility"]),
       dim("technical_ivd_depth", "Technical / IVD / clinical chemistry depth", 20, "Can challenge methods, understand assay behavior, troubleshoot, and oversee technical work relevant to RDI's testing scope.", ["IVD/clinical chemistry", "assay behavior", "technical oversight"]),
