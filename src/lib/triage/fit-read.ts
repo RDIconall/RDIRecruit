@@ -45,8 +45,8 @@ export function fitReadFromCanonical(parts: {
 }): FitRead | null {
   const reply = (parts.why ?? "").trim();
   if (!reply) return null;
-  const pq = (parts.personQuality ?? "").toLowerCase();
-  const v = (parts.seatVerdict ?? "").toLowerCase();
+  const pq = (parts.personQuality ?? "").trim().toLowerCase();
+  const v = (parts.seatVerdict ?? "").trim().toLowerCase();
   let sentiment: FitSentiment = "neutral";
   if (pq === "weak" || pq === "blocked" || v === "pass" || v === "wrong_seat") {
     sentiment = "negative";
