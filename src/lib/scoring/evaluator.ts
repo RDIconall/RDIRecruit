@@ -4,6 +4,7 @@ import { logClaudeUsage } from "../ai/usage";
 import { env, hasAnthropic } from "../env";
 import { gradeLog } from "../triage/grade-log";
 import { analyzeTenureStability, capTenureCategoryScore } from "../triage/tenure-stability";
+import { normalizeVerificationRead } from "./verification-read";
 import type { SeatContext } from "../jobs/seat-context";
 import type {
   AlternateSeatSignal,
@@ -743,6 +744,7 @@ function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): Eva
       ? legacyCategoriesFromSeatTotal(total, input.weights)
       : legacyCategoryScores;
   const complement = parsed.complement === "owner" ? "owner" : "technician";
+  const verificationClaims = Array.isArray(parsed.verification?.claims) ? parsed.verification.claims : [];
 
   return {
     complement,
@@ -796,8 +798,8 @@ function normalize(parsed: Partial<EvaluatorOutput>, input: EvaluatorInput): Eva
       resolve: parsed.digIn?.resolve ?? [],
     },
     verification: {
-      read: parsed.verification?.read ?? "Unverified (no profile)",
-      claims: parsed.verification?.claims ?? [],
+      read: normalizeVerificationRead(parsed.verification?.read, verificationClaims),
+      claims: verificationClaims,
       questions: parsed.verification?.questions ?? [],
       actions: parsed.verification?.actions ?? [],
     },

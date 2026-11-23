@@ -1,4 +1,5 @@
 import type { EvaluatorOutput } from "../scoring/evaluator";
+import { hasVerificationDiscrepancy } from "../scoring/verification-read";
 import type { Decision, DecisionRead, ValueRead } from "../triage/types";
 
 function decisionFor(evaluation: EvaluatorOutput): Decision {
@@ -21,12 +22,7 @@ function decisionFor(evaluation: EvaluatorOutput): Decision {
     return "reject";
   }
 
-  const verificationRead = evaluation.verification.read.toLowerCase();
-  const discrepancy =
-    verificationRead.includes("discrepancy") ||
-    verificationRead.includes("material") ||
-    evaluation.verification.claims.some((claim) => claim.verdict === "DISCREPANCY");
-  if (discrepancy) return "backup";
+  if (hasVerificationDiscrepancy(evaluation.verification)) return "backup";
   if ((!evaluation.salaryAsk || evaluation.salaryValue === "unstated") && evaluation.total < 82) {
     return "backup";
   }
