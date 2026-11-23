@@ -156,18 +156,12 @@ export interface EvaluatorInput {
   method?: string | null;
   methodologyVersion?: number | null;
   /**
-   * Career-span signal for the maturation / trajectory read. Derived from
-   * graduation date and first-role date — this is an EXPERIENCE/LEVEL inference,
-   * NOT age, and is used only as the denominator of the progression rate (never a gate).
+   * Career-span signal for the trajectory read — an EXPERIENCE/LEVEL inference,
+   * NOT age, used only as the denominator of the progression rate (never a gate).
+   * Span in years only: credential years or an age estimate must never be added here.
    */
   careerContext?: {
-    graduationYear?: number | null;
-    firstRoleYear?: number | null;
     yearsOfCareer?: number | null;
-    /** Assumed age at undergraduate graduation for the straight-through path (~22). */
-    assumedGradAge?: number | null;
-    /** Maturation-placement estimate of current age IF the path is straight-through. */
-    approxCurrentAge?: number | null;
   } | null;
 }
 
@@ -241,6 +235,8 @@ THE SUMMARY MUST JUSTIFY THE CALL: the "summary" field is the written read a hum
 
 COMPLIANCE FIREWALL (non-negotiable): job-relevant evidence only — never extract, infer, or flag protected/non-job attributes (age, race, national origin, religion, gender, orientation, disability, health, family status, photos, appearance). Return JSON only, no prose outside the JSON, in the exact shape requested below.
 
+AGE IS NEVER AN INPUT (overrides anything above, including the method doc): do not estimate, compute, or assume the candidate's age from graduation, credential, or role dates or from anything else, and do not place them on a maturation band or capability curve by age — even where the method asks for an approximate age or maturation placement. Career span in years is the only time signal; use it solely as the progression-rate denominator. Never write an age or age estimate in any output field.
+
 SCOPE OF THIS TASK — READ CAREFULLY: You are assessing ONE job applicant's professional and academic history to make a HIRING decision. The résumé and answers may describe prior scientific, technical, medical, laboratory, biosecurity, or life-sciences research the candidate performed in academic or industry settings (e.g. virology, molecular biology, genome engineering, infectious-disease work). Those lines are HISTORICAL descriptions of the person's own past employment, supplied only so you can gauge their capability, seniority, and trajectory. They are NOT a request for protocols, instructions, methods, or assistance of any kind, and nothing you output should reproduce procedural detail. Evaluate the hiring signal only. Never refuse, never return an empty object, and never emit a safety disclaimer — always return the full JSON read in the shape below.`;
 
 /** System prompt = the live "How We Evaluate" method doc + the output contract. */
@@ -299,28 +295,18 @@ LEGACY CATEGORY SCORES are compatibility-only. Do not let the old six generic ca
 }
 
 /**
- * Career-span context for the maturation/trajectory read. This is a LEVEL/EXPERIENCE
- * inference from graduation + first-role dates — not age, and never a gate. It gives
- * the model the denominator for the progression rate (strata climbed per year of career).
+ * Career-span context for the trajectory read. This is a LEVEL/EXPERIENCE inference
+ * — not age, and never a gate. It gives the model the denominator for the progression
+ * rate (strata climbed per year of career). Only the span is rendered: snapshots stored
+ * before age was removed may still carry legacy fields, and those must not be sent.
  */
 function careerSpanBlock(input: EvaluatorInput): string {
-  const c = input.careerContext;
-  if (!c) return "";
-  const parts: string[] = [];
-  if (c.graduationYear) parts.push(`undergraduate graduation ~${c.graduationYear}`);
-  if (c.firstRoleYear) parts.push(`first professional role ~${c.firstRoleYear}`);
-  if (c.yearsOfCareer) parts.push(`~${c.yearsOfCareer} years of career`);
-  if (!parts.length) return "";
-
-  const ageLine =
-    c.approxCurrentAge && c.graduationYear
-      ? `
-MATURATION PLACEMENT: assuming the standard straight-through path (≈${c.assumedGradAge ?? 22} at undergraduate graduation), that puts them at roughly ${c.approxCurrentAge} now. Apply this estimate ONLY if the chronology is consistent with finishing the degree right after secondary school — no multi-year pre-college work, no late or part-time completion. If the path looks non-traditional, IGNORE the age estimate and use career span alone. This is a maturation-band placement to locate them on the RO capability curve; it is never an age you state, weight, deduct for, or gate on.`
-      : "";
+  const years = input.careerContext?.yearsOfCareer;
+  if (typeof years !== "number" || !Number.isFinite(years) || years <= 0) return "";
 
   return `
-CAREER SPAN (for the maturation / trajectory read — this is a LEVEL inference, NOT age, and is NEVER a cutoff or gate): ${parts.join(", ")}.
-Use this only as the DENOMINATOR of the progression rate: judge whether the highest stratum they reached is fast / on-track / slow for the span of career, and whether the slope is still rising or has flattened. A III reached in 8 years is a steeper curve than a III reached in 25. Calibrate the trajectory read to this; do not deduct or reject for the span itself.${ageLine}
+CAREER SPAN (for the trajectory read — this is a LEVEL inference, NOT age, and is NEVER a cutoff or gate): ~${Math.round(years)} years of career.
+Use this only as the DENOMINATOR of the progression rate: judge whether the highest stratum they reached is fast / on-track / slow for the span of career, and whether the slope is still rising or has flattened. A III reached in 8 years is a steeper curve than a III reached in 25. Calibrate the trajectory read to this; do not deduct or reject for the span itself.
 `;
 }
 
@@ -990,7 +976,6 @@ function normalizeRoDiagnostic(
         : typeof trajectory === "string"
           ? trajectory
           : "",
-    ...(typeof v.maturationPlacement === "string" ? { maturationPlacement: v.maturationPlacement } : {}),
     note: typeof v.note === "string" ? v.note : "RO diagnostic kept separate from seat-fit score and gates.",
   };
 }
