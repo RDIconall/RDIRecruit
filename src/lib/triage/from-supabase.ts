@@ -33,6 +33,7 @@ import {
   type InterviewBar,
 } from "./interview-bar";
 import { hasMaterialSyntheticExpertise } from "../scoring/seat-fit";
+import { hasVerificationDiscrepancy as hasDiscrepancy } from "../scoring/verification-read";
 import {
   analyzeTenureStability,
   applyTenureDecisionGate,
@@ -147,13 +148,6 @@ function humanCut(input: MapInput): boolean {
     input.overlay?.status === "withdrawn" ||
     Boolean(input.candidate.disqualified)
   );
-}
-
-function hasDiscrepancy(v: VerificationPayload | null): boolean {
-  if (!v) return false;
-  const read = (v.read ?? "").toLowerCase();
-  if (read.includes("discrepancy") || read.includes("material")) return true;
-  return (v.claims ?? []).some((c) => (c.verdict ?? "").toUpperCase() === "DISCREPANCY");
 }
 
 // A file is only put on the do-not-interview list when something concrete says
