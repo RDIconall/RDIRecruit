@@ -872,10 +872,28 @@ function normalizeTriage(
   };
 }
 
+/** Case- and whitespace-insensitive match of a model token against an enum. */
+function matchToken<T extends string>(value: unknown, allowed: readonly T[]): T | null {
+  if (typeof value !== "string") return null;
+  const token = value.trim().toLowerCase();
+  return allowed.find((option) => option.toLowerCase() === token) ?? null;
+}
+
+const PERSON_QUALITIES = ["high", "solid", "promising", "weak", "blocked"] as const satisfies readonly PersonQuality[];
+const INTEGRITY_STATUSES = ["clear", "concern", "fail"] as const satisfies readonly IntegrityGate["status"][];
+const INTEGRITY_CONCERNS = [
+  "MATERIAL_SYNTHETIC_EXPERTISE",
+  "POSSIBLE_MISREPRESENTATION",
+  "INTEGRITY_CONCERN_HIGH",
+  "OTHER",
+] as const satisfies readonly NonNullable<IntegrityGate["concern"]>[];
+const GATE_STATUSES = ["pass", "warn", "fail", "unknown"] as const satisfies readonly GateResult["status"][];
+const GATE_SEVERITIES = ["info", "caution", "critical"] as const satisfies readonly NonNullable<GateResult["severity"]>[];
+
+// Gates fail closed: a missing or unrecognized token must never read as the
+// favorable value, or the score cap and fit read are skipped.
 function normalizePersonQuality(value: unknown): PersonQuality {
-  return value === "high" || value === "solid" || value === "promising" || value === "weak" || value === "blocked"
-    ? value
-    : "solid";
+  return matchToken(value, PERSON_QUALITIES) ?? "weak";
 }
 
 function normalizeEvidenceConfidence(value: unknown): EvidenceConfidence {
@@ -885,16 +903,10 @@ function normalizeEvidenceConfidence(value: unknown): EvidenceConfidence {
 }
 
 function normalizeIntegrityGate(value: unknown): IntegrityGate {
-  if (!value || typeof value !== "object") return { status: "clear", note: "" };
-  const v = value as Partial<IntegrityGate>;
-  const status = v.status === "fail" || v.status === "concern" || v.status === "clear" ? v.status : "clear";
-  const concern =
-    v.concern === "MATERIAL_SYNTHETIC_EXPERTISE" ||
-    v.concern === "POSSIBLE_MISREPRESENTATION" ||
-    v.concern === "INTEGRITY_CONCERN_HIGH" ||
-    v.concern === "OTHER"
-      ? v.concern
-      : undefined;
+  if (!value || typeof value !== "object") return { status: "fail", note: "" };
+  const v = value as Record<string, unknown>;
+  const status = matchToken(v.status, INTEGRITY_STATUSES) ?? "fail";
+  const concern = matchToken(v.concern, INTEGRITY_CONCERNS) ?? undefined;
   return { status, ...(concern ? { concern } : {}), note: typeof v.note === "string" ? v.note : "" };
 }
 
@@ -902,14 +914,8 @@ function normalizeGateResults(values: unknown[]): GateResult[] {
   return values
     .filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object"))
     .map((v) => {
-      const status =
-        v.status === "pass" || v.status === "warn" || v.status === "fail" || v.status === "unknown"
-          ? v.status
-          : "unknown";
-      const severity =
-        v.severity === "info" || v.severity === "caution" || v.severity === "critical"
-          ? v.severity
-          : undefined;
+      const status = matchToken(v.status, GATE_STATUSES) ?? "fail";
+      const severity = matchToken(v.severity, GATE_SEVERITIES) ?? undefined;
       return {
         key: typeof v.key === "string" && v.key ? v.key : "gate",
         label: typeof v.label === "string" && v.label ? v.label : "Gate",
