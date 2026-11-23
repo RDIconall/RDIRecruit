@@ -11,21 +11,36 @@ const DOCS_DIR = path.join(process.cwd(), "docs");
 
 export const METHOD_DOC_FILE = "RDI_How_We_Evaluate.md";
 
-/** Job rubric files keyed by the title tokens that should resolve to them. */
-const RUBRIC_FILES: Array<{ file: string; match: RegExp }> = [
+/**
+ * Job rubric files keyed by the explicit seat titles that resolve to them.
+ * Patterns name the seat itself: single words like "assistant", "finance", or
+ * "principal" appear in unrelated requisitions and must never select a seat's
+ * rubric. A title that names more than one seat resolves to none, so the
+ * generic default applies instead of a guess.
+ */
+const RUBRIC_FILES: Array<{ file: string; titles: RegExp[] }> = [
   {
     file: "RDI_Senior_Controller_Candidate_Grading_Rubric_COMPLETE_v2.md",
-    match: /controller|finance|accounting/i,
+    titles: [/\b(?:senior|financial|corporate)\s+controller\b/i],
   },
   {
     file: "RDI_Executive_Assistant_Candidate_Grading_Rubric_COMPLETE_v2.md",
-    match: /executive assistant|\bea\b|assistant/i,
+    titles: [/\bexecutive\s+assistant\b/i],
   },
   {
     file: "RDI_Principal_CRA_Monitoring_Standards_Training_Rubric_COMPLETE_v2.md",
-    match: /principal|\bcra\b|monitoring standards|clinical research associate/i,
+    titles: [
+      /\bprincipal\s+cra\b/i,
+      /\bprincipal\s+clinical\s+research\s+associate\b/i,
+      /\bmonitoring\s+standards\b/i,
+    ],
   },
 ];
+
+function seedFileForTitle(title: string): string | null {
+  const matches = RUBRIC_FILES.filter((r) => r.titles.some((rx) => rx.test(title)));
+  return matches.length === 1 ? matches[0]!.file : null;
+}
 
 const cache = new Map<string, string | null>();
 
@@ -55,9 +70,9 @@ export async function getSeedRubricForJob(
   if (builtin) return seatRubricMarkdown(builtin);
 
   if (!title) return null;
-  const entry = RUBRIC_FILES.find((r) => r.match.test(title));
-  if (!entry) return null;
-  return readDoc(entry.file);
+  const file = seedFileForTitle(title);
+  if (!file) return null;
+  return readDoc(file);
 }
 
 /** All known rubric doc filenames (for listing / tooling). */
