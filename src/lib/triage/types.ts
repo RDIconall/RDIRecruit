@@ -270,7 +270,7 @@ export interface Logistics {
   mode: string;
   location: string;
   distance: string;
-  likelihood: string; // High | Medium | Low | —
+  likelihood: string; // High | Medium | Low | Unconfirmed | —
   read: string;
   signals: LogisticsSignal[];
 }
