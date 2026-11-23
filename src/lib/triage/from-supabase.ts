@@ -22,6 +22,7 @@ import type {
 import { wbCandidate } from "../workable/links";
 import { reviewerSignalFor } from "./reviewer";
 import { askNumK, cityState } from "./format";
+import { placeLocation } from "./location";
 import { avatarColor, DECISION_NEXT, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision, normalizeProcessStatus } from "./types";
 import { summarizeAnswerGrades } from "./answer-grades";
@@ -597,17 +598,22 @@ function answersFrom(
   return [];
 }
 
-function likelihoodFrom(location: string): Logistics["likelihood"] {
-  const loc = location.toLowerCase();
-  if (!loc || loc === "—") return "—";
-  if (/(\bca\b|california)/.test(loc)) return "High";
-  if (/(united states|usa|u\.s\.|, [a-z]{2}$)/.test(loc) || /\b(tx|ny|nj|wa|fl|az|il|ma|pa)\b/.test(loc))
-    return "Medium";
-  return "Low";
+function likelihoodFrom(location: string, structured: unknown): Logistics["likelihood"] {
+  const placement = placeLocation(location, structured);
+  switch (placement.kind) {
+    case "none":
+      return "—";
+    case "us":
+      return placement.state === "CA" ? "High" : "Medium";
+    case "foreign":
+      return "Low";
+    case "unconfirmed":
+      return "Unconfirmed";
+  }
 }
 
-function logisticsFrom(input: MapInput, location: string): Logistics {
-  const likelihood = likelihoodFrom(location);
+function logisticsFrom(input: MapInput, location: string, structured: unknown): Logistics {
+  const likelihood = likelihoodFrom(location, structured);
   const localClaims = (input.evals.verification?.claims ?? []).filter(
     (c) => (c.category ?? "").toLowerCase() === "local",
   );
@@ -620,6 +626,7 @@ function logisticsFrom(input: MapInput, location: string): Logistics {
   if (likelihood === "High") read = `${location} reads as in or near California — the ${JOB_BASE} on-site ask is realistic. Confirm exact commute.`;
   else if (likelihood === "Medium") read = `${location} is US-based but outside California — confirm relocation intent before a ${JOB_BASE} on-site slot.`;
   else if (likelihood === "Low") read = `${location} is outside the US / region on file — relocation and work-authorization are open questions for a ${JOB_BASE} role.`;
+  else if (likelihood === "Unconfirmed") read = `${location} does not confirm a US state or country — confirm where the candidate is based before assessing the ${JOB_BASE} on-site ask.`;
   else read = "Location not stated — confirm where the candidate is based before assessing the on-site ask.";
 
   return {
@@ -1039,7 +1046,10 @@ export function mapCandidate(input: MapInput): Candidate {
   const mismatch =
     salaryValue === "rich for fit" || salaryValue === "poor value" || hasDiscrepancy(input.evals.verification);
 
-  const location = input.candidate.location || ((input.candidate.raw?.address as string) ?? "") || "—";
+  const rawAddress = typeof input.candidate.raw?.address === "string" ? input.candidate.raw.address.trim() : "";
+  const location = input.candidate.location || rawAddress || "—";
+  // Workable's parsed location only describes the address it came with.
+  const structuredLocation = rawAddress && rawAddress === location.trim() ? input.candidate.raw?.location : undefined;
 
   const baseRedFlags = [...(input.read?.flags ?? redFlagsFrom(input, tenure))];
   // Claude-authored flag lists omit our deterministic hopping flag — always merge it.
@@ -1144,7 +1154,7 @@ export function mapCandidate(input: MapInput): Candidate {
     timeline: timelineFromNarrative(input.narrative, input.evals.roleReads),
     cover: coverFromApplication(input.application?.cover_letter ?? null),
     answers: answersFrom(input.evals.answerGrades, input.application),
-    logistics: logisticsFrom(input, location),
+    logistics: logisticsFrom(input, location, structuredLocation),
     fireflies: firefliesFrom(input.interviewEvidence),
     redFlags: baseRedFlags,
     resume: resumeFrom(input.application),
@@ -1159,7 +1169,7 @@ export function mapCandidate(input: MapInput): Candidate {
     initials: initialsOf(input.candidate.name || "?"),
     avatarColor: avatarColor(input.candidate.workable_id || input.candidate.name || "x"),
     photoUrl: photoUrlFor(input.candidate),
-    locationShort: cityState(location),
+    locationShort: cityState(location, structuredLocation),
     experience: experienceFrom(input.application, ro),
     answersRead,
     specRead,

@@ -3,78 +3,15 @@
 // the tight, consistent forms the data grid columns expect. Pure + deterministic
 // so they're safe to use in the Supabase mapper and in UI cells alike.
 
-const US_STATES: Record<string, string> = {
-  alabama: "AL", alaska: "AK", arizona: "AZ", arkansas: "AR", california: "CA",
-  colorado: "CO", connecticut: "CT", delaware: "DE", "district of columbia": "DC",
-  florida: "FL", georgia: "GA", hawaii: "HI", idaho: "ID", illinois: "IL",
-  indiana: "IN", iowa: "IA", kansas: "KS", kentucky: "KY", louisiana: "LA",
-  maine: "ME", maryland: "MD", massachusetts: "MA", michigan: "MI", minnesota: "MN",
-  mississippi: "MS", missouri: "MO", montana: "MT", nebraska: "NE", nevada: "NV",
-  "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY",
-  "north carolina": "NC", "north dakota": "ND", ohio: "OH", oklahoma: "OK",
-  oregon: "OR", pennsylvania: "PA", "rhode island": "RI", "south carolina": "SC",
-  "south dakota": "SD", tennessee: "TN", texas: "TX", utah: "UT", vermont: "VT",
-  virginia: "VA", washington: "WA", "west virginia": "WV", wisconsin: "WI", wyoming: "WY",
-};
-const STATE_CODES = new Set(Object.values(US_STATES));
-const COUNTRY_NOISE = new Set(["usa", "us", "u.s.", "u.s.a.", "united states", "united states of america"]);
-const STREET_RE = /\d|\b(st|street|ave|avenue|blvd|boulevard|rd|road|dr|drive|ln|lane|way|apt|suite|ste|unit|hwy|highway|ct|court|pl|place|pkwy|parkway|fl|floor)\b/i;
-
-/** Resolve a location part to a 2-letter state code, or null if it isn't a state. */
-function toStateCode(part: string): string | null {
-  // Strip a trailing ZIP ("California 91101", "CA 95123-1234") then match.
-  const p = part.trim().toLowerCase().replace(/\.$/, "").replace(/\s+\d{5}(-\d{4})?$/, "").trim();
-  if (US_STATES[p]) return US_STATES[p];
-  const code = p.toUpperCase();
-  if (code.length === 2 && STATE_CODES.has(code)) return code;
-  return null;
-}
+import { shortLocation } from "./location";
 
 /**
- * Standardize a free-text location / mailing address to "City, ST". Falls back to
- * the state name when no city is recoverable, then to a cleaned single token, then
- * to a dash. Examples:
- *   "400 Hacker Blvd Apt 5, San Jose, CA 95123" → "San Jose, CA"
- *   "Pasadena, California, USA"                  → "Pasadena, CA"
- *   "California"                                 → "California"
- *   "Remote"                                     → "Remote"
+ * Standardize a free-text location / mailing address to "City, ST" when it is a
+ * confirmed US address; see `shortLocation`. `structured` is Workable's parsed
+ * location for the same address, when known.
  */
-export function cityState(raw: string | null | undefined): string {
-  if (!raw) return "—";
-  const cleaned = raw.replace(/\s+/g, " ").trim();
-  if (!cleaned || cleaned === "—") return "—";
-
-  const parts = cleaned
-    .split(",")
-    .map((p) => p.trim())
-    .filter((p) => p && !COUNTRY_NOISE.has(p.toLowerCase()));
-  if (parts.length === 0) return "—";
-
-  // Find the state token (search from the right — state sits late in an address).
-  let stateIdx = -1;
-  let stateCode: string | null = null;
-  for (let i = parts.length - 1; i >= 0; i--) {
-    const code = toStateCode(parts[i]);
-    if (code) {
-      stateIdx = i;
-      stateCode = code;
-      break;
-    }
-  }
-
-  if (stateCode && stateIdx >= 0) {
-    // City is the part just before the state, unless that part is a street line.
-    for (let i = stateIdx - 1; i >= 0; i--) {
-      if (!STREET_RE.test(parts[i])) return `${parts[i]}, ${stateCode}`;
-    }
-    // No usable city → show the full state name for readability.
-    const full = Object.keys(US_STATES).find((k) => US_STATES[k] === stateCode);
-    return full ? full.replace(/\b\w/g, (c) => c.toUpperCase()) : stateCode;
-  }
-
-  // No state found: return the first non-street token (e.g. "Remote", "London").
-  const city = parts.find((p) => !STREET_RE.test(p));
-  return city ?? parts[parts.length - 1];
+export function cityState(raw: string | null | undefined, structured?: unknown): string {
+  return shortLocation(raw, structured);
 }
 
 /** Parse a salary token like "$145,000", "145k", "145" into thousands (→ 145). */
