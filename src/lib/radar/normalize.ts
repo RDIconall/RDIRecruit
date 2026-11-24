@@ -6,10 +6,33 @@ function clean(v: unknown): string | null {
   return s.length ? s : null;
 }
 
+/**
+ * Profile slug from a LinkedIn URL. Only an http(s) URL whose host is
+ * linkedin.com (or a subdomain) and whose path starts with /in/<slug> counts;
+ * the text "linkedin.com/in/" anywhere else in a URL is attacker-controlled
+ * and must never produce another person's key.
+ */
 function linkedinSlug(url: string | null): string | null {
   if (!url) return null;
-  const m = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
-  return m ? m[1].toLowerCase() : null;
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  if (parsed.username || parsed.password || parsed.port) return null;
+  const host = parsed.hostname.toLowerCase();
+  if (host !== "linkedin.com" && !host.endsWith(".linkedin.com")) return null;
+  const [first, slug] = parsed.pathname.split("/").filter(Boolean);
+  if (first?.toLowerCase() !== "in" || !slug) return null;
+  return slug.toLowerCase();
+}
+
+/** `li:<slug>` key for a profile URL, or null when it is not a LinkedIn profile URL. */
+export function linkedinDedupeKey(url: string | null | undefined): string | null {
+  const slug = linkedinSlug(clean(url));
+  return slug ? `li:${slug}` : null;
 }
 
 /**
@@ -20,8 +43,8 @@ function linkedinSlug(url: string | null): string | null {
 export function dedupeKey(c: { email?: string | null; linkedinUrl?: string | null; fullName?: string | null; firstName?: string | null; lastName?: string | null; company?: string | null }): string | null {
   const email = clean(c.email)?.toLowerCase();
   if (email) return `email:${email}`;
-  const slug = linkedinSlug(clean(c.linkedinUrl));
-  if (slug) return `li:${slug}`;
+  const li = linkedinDedupeKey(c.linkedinUrl);
+  if (li) return li;
   const name = clean(c.fullName) || [clean(c.firstName), clean(c.lastName)].filter(Boolean).join(" ");
   const company = clean(c.company);
   if (name && company) return `nc:${name.toLowerCase()}|${company.toLowerCase()}`;

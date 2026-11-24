@@ -2,7 +2,7 @@ import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { getServiceSupabase } from "../supabase/server";
 import { defaultScorecard } from "./scorecard";
-import { normalizeContact } from "./normalize";
+import { linkedinDedupeKey, normalizeContact } from "./normalize";
 import {
   EMPTY_CRITERIA,
   type ConsentStatus,
@@ -218,13 +218,19 @@ export async function upsertContact(
   const n = normalizeContact(raw);
   const supabase = db();
 
-  if (n.dedupeKey) {
+  let dedupeKey = n.dedupeKey;
+  if (dedupeKey) {
     const { data: existing } = await supabase
       .from("radar_contacts")
-      .select("id, pipeline")
-      .eq("dedupe_key", n.dedupeKey)
+      .select("id, pipeline, linkedin_url")
+      .eq("dedupe_key", dedupeKey)
       .maybeSingle();
-    if (existing) {
+    // A li: key only identifies a row whose own stored profile URL yields the
+    // same key; otherwise the row was keyed from an untrusted URL, so keep the
+    // incoming contact separate instead of merging into it.
+    if (existing && dedupeKey.startsWith("li:") && linkedinDedupeKey(existing.linkedin_url) !== dedupeKey) {
+      dedupeKey = null;
+    } else if (existing) {
       const merged = Array.from(new Set([...(existing.pipeline ?? []), opts.pipeline]));
       // Fill blanks only; never overwrite human/owner edits with provider nulls.
       await supabase
@@ -264,17 +270,17 @@ export async function upsertContact(
       raw: n.raw,
       email_status: n.emailStatus,
       owner: opts.owner ?? null,
-      dedupe_key: n.dedupeKey,
+      dedupe_key: dedupeKey,
     })
     .select("id")
     .single();
   if (error) {
     // Unique-violation race: a concurrent insert won. Treat as merge.
-    if ((error as { code?: string }).code === "23505" && n.dedupeKey) {
+    if ((error as { code?: string }).code === "23505" && dedupeKey) {
       const { data: ex } = await supabase
         .from("radar_contacts")
         .select("id")
-        .eq("dedupe_key", n.dedupeKey)
+        .eq("dedupe_key", dedupeKey)
         .maybeSingle();
       if (ex) return { id: String(ex.id), inserted: false };
     }
