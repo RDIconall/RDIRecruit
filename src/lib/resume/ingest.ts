@@ -3,6 +3,7 @@ import { hasSupabase } from "../env";
 import { downloadResumeFile, hashResumeSource } from "./download";
 import { extractTextFromResume } from "./extract-text";
 import { narrativeFromParsedResume, experienceFromParsedResume, educationFromParsedResume } from "./narrative-from-parse";
+import { resumeIngestPausedUntil } from "./ingest-attempts";
 import { parseResumeIntelligently } from "./parse-resume";
 import type { ResumeIngestResult } from "./types";
 
@@ -22,7 +23,7 @@ export async function ingestResumeForCandidate(input: {
 
   const { data: existing } = await supabase
     .from("applications")
-    .select("resume_source_hash, resume_storage_path")
+    .select("resume_source_hash, resume_storage_path, resume_ingest_attempts, resume_ingest_attempted_at, resume_ingest_error")
     .eq("candidate_id", input.candidateId)
     .maybeSingle();
 
@@ -30,47 +31,38 @@ export async function ingestResumeForCandidate(input: {
     return null;
   }
 
-  const { buffer, mime, extension } = await downloadResumeFile(input.resumeUrl);
-  const text = await extractTextFromResume(buffer, mime, extension);
-  const parsed = await parseResumeIntelligently({
-    candidateName: input.candidateName,
-    resumeText: text,
-    workableExperience: input.parsedExperience,
-    workableEducation: input.parsedEducation,
-  });
-
-  const storagePath = `${input.candidateId}/resume.${extension}`;
-  const { error: uploadError } = await supabase.storage
-    .from("captures")
-    .upload(storagePath, buffer, { upsert: true, contentType: mime });
-
-  if (uploadError) {
-    throw new Error(`Storage upload failed: ${uploadError.message}`);
+  const pausedUntil = resumeIngestPausedUntil(existing);
+  if (pausedUntil) {
+    const lastError = existing?.resume_ingest_error ? ` (last error: ${existing.resume_ingest_error})` : "";
+    throw new Error(
+      `Résumé ingest paused after ${existing?.resume_ingest_attempts} failed attempts until ${new Date(pausedUntil).toISOString()}${lastError}`,
+    );
   }
 
-  const narrative = narrativeFromParsedResume(parsed);
-  const parsedExperience = experienceFromParsedResume(parsed);
-  const parsedEducation = educationFromParsedResume(parsed);
-
-  const { error: appUpdateError } = await supabase
+  const { error: attemptError } = await supabase
     .from("applications")
     .update({
-      resume_storage_path: storagePath,
-      resume_mime: mime,
-      resume_text: text,
-      resume_parsed: parsed,
-      resume_ingested_at: new Date().toISOString(),
-      resume_source_hash: sourceHash,
-      parsed_experience: parsedExperience.length ? parsedExperience : input.parsedExperience,
-      parsed_education: parsedEducation.length ? parsedEducation : input.parsedEducation,
+      resume_ingest_attempts: (existing?.resume_ingest_attempts ?? 0) + 1,
+      resume_ingest_attempted_at: new Date().toISOString(),
     })
     .eq("candidate_id", input.candidateId);
-
-  // Surface (don't swallow) a failed write — otherwise the upload "succeeds" and
-  // callers count a false ingest while resume_storage_path/resume_text stay null.
-  if (appUpdateError) {
-    throw new Error(`Application résumé update failed: ${appUpdateError.message}`);
+  if (attemptError) {
+    throw new Error(`Application résumé attempt update failed: ${attemptError.message}`);
   }
+
+  let stored: Awaited<ReturnType<typeof downloadParseAndStore>>;
+  try {
+    stored = await downloadParseAndStore(supabase, input, input.resumeUrl, sourceHash);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await supabase
+      .from("applications")
+      .update({ resume_ingest_error: message.slice(0, 500) })
+      .eq("candidate_id", input.candidateId);
+    throw error;
+  }
+  const { buffer, mime, text, parsed, storagePath } = stored;
+  const narrative = narrativeFromParsedResume(parsed);
 
   await supabase.from("evidence").delete().eq("candidate_id", input.candidateId).eq("source_type", "resume");
 
@@ -132,6 +124,58 @@ export async function ingestResumeForCandidate(input: {
   });
 
   return { storagePath, mime, text, parsed };
+}
+
+async function downloadParseAndStore(
+  supabase: ReturnType<typeof getServiceSupabase>,
+  input: Parameters<typeof ingestResumeForCandidate>[0],
+  resumeUrl: string,
+  sourceHash: string,
+) {
+  const { buffer, mime, extension } = await downloadResumeFile(resumeUrl);
+  const text = await extractTextFromResume(buffer, mime, extension);
+  const parsed = await parseResumeIntelligently({
+    candidateName: input.candidateName,
+    resumeText: text,
+    workableExperience: input.parsedExperience,
+    workableEducation: input.parsedEducation,
+  });
+
+  const storagePath = `${input.candidateId}/resume.${extension}`;
+  const { error: uploadError } = await supabase.storage
+    .from("captures")
+    .upload(storagePath, buffer, { upsert: true, contentType: mime });
+
+  if (uploadError) {
+    throw new Error(`Storage upload failed: ${uploadError.message}`);
+  }
+
+  const parsedExperience = experienceFromParsedResume(parsed);
+  const parsedEducation = educationFromParsedResume(parsed);
+
+  const { error: appUpdateError } = await supabase
+    .from("applications")
+    .update({
+      resume_storage_path: storagePath,
+      resume_mime: mime,
+      resume_text: text,
+      resume_parsed: parsed,
+      resume_ingested_at: new Date().toISOString(),
+      resume_source_hash: sourceHash,
+      resume_ingest_attempts: 0,
+      resume_ingest_error: null,
+      parsed_experience: parsedExperience.length ? parsedExperience : input.parsedExperience,
+      parsed_education: parsedEducation.length ? parsedEducation : input.parsedEducation,
+    })
+    .eq("candidate_id", input.candidateId);
+
+  // Surface (don't swallow) a failed write — otherwise the upload "succeeds" and
+  // callers count a false ingest while resume_storage_path/resume_text stay null.
+  if (appUpdateError) {
+    throw new Error(`Application résumé update failed: ${appUpdateError.message}`);
+  }
+
+  return { buffer, mime, text, parsed, storagePath };
 }
 
 export async function getSignedResumeUrl(
