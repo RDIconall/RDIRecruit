@@ -3,12 +3,13 @@
 import { CSSProperties, useEffect, useState } from "react";
 import { APP, decisionColor, isAdvancedStage, verdictDot, workableStageLabel, describeMissingInputs } from "@/lib/triage/app-theme";
 import { standingLabel } from "@/lib/triage/ranking";
+import { findByCompany, normalizeCompanyName } from "@/lib/triage/company-match";
 import {
   decisionLabelForPhase,
   detectPipelinePhase,
   type PipelinePhase,
 } from "@/lib/triage/pipeline-phase";
-import type { ActivityEntry, ActivityType, Candidate, Decision, VerdictRead } from "@/lib/triage/types";
+import type { ActivityEntry, ActivityType, Candidate, Decision, ResumeRole, VerdictRead } from "@/lib/triage/types";
 import type { WorkspaceApi } from "./use-workspace";
 import { useTriageData } from "./context";
 import { useIsNarrow } from "./use-media-query";
@@ -105,6 +106,19 @@ function formatStamp(iso: string | undefined | null): string {
   );
 }
 
+/**
+ * The résumé role for a career step. Companies must match by full name (see
+ * findByCompany); a title is only consulted when the step names no company,
+ * and then only an exact, unambiguous title.
+ */
+function matchResumeRole(roles: ResumeRole[], company: string, role: string): ResumeRole | undefined {
+  if (normalizeCompanyName(company)) return findByCompany(company, roles, (r) => r.company);
+  const title = normalizeCompanyName(role);
+  if (!title) return undefined;
+  const hits = roles.filter((r) => normalizeCompanyName(r.title) === title);
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
 interface RecordRow {
   years: string;
   org: string;
@@ -131,18 +145,7 @@ function buildRecord(c: Candidate): RecordRow[] {
   const steps = c.careerProgression?.steps ?? [];
   const roles = c.resume?.roles ?? [];
 
-  const matchRole = (company: string, role: string) => {
-    const cl = (company || "").toLowerCase();
-    const rl = (role || "").toLowerCase();
-    return (
-      roles.find(
-        (r) =>
-          r.company &&
-          cl &&
-          (r.company.toLowerCase().includes(cl.slice(0, 6)) || cl.includes(r.company.toLowerCase().slice(0, 6))),
-      ) ?? roles.find((r) => r.title && rl && r.title.toLowerCase().includes(rl.slice(0, 6)))
-    );
-  };
+  const matchRole = (company: string, role: string) => matchResumeRole(roles, company, role);
   // Pick the most quantified / longest bullet as the "biggest accomplishment".
   const topBullet = (bullets: string[]): string => {
     if (!bullets.length) return "";
@@ -281,18 +284,8 @@ export function CandidateDossier({ wsApi, activeId, openPool, stages }: Props) {
     if (!c.careerProgression?.hasData) return [];
     const roles = c.resume?.roles ?? [];
     // Career steps carry no dates, so borrow the matching résumé role's period to order them.
-    const periodFor = (company: string, role: string): string | undefined => {
-      const cl = (company || "").toLowerCase();
-      const rl = (role || "").toLowerCase();
-      const hit =
-        roles.find(
-          (r) =>
-            r.company &&
-            cl &&
-            (r.company.toLowerCase().includes(cl.slice(0, 6)) || cl.includes(r.company.toLowerCase().slice(0, 6))),
-        ) ?? roles.find((r) => r.title && rl && r.title.toLowerCase().includes(rl.slice(0, 6)));
-      return hit?.period;
-    };
+    const periodFor = (company: string, role: string): string | undefined =>
+      matchResumeRole(roles, company, role)?.period;
     const rolePts = steps
       .map((s, i) => {
         const y = stratumToNum(s.stratum);
