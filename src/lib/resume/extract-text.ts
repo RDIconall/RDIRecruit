@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import { ensurePdfPolyfills } from "./pdf-polyfills";
 import { MIN_RESUME_TEXT } from "./constants";
+import { openBoundedDocx } from "./docx-zip";
 
 export async function extractTextFromResume(
   buffer: Buffer,
@@ -58,7 +59,10 @@ export async function extractTextFromResume(
     ext === "docx" ||
     ext === "doc"
   ) {
-    const result = await mammoth.extractRawText({ buffer });
+    // mammoth's openZip accepts a pre-opened `file` (mammoth/lib/unzip.js). Handing
+    // it the bounded reader keeps mammoth's own jszip from ever inflating a part.
+    const file = openBoundedDocx(buffer);
+    const result = await mammoth.extractRawText({ file } as unknown as { buffer: Buffer });
     return normalizeText(result.value ?? "");
   }
 
