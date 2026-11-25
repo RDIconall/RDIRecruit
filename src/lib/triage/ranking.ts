@@ -58,26 +58,28 @@ export function sortBestNew(candidates: Candidate[]): Candidate[] {
  * Assign each ACTIVE candidate an ordinal pool standing (never a numeric score):
  * overall rank in the pool and rank within its decision group, ordered exactly the
  * way the pool board displays them (decision groups in fixed priority; within a
- * group by fit, then by the board's score order). Mutates `candidate.standing`.
- * Disqualified candidates are excluded from the ranking.
+ * group by rankWeight strength). Application time only breaks exact strength ties,
+ * so applying later can never lift someone above a stronger file.
+ * Mutates `candidate.standing`. Disqualified candidates are excluded from the ranking.
  */
 export function assignPoolStanding(
   candidates: Candidate[],
   isDisqualified: (id: string) => boolean,
 ): void {
   const active = candidates
-    .map((c, index) => ({ c, index }))
+    .map((c, index) => ({ c, index, weight: rankWeight(c) }))
     .filter((x) => !isDisqualified(x.c.id));
 
   const activeTotal = active.length;
 
-  const flattened: { c: Candidate; index: number }[] = [];
+  const flattened: { c: Candidate; index: number; weight: number }[] = [];
   const groupRank = new Map<string, { rank: number; total: number; label: string }>();
 
   for (const g of POOL_GROUPS) {
     const rows = active
       .filter((x) => poolGroupOf(x.c.decision) === g.key)
       .sort((a, b) => {
+        if (b.weight !== a.weight) return b.weight - a.weight;
         const at = Date.parse(b.c.appliedAt || "") - Date.parse(a.c.appliedAt || "");
         return (Number.isFinite(at) ? at : 0) || a.index - b.index;
       });
