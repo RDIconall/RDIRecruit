@@ -4,6 +4,7 @@ import {
   isPermanentWorkableNotFound,
   tombstoneMissingWorkableCandidate,
 } from "../sync/failures";
+import { resumeIngestPausedUntil } from "./ingest-attempts";
 
 export interface ResumeBackfillResult {
   attempted: number;
@@ -44,7 +45,7 @@ export async function backfillMissingResumes(options?: {
   // Candidates whose application has a résumé URL but no stored/parsed copy.
   const { data: apps, error } = await supabase
     .from("applications")
-    .select("candidate_id, resume_url, resume_storage_path")
+    .select("candidate_id, resume_url, resume_storage_path, resume_ingest_attempts, resume_ingest_attempted_at")
     .is("resume_storage_path", null)
     .not("resume_url", "is", null);
 
@@ -54,7 +55,7 @@ export async function backfillMissingResumes(options?: {
   }
 
   const candidateIds = (apps ?? [])
-    .filter((a) => (a.resume_url as string | null)?.trim())
+    .filter((a) => (a.resume_url as string | null)?.trim() && !resumeIngestPausedUntil(a))
     .map((a) => a.candidate_id as string);
 
   if (!candidateIds.length) return result;
@@ -317,15 +318,18 @@ export async function recaptureBlockedResumes(options?: {
     if (!blockedIds.length) return result;
 
     // Keep only those without a stored résumé copy yet (skips e.g. Aaron's case,
-    // which has a stored file and is handled via explicit `ids`).
+    // which has a stored file and is handled via explicit `ids`), and skip résumés
+    // paused after repeated failed ingests.
     const { data: apps } = await supabase
       .from("applications")
-      .select("candidate_id, resume_storage_path")
+      .select("candidate_id, resume_storage_path, resume_ingest_attempts, resume_ingest_attempted_at")
       .in("candidate_id", blockedIds);
-    const hasStored = new Set(
-      (apps ?? []).filter((a) => (a.resume_storage_path as string | null)?.trim()).map((a) => a.candidate_id as string),
+    const skip = new Set(
+      (apps ?? [])
+        .filter((a) => (a.resume_storage_path as string | null)?.trim() || resumeIngestPausedUntil(a))
+        .map((a) => a.candidate_id as string),
     );
-    candidateIds = blockedIds.filter((id) => !hasStored.has(id));
+    candidateIds = blockedIds.filter((id) => !skip.has(id));
   }
 
   if (!candidateIds.length) return result;
