@@ -25,6 +25,7 @@ import { askNumK, cityState } from "./format";
 import { avatarColor, DECISION_NEXT, fitWeight, initialsOf } from "./app-theme";
 import { normalizeDecision, normalizeProcessStatus } from "./types";
 import { summarizeAnswerGrades } from "./answer-grades";
+import { findByCompany } from "./company-match";
 import {
   ADVANCE_BAND_MIN,
   applyInterviewBar,
@@ -433,9 +434,7 @@ function timelineFromNarrative(
     }
 
     // role — enrich with the matching role_read where companies line up.
-    const match = roleReads.find(
-      (r) => org && r.company && r.company.toLowerCase().includes(org.toLowerCase().slice(0, 8)),
-    );
+    const match = findByCompany(org, roleReads, (r) => r.company);
     return {
       type: "role",
       period: seg.span === "unknown" ? "—" : seg.span,
